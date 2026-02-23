@@ -124,46 +124,46 @@ Identify market regime (bull/bear/sideways) and adjust allocation.
 
 #### 4.2 Complexity Levels
 
-| Level | Assets | Templates | Task |
-|-------|--------|-----------|------|
-| 1 | 1 | T1, T2, T3 | Single-asset analysis (prediction, risk, sizing) |
-| 2 | 2 | T4 | Pairwise allocation |
-| 3 | 3-4 | T5, T6 | Multi-asset optimization, rebalancing |
-| 4 | All | T5, T6, T7 | Full portfolio with regime detection |
+| Level | Assets | Templates  | Task                                             |
+| ----- | ------ | ---------- | ------------------------------------------------ |
+| 1     | 1      | T1, T2, T3 | Single-asset analysis (prediction, risk, sizing) |
+| 2     | 2      | T4         | Pairwise allocation                              |
+| 3     | 3-4    | T5, T6     | Multi-asset optimization, rebalancing            |
+| 4     | All    | T5, T6, T7 | Full portfolio with regime detection             |
 
 #### 4.3 Evaluation Metrics
 
 **Return Metrics**:
 
-| Metric | Formula |
-|--------|---------|
-| Total Return | $R_{total} = \frac{P_T - P_0}{P_0}$ |
-| CAGR | $CAGR = \left(\frac{P_T}{P_0}\right)^{\frac{1}{T}} - 1$ |
+| Metric       | Formula                                                 |
+| ------------ | ------------------------------------------------------- |
+| Total Return | $R_{total} = \frac{P_T - P_0}{P_0}$                     |
+| CAGR         | $CAGR = \left(\frac{P_T}{P_0}\right)^{\frac{1}{T}} - 1$ |
 
 **Risk Metrics**:
 
-| Metric | Formula |
-|--------|---------|
-| Volatility | $\sigma = \sqrt{\frac{1}{T-1}\sum_{t=1}^{T}(r_t - \bar{r})^2} \times \sqrt{252}$ |
-| Max Drawdown | $MDD = \max_{t \in [0,T]} \frac{P_{peak} - P_t}{P_{peak}}$ |
-| VaR (95%) | $VaR_{0.95} = -\text{Quantile}_{0.05}(r_1, ..., r_T)$ |
-| CVaR (95%) | $CVaR_{0.95} = -\mathbb{E}[r \mid r \leq -VaR_{0.95}]$ |
+| Metric       | Formula                                                                          |
+| ------------ | -------------------------------------------------------------------------------- |
+| Volatility   | $\sigma = \sqrt{\frac{1}{T-1}\sum_{t=1}^{T}(r_t - \bar{r})^2} \times \sqrt{252}$ |
+| Max Drawdown | $MDD = \max_{t \in [0,T]} \frac{P_{peak} - P_t}{P_{peak}}$                       |
+| VaR (95%)    | $VaR_{0.95} = -\text{Quantile}_{0.05}(r_1, ..., r_T)$                            |
+| CVaR (95%)   | $CVaR_{0.95} = -\mathbb{E}[r \mid r \leq -VaR_{0.95}]$                           |
 
 **Risk-Adjusted Metrics**:
 
-| Metric | Formula |
-|--------|---------|
-| Sharpe Ratio | $SR = \frac{\bar{r}_p - r_f}{\sigma_p}$ |
-| Sortino Ratio | $Sortino = \frac{\bar{r}_p - r_f}{\sigma_{downside}}$ |
-| Calmar Ratio | $Calmar = \frac{CAGR}{MDD}$ |
+| Metric            | Formula                                                |
+| ----------------- | ------------------------------------------------------ |
+| Sharpe Ratio      | $SR = \frac{\bar{r}_p - r_f}{\sigma_p}$                |
+| Sortino Ratio     | $Sortino = \frac{\bar{r}_p - r_f}{\sigma_{downside}}$  |
+| Calmar Ratio      | $Calmar = \frac{CAGR}{MDD}$                            |
 | Information Ratio | $IR = \frac{\bar{r}_p - \bar{r}_b}{\sigma_{tracking}}$ |
 
 **Allocation Accuracy**:
 
-| Metric | Formula |
-|--------|---------|
-| Weight MAE | $MAE_w = \frac{1}{n}\sum_{i=1}^{n}\|w_i^{pred} - w_i^{true}\|$ |
-| Portfolio Return Gap | $\Delta R = R_{pred} - R_{optimal}$ |
+| Metric               | Formula                                                        |
+| -------------------- | -------------------------------------------------------------- |
+| Weight MAE           | $MAE_w = \frac{1}{n}\sum_{i=1}^{n}\|w_i^{pred} - w_i^{true}\|$ |
+| Portfolio Return Gap | $\Delta R = R_{pred} - R_{optimal}$                            |
 
 ---
 
@@ -190,11 +190,11 @@ Methods: SFT -> GRPO
 
 #### 5.3 Baseline Strategies
 
-| Strategy | Description |
-|----------|-------------|
-| Equal Weight | $w_i = \frac{1}{n}$ |
-| 60/40 | $w_{equity}=0.6, w_{bond}=0.4$ |
-| Risk Parity | $w_i \propto \frac{1}{\sigma_i}$ |
+| Strategy     | Description                      |
+| ------------ | -------------------------------- |
+| Equal Weight | $w_i = \frac{1}{n}$              |
+| 60/40        | $w_{equity}=0.6, w_{bond}=0.4$   |
+| Risk Parity  | $w_i \propto \frac{1}{\sigma_i}$ |
 
 #### 5.4 Tool Calling Support
 
@@ -202,21 +202,21 @@ LLMs can invoke auxiliary tools during evaluation. Tools provide computational s
 
 **Available Tools**:
 
-| Tool | Function Signature | Description |
-|------|-------------------|-------------|
-| `calculator` | `calc(expression)` | Evaluate arithmetic expressions |
-| `correlation` | `correlation(asset_a, asset_b, window)` | Compute Pearson correlation |
-| `covariance` | `cov(asset_a, asset_b, window)` | Compute covariance |
-| `volatility` | `volatility(asset, window)` | Compute annualized volatility |
-| `mean_return` | `mean_return(asset, window)` | Compute mean return |
-| `price_history` | `get_prices(asset, window)` | Retrieve historical prices |
+| Tool            | Function Signature                      | Description                     |
+| --------------- | --------------------------------------- | ------------------------------- |
+| `calculator`    | `calc(expression)`                      | Evaluate arithmetic expressions |
+| `correlation`   | `correlation(asset_a, asset_b, window)` | Compute Pearson correlation     |
+| `covariance`    | `cov(asset_a, asset_b, window)`         | Compute covariance              |
+| `volatility`    | `volatility(asset, window)`             | Compute annualized volatility   |
+| `mean_return`   | `mean_return(asset, window)`            | Compute mean return             |
+
 
 **Evaluation Modes**:
 
-| Mode | Tool Access | Purpose |
-|------|-------------|---------|
-| No-Tool | Disabled | Test pure reasoning |
-| Tool-Assisted | Enabled | Test tool utilization |
+| Mode          | Tool Access | Purpose               |
+| ------------- | ----------- | --------------------- |
+| No-Tool       | Disabled    | Test pure reasoning   |
+| Tool-Assisted | Enabled     | Test tool utilization |
 
 ---
 
