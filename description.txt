@@ -1,1 +1,1 @@
-cdemo: A python coding template to be used for a quick start.
+PortBench, a benchmark for multi-asset portfolio management featuring heterogeneous asset classes. 
