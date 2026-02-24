@@ -43,6 +43,11 @@ KAGGLE_DATASETS = [
         asset_class=AssetClass.COMMODITIES,
         description="Crude Oil WTI (USD/Bbl) historical data",
     ),
+    KaggleDataset(
+        dataset_id="anthonygocmen/8-commodities-multi-timeframe-market-data",
+        asset_class=AssetClass.COMMODITIES,
+        description="7 commodities multi-timeframe: Gold, Silver, Palladium, Platinum, Brent, Natural Gas, WTI (2016-2025)",
+    ),
     # Equities
     KaggleDataset(
         dataset_id="jacksaleeby/nasdaq100-historical-data-2000-2026-upvote",

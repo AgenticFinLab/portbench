@@ -3,6 +3,8 @@
 from .base import DataCollector, AssetClass, DatasetMetadata
 from .kaggle import KaggleCollector, KaggleDataset, KAGGLE_DATASETS
 from .fred import FREDCollector, FREDSeries, FRED_SERIES
+from .yahoo import YahooCollector, YahooTicker, YAHOO_TICKERS
+from .sec import SECCollector, SECCompany, SECFilingType, SEC_COMPANIES
 
 __all__ = [
     "DataCollector",
@@ -14,4 +16,11 @@ __all__ = [
     "FREDCollector",
     "FREDSeries",
     "FRED_SERIES",
+    "YahooCollector",
+    "YahooTicker",
+    "YAHOO_TICKERS",
+    "SECCollector",
+    "SECCompany",
+    "SECFilingType",
+    "SEC_COMPANIES",
 ]
