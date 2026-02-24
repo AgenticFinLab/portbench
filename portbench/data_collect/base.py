@@ -20,6 +20,13 @@ class AssetClass(Enum):
     CASH = "cash"
 
 
+class DataType(Enum):
+    """Data type classification for portfolio management."""
+
+    NUMERIC = "numeric"  # Price, returns, macro indicators -> CSV format
+    TEXT = "text"  # News, filings, reports -> JSON/TXT/HTML format
+
+
 @dataclass
 class DatasetMetadata:
     """Metadata for a downloaded dataset."""
@@ -30,10 +37,15 @@ class DatasetMetadata:
     description: str
     file_path: str
     download_time: str
+    data_type: str = "numeric"  # "numeric" or "text"
+    file_format: str = "csv"  # csv, json, txt, html
     rows: Optional[int] = None
     columns: Optional[int] = None
     start_date: Optional[str] = None
     end_date: Optional[str] = None
+    # Text-specific metadata
+    document_count: Optional[int] = None
+    avg_length: Optional[int] = None
 
 
 class DataCollector(ABC):

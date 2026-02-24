@@ -13,7 +13,7 @@ from enum import Enum
 
 from dotenv import load_dotenv
 
-from .base import DataCollector, AssetClass, DatasetMetadata
+from .base import DataCollector, AssetClass, DataType, DatasetMetadata
 
 
 class SECFilingType(Enum):
@@ -340,8 +340,9 @@ class SECCollector(DataCollector):
                 description=description or f"{company.name} {form_type} filings",
                 file_path=str(target_dir),
                 download_time=datetime.now().isoformat(),
-                rows=downloaded_count,  # Number of filings
-                columns=None,
+                data_type=DataType.TEXT.value,
+                file_format="html",
+                document_count=downloaded_count,
             )
         )
 

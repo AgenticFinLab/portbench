@@ -11,7 +11,7 @@ import pandas as pd
 from dotenv import load_dotenv
 from fredapi import Fred
 
-from .base import DataCollector, AssetClass, DatasetMetadata
+from .base import DataCollector, AssetClass, DataType, DatasetMetadata
 
 
 @dataclass
@@ -241,6 +241,8 @@ class FREDCollector(DataCollector):
                 description=description,
                 file_path=str(target_file),
                 download_time=datetime.now().isoformat(),
+                data_type=DataType.NUMERIC.value,
+                file_format="csv",
                 rows=len(df),
                 columns=len(df.columns),
                 start_date=start_date,
