@@ -75,6 +75,19 @@
   - Period: January 2000 - February 2026
   - Description: All 100 NASDAQ-100 constituents. 514,000+ rows of split-adjusted price and volume data
 
+- **Stock Data with News**
+  - URL: https://www.kaggle.com/datasets/ekalabyaghosh/stock-data-with-news
+  - Data Type: Text
+  - Period: 1980-12-12 - 2026-02-19
+  - Description: 99 stock OHLCV data and news data
+
+- **Google Stock Financial News: 2000–Today**
+  - URL: https://www.kaggle.com/datasets/emrekaany/google-googl-financial-news-from-2000-to-today
+  - Data Type: Text
+  - Period: 2000-01-01 - 2026-02-24
+  - Source: Yahoo Finance
+  - Description: daily news articles about Alphabet Inc. (NASDAQ: GOOGL) from January 1, 2000
+
 #### Real Estate
 
 - **US Cities Housing Market**

@@ -68,6 +68,20 @@ KAGGLE_DATASETS = [
         description="NASDAQ-100 constituents daily data (2000-2026), 514,000+ rows",
         data_type=DataType.NUMERIC,
     ),
+    # Equities - Text
+    KaggleDataset(
+        dataset_id="ekalabyaghosh/stock-data-with-news",
+        asset_class=AssetClass.EQUITIES,
+        description="99 Stock data with news (1980-2026) including OHLCV and news text",
+        data_type=DataType.TEXT,
+    ),
+    # Equities - Text
+    KaggleDataset(
+        dataset_id="emrekaany/google-googl-financial-news-from-2000-to-today",
+        asset_class=AssetClass.EQUITIES,
+        description="Google stock financial news (2000-2026)",
+        data_type=DataType.TEXT,
+    ),
     # Real Estate - Numeric
     KaggleDataset(
         dataset_id="vincentvaseghi/us-cities-housing-market-data",
