@@ -1,15 +1,17 @@
 """FRED dataset collector for PortBench."""
 
 import os
+import time
 from pathlib import Path
-from dataclasses import dataclass
 from typing import Optional
+from datetime import datetime
+from dataclasses import dataclass
 
 import pandas as pd
 from dotenv import load_dotenv
 from fredapi import Fred
 
-from .base import DataCollector, AssetClass
+from .base import DataCollector, AssetClass, DatasetMetadata
 
 
 @dataclass
@@ -166,7 +168,11 @@ class FREDCollector(DataCollector):
         return "fred"
 
     def download(
-        self, dataset_id: str, asset_class: AssetClass, force: bool = False
+        self,
+        dataset_id: str,
+        asset_class: AssetClass,
+        force: bool = False,
+        description: str = "",
     ) -> Path:
         """
         Download a FRED series.
@@ -175,6 +181,7 @@ class FREDCollector(DataCollector):
             dataset_id: FRED series ID (e.g., "DGS10").
             asset_class: The asset class this series belongs to.
             force: If True, re-download even if exists.
+            description: Optional description for metadata.
 
         Returns:
             Path to the downloaded CSV file.
@@ -188,12 +195,26 @@ class FREDCollector(DataCollector):
 
         print(f"Downloading {dataset_id}...")
 
-        # Download series from FRED
-        series = self.fred.get_series(
-            dataset_id,
-            observation_start=self.start_date,
-            observation_end=self.end_date,
-        )
+        # Download series from FRED with retry
+        max_retries = 3
+        retry_delay = 5
+
+        for attempt in range(max_retries):
+            try:
+                series = self.fred.get_series(
+                    dataset_id,
+                    observation_start=self.start_date,
+                    observation_end=self.end_date,
+                )
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    print(f"  Attempt {attempt + 1} failed: {e}")
+                    print(f"  Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                else:
+                    raise
 
         # Validate data
         if series is None or series.empty:
@@ -207,6 +228,28 @@ class FREDCollector(DataCollector):
         # Save to CSV
         df.to_csv(target_file, index=False)
         print(f"  Saved to: {target_file} ({len(df)} rows)")
+
+        # Update metadata
+        start_date = df["date"].min().strftime("%Y-%m-%d") if len(df) > 0 else None
+        end_date = df["date"].max().strftime("%Y-%m-%d") if len(df) > 0 else None
+
+        self.update_metadata(
+            DatasetMetadata(
+                dataset_id=dataset_id,
+                asset_class=asset_class.value,
+                source=self.source_name,
+                description=description,
+                file_path=str(target_file),
+                download_time=datetime.now().isoformat(),
+                rows=len(df),
+                columns=len(df.columns),
+                start_date=start_date,
+                end_date=end_date,
+            )
+        )
+
+        # Rate limiting
+        time.sleep(1)
 
         return target_file
 
@@ -228,6 +271,7 @@ class FREDCollector(DataCollector):
                     dataset_id=series.series_id,
                     asset_class=series.asset_class,
                     force=force,
+                    description=series.description,
                 )
                 if series.asset_class not in result:
                     result[series.asset_class] = []

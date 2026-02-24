@@ -2,11 +2,12 @@
 
 import shutil
 from pathlib import Path
+from datetime import datetime
 from dataclasses import dataclass
 
 import kagglehub
 
-from .base import DataCollector, AssetClass
+from .base import DataCollector, AssetClass, DatasetMetadata
 
 
 @dataclass
@@ -65,7 +66,11 @@ class KaggleCollector(DataCollector):
         return "kaggle"
 
     def download(
-        self, dataset_id: str, asset_class: AssetClass, force: bool = False
+        self,
+        dataset_id: str,
+        asset_class: AssetClass,
+        force: bool = False,
+        description: str = "",
     ) -> Path:
         """
         Download a Kaggle dataset.
@@ -74,6 +79,7 @@ class KaggleCollector(DataCollector):
             dataset_id: Kaggle dataset identifier (e.g., "username/dataset-name").
             asset_class: The asset class this dataset belongs to.
             force: If True, re-download even if exists.
+            description: Optional description for metadata.
 
         Returns:
             Path to the downloaded dataset directory.
@@ -100,6 +106,8 @@ class KaggleCollector(DataCollector):
         target_dir.mkdir(parents=True, exist_ok=True)
 
         # Copy files instead of directory to avoid nested structure issues
+        total_rows = 0
+        total_cols = 0
         for item in cache_path.iterdir():
             src = item
             dst = target_dir / item.name
@@ -109,8 +117,34 @@ class KaggleCollector(DataCollector):
                 shutil.copytree(src, dst)
             else:
                 shutil.copy2(src, dst)
+                # Count rows/cols for CSV files
+                if item.suffix.lower() == ".csv":
+                    try:
+                        import pandas as pd
+
+                        df = pd.read_csv(item, nrows=0)
+                        total_cols = max(total_cols, len(df.columns))
+                        with open(item, "r") as f:
+                            total_rows += sum(1 for _ in f) - 1
+                    except Exception:
+                        pass
 
         print(f"  Copied to: {target_dir}")
+
+        # Update metadata
+        self.update_metadata(
+            DatasetMetadata(
+                dataset_id=dataset_id,
+                asset_class=asset_class.value,
+                source=self.source_name,
+                description=description,
+                file_path=str(target_dir),
+                download_time=datetime.now().isoformat(),
+                rows=total_rows if total_rows > 0 else None,
+                columns=total_cols if total_cols > 0 else None,
+            )
+        )
+
         return target_dir
 
     def download_all(self, force: bool = False) -> dict[AssetClass, list[Path]]:
@@ -131,6 +165,7 @@ class KaggleCollector(DataCollector):
                     dataset_id=dataset.dataset_id,
                     asset_class=dataset.asset_class,
                     force=force,
+                    description=dataset.description,
                 )
                 if dataset.asset_class not in result:
                     result[dataset.asset_class] = []

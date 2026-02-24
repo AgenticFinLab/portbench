@@ -1,8 +1,12 @@
 """Base class for data collection."""
 
+import json
 from enum import Enum
 from pathlib import Path
+from typing import Optional
+from datetime import datetime
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, asdict
 
 
 class AssetClass(Enum):
@@ -14,6 +18,22 @@ class AssetClass(Enum):
     REAL_ESTATE = "real_estate"
     CRYPTOCURRENCY = "cryptocurrency"
     CASH = "cash"
+
+
+@dataclass
+class DatasetMetadata:
+    """Metadata for a downloaded dataset."""
+
+    dataset_id: str
+    asset_class: str
+    source: str
+    description: str
+    file_path: str
+    download_time: str
+    rows: Optional[int] = None
+    columns: Optional[int] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
 
 
 class DataCollector(ABC):
@@ -28,6 +48,7 @@ class DataCollector(ABC):
         """
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
+        self.metadata_file = self.base_dir / "metadata.json"
 
     @property
     @abstractmethod
@@ -48,6 +69,50 @@ class DataCollector(ABC):
         asset_dir = self.base_dir / self.source_name / asset_class.value
         asset_dir.mkdir(parents=True, exist_ok=True)
         return asset_dir
+
+    def _load_metadata(self) -> dict:
+        """Load existing metadata from file."""
+        if self.metadata_file.exists():
+            with open(self.metadata_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        return {"datasets": {}, "summary": {}}
+
+    def _save_metadata(self, metadata: dict) -> None:
+        """Save metadata to file."""
+        # Update summary
+        summary = {}
+        for key, info in metadata.get("datasets", {}).items():
+            source = info.get("source", "unknown")
+            asset_class = info.get("asset_class", "unknown")
+
+            if source not in summary:
+                summary[source] = {"total": 0, "by_asset_class": {}}
+            summary[source]["total"] += 1
+
+            if asset_class not in summary[source]["by_asset_class"]:
+                summary[source]["by_asset_class"][asset_class] = 0
+            summary[source]["by_asset_class"][asset_class] += 1
+
+        metadata["summary"] = summary
+        metadata["last_updated"] = datetime.now().isoformat()
+
+        with open(self.metadata_file, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2, ensure_ascii=False)
+
+    def update_metadata(self, dataset_meta: DatasetMetadata) -> None:
+        """
+        Update metadata file with new dataset information.
+
+        Args:
+            dataset_meta: Metadata for the downloaded dataset.
+        """
+        metadata = self._load_metadata()
+
+        # Use source/dataset_id as unique key
+        key = f"{dataset_meta.source}/{dataset_meta.dataset_id}"
+        metadata["datasets"][key] = asdict(dataset_meta)
+
+        self._save_metadata(metadata)
 
     @abstractmethod
     def download(
