@@ -17,6 +17,11 @@
 - **Description**: Portfolio analysis and backtesting platform with historical asset class returns, correlation matrices, and factor analysis tools.
 - **Relevant Assets**: Multi-asset allocation benchmarks, historical performance data
 
+#### Crypto News 
+- **URL**: https://cryptonews.com; https://cryptopotato.com; https://cointelegraph.com
+- **Description**: Crypto news and analysis from multiple sources
+- **Relevant Assets**: Crypto news and analysis
+
 ---
 
 ### 2. Kaggle Datasets
@@ -25,37 +30,56 @@
 
 - **Crypto Data 2014-2026**
   - URL: https://www.kaggle.com/datasets/kaushalnandania/crypto-data-2014-2026/data
-  - Daily OHLCV for top 50 cryptocurrencies by market cap
+  - Data Type: Numeric
   - Period: September 2014 - February 2026
-  - Covers: 2017 ICO boom, 2018 crash, 2020-2021 DeFi/NFT bull run, 2022 crypto winter, 2024-2025 recovery
+  - Description: Daily OHLCV for top 50 cryptocurrencies by market cap. Covers: 2017 ICO boom, 2018 crash, 2020-2021 DeFi/NFT bull run, 2022 crypto winter, 2024-2025 recovery
 
 - **Crypto Quants Dataset**
   - URL: https://www.kaggle.com/datasets/emranalbiek/crypto-quants-dataset
-  - 95,100+ samples covering ~5,000 unique cryptocurrencies
+  - Data Type: Numeric
   - Source: CoinMarketCap API
+  - Description: 95,100+ samples covering ~5,000 unique cryptocurrencies
+
+- **Crypto News Dataset**
+  - URL: https://www.kaggle.com/datasets/oliviervha/crypto-news/data
+  - Data Type: Text
+  - Source: cryptonews.com; cryptopotato.com; cointelegraph.com
+  - Description: Crypto news data from over a year (2021-10-12 / 2023-12-19) in a structured format including title, text, source, subject, and sentiment analysis. 
 
 #### Commodities
 
 - **Gold Price Dynamics**
   - URL: https://www.kaggle.com/datasets/ayeshaimran1619/gold-price-dynamics-and-market-behavior
-  - Daily gold price data from 2016 to 2026
-  - Features: OHLCV, moving averages, daily returns, volatility
+  - Data Type: Numeric
+  - Period: 2016-01-29 - 2026-01-23
+  - Description: Daily gold price data from 2016 to 2026. Features: OHLCV, moving averages, daily returns, volatility
 
 - **Crude Oil Price**
   - URL: https://www.kaggle.com/datasets/sc231997/crude-oil-price
-  - Crude Oil WTI (USD/Bbl) historical data
+  - Data Type: Numeric
+  - Period: 1983-03-01 - 2026-02-01
+  - Description: Crude Oil WTI (USD/Bbl) historical data
+
+- **7 Commodities — Multi-Timeframe Market Data**
+  - URL: https://www.kaggle.com/datasets/anthonygocmen/8-commodities-multi-timeframe-market-data
+  - Data Type: Numeric
+  - Source: IC Markets using Python and the MetaTrader 5 API
+  - Period: 2016-10-12 17:00 - 2025-12-08 10:00
+  - Description: This dataset contains historical market data for 7 major commodities: XAUUSD (Gold); XAGUSD (Silver); XPDUSD (Palladium); XPTUSD (Platinum); XBRUSD (Brent Crude); XNGUSD (Natural Gas); XTIUSD (WTI Crude)
 
 #### Equities
 
 - **NASDAQ 100 Historical**
   - URL: https://www.kaggle.com/datasets/jacksaleeby/nasdaq100-historical-data-2000-2026-upvote
-  - All 100 NASDAQ-100 constituents, January 2000 - February 2026
-  - 514,000+ rows of split-adjusted price and volume data
+  - Data Type: Numeric
+  - Period: January 2000 - February 2026
+  - Description: All 100 NASDAQ-100 constituents. 514,000+ rows of split-adjusted price and volume data
 
 #### Real Estate
 
 - **US Cities Housing Market**
   - URL: https://www.kaggle.com/datasets/vincentvaseghi/us-cities-housing-market-data
+  - Data Type: Numeric
   - Source: Redfin
   - Period: February 2012 - present (monthly updates)
 
