@@ -126,6 +126,52 @@ class DataCollector(ABC):
 
         self._save_metadata(metadata)
 
+    def _get_metadata_entry(self, dataset_id: str) -> Optional[dict]:
+        """Return the metadata entry for dataset_id, or None if not recorded."""
+        key = f"{self.source_name}/{dataset_id}"
+        return self._load_metadata().get("datasets", {}).get(key)
+
+    def _is_complete(self, path: Path, dataset_id: str, min_files: int = 1) -> bool:
+        """
+        Check whether a previously downloaded dataset is intact.
+
+        A download is considered complete when ALL of the following hold:
+          1. The path exists (file or directory).
+          2. The path contains at least `min_files` files (for directories).
+          3. The dataset appears in metadata.json with a recorded download_time.
+
+        Condition 3 guards against interrupted downloads where the directory was
+        created but the download never finished (metadata is written only after a
+        successful download completes).
+
+        Args:
+            path:       Expected file or directory path for this dataset.
+            dataset_id: Dataset identifier used as the metadata key.
+            min_files:  Minimum number of files required inside a directory.
+                        Ignored when path is a file.
+
+        Returns:
+            True if the dataset is complete, False if it should be re-downloaded.
+        """
+        if not path.exists():
+            return False
+
+        # For directories: must contain at least min_files actual files
+        if path.is_dir():
+            file_count = sum(1 for f in path.rglob("*") if f.is_file())
+            if file_count < min_files:
+                return False
+
+        # For files: must be non-empty
+        elif path.is_file() and path.stat().st_size == 0:
+            return False
+
+        # Must have a metadata entry (written only on successful completion)
+        if self._get_metadata_entry(dataset_id) is None:
+            return False
+
+        return True
+
     @abstractmethod
     def download(
         self, dataset_id: str, asset_class: AssetClass, force: bool = False

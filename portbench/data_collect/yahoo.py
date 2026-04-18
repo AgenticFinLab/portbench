@@ -21,104 +21,159 @@ class YahooTicker:
     description: str
 
 
-# Yahoo Finance tickers from docs/project-overview.md
+# ---------------------------------------------------------------------------
+# Yahoo Finance ticker universe
+#
+# Selection criteria:
+#   - High liquidity (AUM > $1B) for price accuracy
+#   - Long history (listed before 2015) to cover all three stress periods
+#   - Broad representation across asset classes and geographies
+#   - Prefer ETFs over individual securities for diversification purity
+#
+# Coverage across six asset classes:
+#   Equities:       US broad market, sector, international, factor ETFs
+#   Bonds:          Treasury (short/mid/long), TIPS, corporate, high yield, international
+#   Commodities:    Precious metals, energy, agriculture, base metals, broad index
+#   Real Estate:    US REIT, residential, commercial, international
+#   Cryptocurrency: Bitcoin, Ethereum, major altcoins
+#   Cash:           T-bills, money market, short-duration
+# ---------------------------------------------------------------------------
+
 YAHOO_TICKERS = [
-    # Equities
-    YahooTicker(
-        symbol="SPY",
-        asset_class=AssetClass.EQUITIES,
-        description="SPDR S&P 500 ETF Trust",
-    ),
-    YahooTicker(
-        symbol="QQQ",
-        asset_class=AssetClass.EQUITIES,
-        description="Invesco QQQ Trust (NASDAQ-100)",
-    ),
-    YahooTicker(
-        symbol="IVV",
-        asset_class=AssetClass.EQUITIES,
-        description="iShares Core S&P 500 ETF",
-    ),
-    YahooTicker(
-        symbol="EEM",
-        asset_class=AssetClass.EQUITIES,
-        description="iShares MSCI Emerging Markets ETF",
-    ),
-    # Bonds
-    YahooTicker(
-        symbol="TLT",
-        asset_class=AssetClass.BONDS,
-        description="iShares 20+ Year Treasury Bond ETF",
-    ),
-    YahooTicker(
-        symbol="SHV",
-        asset_class=AssetClass.BONDS,
-        description="iShares Short Treasury Bond ETF",
-    ),
-    YahooTicker(
-        symbol="IEF",
-        asset_class=AssetClass.BONDS,
-        description="iShares 7-10 Year Treasury Bond ETF",
-    ),
-    YahooTicker(
-        symbol="LQD",
-        asset_class=AssetClass.BONDS,
-        description="iShares iBoxx Investment Grade Corporate Bond ETF",
-    ),
-    YahooTicker(
-        symbol="HYG",
-        asset_class=AssetClass.BONDS,
-        description="iShares iBoxx High Yield Corporate Bond ETF",
-    ),
-    # Commodities
-    YahooTicker(
-        symbol="GLD",
-        asset_class=AssetClass.COMMODITIES,
-        description="SPDR Gold Shares",
-    ),
-    YahooTicker(
-        symbol="SLV",
-        asset_class=AssetClass.COMMODITIES,
-        description="iShares Silver Trust",
-    ),
-    YahooTicker(
-        symbol="USO",
-        asset_class=AssetClass.COMMODITIES,
-        description="United States Oil Fund",
-    ),
-    YahooTicker(
-        symbol="DBC",
-        asset_class=AssetClass.COMMODITIES,
-        description="Invesco DB Commodity Index Tracking Fund",
-    ),
-    # Real Estate
-    YahooTicker(
-        symbol="VNQ",
-        asset_class=AssetClass.REAL_ESTATE,
-        description="Vanguard Real Estate ETF",
-    ),
-    YahooTicker(
-        symbol="IYR",
-        asset_class=AssetClass.REAL_ESTATE,
-        description="iShares U.S. Real Estate ETF",
-    ),
-    # Cryptocurrency
-    YahooTicker(
-        symbol="BTC-USD",
-        asset_class=AssetClass.CRYPTOCURRENCY,
-        description="Bitcoin USD",
-    ),
-    YahooTicker(
-        symbol="ETH-USD",
-        asset_class=AssetClass.CRYPTOCURRENCY,
-        description="Ethereum USD",
-    ),
-    # Cash equivalents
-    YahooTicker(
-        symbol="BIL",
-        asset_class=AssetClass.CASH,
-        description="SPDR Bloomberg 1-3 Month T-Bill ETF",
-    ),
+    # -----------------------------------------------------------------------
+    # Equities — US Broad Market
+    # -----------------------------------------------------------------------
+    YahooTicker("SPY",  AssetClass.EQUITIES, "SPDR S&P 500 ETF Trust"),
+    YahooTicker("QQQ",  AssetClass.EQUITIES, "Invesco QQQ Trust (NASDAQ-100)"),
+    YahooTicker("IWM",  AssetClass.EQUITIES, "iShares Russell 2000 ETF (US Small Cap)"),
+    YahooTicker("VTI",  AssetClass.EQUITIES, "Vanguard Total Stock Market ETF"),
+    YahooTicker("IVV",  AssetClass.EQUITIES, "iShares Core S&P 500 ETF"),
+
+    # Equities — International & Emerging Markets
+    YahooTicker("EEM",  AssetClass.EQUITIES, "iShares MSCI Emerging Markets ETF"),
+    YahooTicker("EFA",  AssetClass.EQUITIES, "iShares MSCI EAFE ETF (Developed ex-US)"),
+    YahooTicker("VEA",  AssetClass.EQUITIES, "Vanguard FTSE Developed Markets ETF"),
+    YahooTicker("FXI",  AssetClass.EQUITIES, "iShares China Large-Cap ETF"),
+    YahooTicker("EWJ",  AssetClass.EQUITIES, "iShares MSCI Japan ETF"),
+    YahooTicker("ACWI", AssetClass.EQUITIES, "iShares MSCI ACWI ETF (All-World)"),
+
+    # Equities — US Sector ETFs (GICS sectors for sector rotation analysis)
+    YahooTicker("XLK",  AssetClass.EQUITIES, "Technology Select Sector SPDR ETF"),
+    YahooTicker("XLF",  AssetClass.EQUITIES, "Financial Select Sector SPDR ETF"),
+    YahooTicker("XLE",  AssetClass.EQUITIES, "Energy Select Sector SPDR ETF"),
+    YahooTicker("XLV",  AssetClass.EQUITIES, "Health Care Select Sector SPDR ETF"),
+    YahooTicker("XLI",  AssetClass.EQUITIES, "Industrial Select Sector SPDR ETF"),
+    YahooTicker("XLY",  AssetClass.EQUITIES, "Consumer Discretionary Select Sector SPDR ETF"),
+    YahooTicker("XLP",  AssetClass.EQUITIES, "Consumer Staples Select Sector SPDR ETF"),
+    YahooTicker("XLU",  AssetClass.EQUITIES, "Utilities Select Sector SPDR ETF"),
+    YahooTicker("XLB",  AssetClass.EQUITIES, "Materials Select Sector SPDR ETF"),
+    YahooTicker("XLRE", AssetClass.EQUITIES, "Real Estate Select Sector SPDR ETF"),
+
+    # Equities — Factor ETFs
+    YahooTicker("MTUM", AssetClass.EQUITIES, "iShares MSCI USA Momentum Factor ETF"),
+    YahooTicker("VLUE", AssetClass.EQUITIES, "iShares MSCI USA Value Factor ETF"),
+    YahooTicker("QUAL", AssetClass.EQUITIES, "iShares MSCI USA Quality Factor ETF"),
+    YahooTicker("USMV", AssetClass.EQUITIES, "iShares MSCI USA Min Vol Factor ETF"),
+
+    # -----------------------------------------------------------------------
+    # Bonds — US Treasury
+    # -----------------------------------------------------------------------
+    YahooTicker("SHV",  AssetClass.BONDS, "iShares Short Treasury Bond ETF (0-1Y)"),
+    YahooTicker("SHY",  AssetClass.BONDS, "iShares 1-3 Year Treasury Bond ETF"),
+    YahooTicker("IEF",  AssetClass.BONDS, "iShares 7-10 Year Treasury Bond ETF"),
+    YahooTicker("TLT",  AssetClass.BONDS, "iShares 20+ Year Treasury Bond ETF"),
+    YahooTicker("TLH",  AssetClass.BONDS, "iShares 10-20 Year Treasury Bond ETF"),
+
+    # Bonds — TIPS (Inflation-Protected)
+    YahooTicker("TIP",  AssetClass.BONDS, "iShares TIPS Bond ETF (Inflation-Protected)"),
+    YahooTicker("SCHP", AssetClass.BONDS, "Schwab U.S. TIPS ETF"),
+    YahooTicker("STIP", AssetClass.BONDS, "iShares 0-5 Year TIPS Bond ETF (Short-term)"),
+
+    # Bonds — Corporate
+    YahooTicker("LQD",  AssetClass.BONDS, "iShares iBoxx Investment Grade Corporate Bond ETF"),
+    YahooTicker("HYG",  AssetClass.BONDS, "iShares iBoxx High Yield Corporate Bond ETF"),
+    YahooTicker("JNK",  AssetClass.BONDS, "SPDR Bloomberg High Yield Bond ETF"),
+    YahooTicker("VCIT", AssetClass.BONDS, "Vanguard Intermediate-Term Corporate Bond ETF"),
+
+    # Bonds — International
+    YahooTicker("BNDX", AssetClass.BONDS, "Vanguard Total International Bond ETF"),
+    YahooTicker("EMB",  AssetClass.BONDS, "iShares JP Morgan USD Emerging Markets Bond ETF"),
+    YahooTicker("IGOV", AssetClass.BONDS, "iShares International Treasury Bond ETF"),
+
+    # -----------------------------------------------------------------------
+    # Commodities — Precious Metals
+    # -----------------------------------------------------------------------
+    YahooTicker("GLD",  AssetClass.COMMODITIES, "SPDR Gold Shares"),
+    YahooTicker("IAU",  AssetClass.COMMODITIES, "iShares Gold Trust"),
+    YahooTicker("SLV",  AssetClass.COMMODITIES, "iShares Silver Trust"),
+    YahooTicker("PPLT", AssetClass.COMMODITIES, "abrdn Physical Platinum Shares ETF"),
+    YahooTicker("PALL", AssetClass.COMMODITIES, "abrdn Physical Palladium Shares ETF"),
+
+    # Commodities — Energy
+    YahooTicker("USO",  AssetClass.COMMODITIES, "United States Oil Fund (WTI Crude)"),
+    YahooTicker("UNG",  AssetClass.COMMODITIES, "United States Natural Gas Fund"),
+    YahooTicker("BNO",  AssetClass.COMMODITIES, "United States Brent Oil Fund"),
+
+    # Commodities — Agriculture
+    YahooTicker("DBA",  AssetClass.COMMODITIES, "Invesco DB Agriculture Fund (Wheat/Corn/Soybeans/Sugar)"),
+    YahooTicker("CORN", AssetClass.COMMODITIES, "Teucrium Corn Fund"),
+    YahooTicker("WEAT", AssetClass.COMMODITIES, "Teucrium Wheat Fund"),
+    YahooTicker("SOYB", AssetClass.COMMODITIES, "Teucrium Soybean Fund"),
+
+    # Commodities — Broad Index & Base Metals
+    YahooTicker("DBC",  AssetClass.COMMODITIES, "Invesco DB Commodity Index Tracking Fund"),
+    YahooTicker("PDBC", AssetClass.COMMODITIES, "Invesco Optimum Yield Diversified Commodity Strategy ETF"),
+    YahooTicker("DBB",  AssetClass.COMMODITIES, "Invesco DB Base Metals Fund (Aluminum/Zinc/Copper)"),
+    YahooTicker("CPER", AssetClass.COMMODITIES, "United States Copper Index Fund"),
+
+    # -----------------------------------------------------------------------
+    # Real Estate — US REITs
+    # -----------------------------------------------------------------------
+    YahooTicker("VNQ",  AssetClass.REAL_ESTATE, "Vanguard Real Estate ETF (Broad US REIT)"),
+    YahooTicker("IYR",  AssetClass.REAL_ESTATE, "iShares U.S. Real Estate ETF"),
+    YahooTicker("SCHH", AssetClass.REAL_ESTATE, "Schwab U.S. REIT ETF"),
+
+    # Real Estate — Sub-sector REITs
+    YahooTicker("REZ",  AssetClass.REAL_ESTATE, "iShares Residential & Multisector Real Estate ETF"),
+    YahooTicker("MORT", AssetClass.REAL_ESTATE, "VanEck Mortgage REIT Income ETF"),
+    YahooTicker("INDS", AssetClass.REAL_ESTATE, "Pacer Benchmark Industrial Real Estate ETF"),
+
+    # Real Estate — International
+    YahooTicker("VNQI", AssetClass.REAL_ESTATE, "Vanguard Global ex-US Real Estate ETF"),
+    YahooTicker("HAUZ", AssetClass.REAL_ESTATE, "Xtrackers International Real Estate ETF"),
+
+    # Homebuilder proxies (leading indicator for residential real estate)
+    YahooTicker("XHB",  AssetClass.REAL_ESTATE, "SPDR S&P Homebuilders ETF"),
+    YahooTicker("ITB",  AssetClass.REAL_ESTATE, "iShares U.S. Home Construction ETF"),
+
+    # -----------------------------------------------------------------------
+    # Cryptocurrency — Major by Market Cap
+    # -----------------------------------------------------------------------
+    YahooTicker("BTC-USD",  AssetClass.CRYPTOCURRENCY, "Bitcoin USD"),
+    YahooTicker("ETH-USD",  AssetClass.CRYPTOCURRENCY, "Ethereum USD"),
+    YahooTicker("BNB-USD",  AssetClass.CRYPTOCURRENCY, "Binance Coin USD"),
+    YahooTicker("SOL-USD",  AssetClass.CRYPTOCURRENCY, "Solana USD"),
+    YahooTicker("XRP-USD",  AssetClass.CRYPTOCURRENCY, "Ripple USD"),
+    YahooTicker("ADA-USD",  AssetClass.CRYPTOCURRENCY, "Cardano USD"),
+    YahooTicker("AVAX-USD", AssetClass.CRYPTOCURRENCY, "Avalanche USD"),
+    YahooTicker("DOT-USD",  AssetClass.CRYPTOCURRENCY, "Polkadot USD"),
+    YahooTicker("LINK-USD", AssetClass.CRYPTOCURRENCY, "Chainlink USD"),
+    YahooTicker("MATIC-USD",AssetClass.CRYPTOCURRENCY, "Polygon USD"),
+
+    # Cryptocurrency — DeFi / Stablecoin proxies
+    YahooTicker("UNI7083-USD", AssetClass.CRYPTOCURRENCY, "Uniswap USD"),
+    YahooTicker("AAVE-USD",    AssetClass.CRYPTOCURRENCY, "Aave USD"),
+
+    # -----------------------------------------------------------------------
+    # Cash & Money Market Equivalents
+    # -----------------------------------------------------------------------
+    YahooTicker("BIL",  AssetClass.CASH, "SPDR Bloomberg 1-3 Month T-Bill ETF"),
+    YahooTicker("SGOV", AssetClass.CASH, "iShares 0-3 Month Treasury Bond ETF"),
+    YahooTicker("CSHI", AssetClass.CASH, "NEOS Enhanced Income Cash Alternative ETF"),
+    YahooTicker("ICSH", AssetClass.CASH, "iShares Ultra Short-Term Bond ETF"),
+
+    # Volatility index (not an investable asset but critical regime indicator)
+    YahooTicker("^VIX", AssetClass.EQUITIES, "CBOE Volatility Index (VIX)"),
 ]
 
 
@@ -169,8 +224,8 @@ class YahooCollector(DataCollector):
         target_dir = self.get_asset_dir(asset_class)
         target_file = target_dir / f"{dataset_id}.csv"
 
-        if target_file.exists() and not force:
-            print(f"Ticker already exists: {target_file}")
+        if not force and self._is_complete(target_file, dataset_id):
+            print(f"Ticker already complete: {target_file}")
             return target_file
 
         print(f"Downloading {dataset_id}...")

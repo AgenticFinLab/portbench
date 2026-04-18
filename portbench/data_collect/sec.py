@@ -286,12 +286,10 @@ class SECCollector(DataCollector):
         )
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        # Check if already downloaded
-        existing_files = list(target_dir.glob("*.htm")) + list(
-            target_dir.glob("*.html")
-        )
-        if existing_files and not force:
-            print(f"Filings already exist: {target_dir}")
+        # Check if already downloaded (directory exists, has files, and metadata recorded)
+        dataset_id = f"{ticker}/{form_type}"
+        if not force and self._is_complete(target_dir, dataset_id, min_files=1):
+            print(f"Filings already complete: {target_dir}")
             return target_dir
 
         print(f"Downloading {ticker} {form_type} filings...")
