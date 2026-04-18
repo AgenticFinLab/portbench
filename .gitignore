@@ -209,3 +209,6 @@ __marimo__/
 
 # Datasets
 datasets/
+
+# Paper appraisal
+docs/paper_appraisal/papers
