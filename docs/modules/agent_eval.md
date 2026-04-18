@@ -1,0 +1,265 @@
+# Agent Evaluation Framework (`portbench/agent_eval/`)
+
+## Overview
+
+End-to-end evaluation of LLM agents across a five-stage portfolio management pipeline. The pipeline models the full investment decision process from market interpretation to risk monitoring, and quantifies cross-stage error propagation via the CEPS metric.
+
+## Architecture
+
+```
+MarketSnapshot (includes correlation_matrix)
+      │
+      ▼
+ S1: Market Interpretation   ─── asset_views ──►
+ S2: Signal Generation       ─── signals    ──►
+ S3: Weight Optimization     ─── weights    ──►  (scored with correlation-awareness)
+ S4: Execution Simulation    ─── executed_w ──►
+ S5: Risk Monitoring         ─── alerts     ──►
+      │
+      ▼
+ EpisodeResult → CEPS score
+```
+
+## MarketSnapshot
+
+`MarketSnapshot` is the single external input to the pipeline. It now includes a `correlation_matrix` field capturing cross-asset return correlations:
+
+```python
+@dataclass
+class MarketSnapshot:
+    decision_date: date
+    price_data: dict[str, pd.Series]
+    return_data: dict[str, pd.Series]
+    macro_data: dict[str, float]
+    current_weights: dict[str, float]
+    portfolio_value: float
+    market_regime: Optional[str]
+    correlation_matrix: Optional[pd.DataFrame]   # assets × assets, lazy-computed
+
+    def get_correlation(self) -> pd.DataFrame:
+        """Compute (and cache) Pearson correlation matrix from return_data."""
+```
+
+This captures both cross-class correlations (e.g., equity–bond flight-to-quality during crises) and intra-class correlations (e.g., sector concentration). It is used in S3 scoring and may be included in LLM prompts for weight optimization.
+
+## Pipeline Stages
+
+### S1 — Market Interpretation (`S1MarketInterpretation`)
+
+**Input**: `MarketSnapshot` (price data, return data, macro context)  
+**Output**: `S1Output` — `asset_views: dict[str, float]` in [-1, +1]
+
+Ground truth: `view = clip(trailing_return / 0.10, -1, 1)` — normalizes a ±10% trailing return to ±1.0.
+
+LLM prompt asks the model to analyze price/return data and output a JSON dict of sentiment scores per asset.
+
+**Scoring**: `1 - MAE(actual_views, gt_views) / 2`
+
+### S2 — Signal Generation (`S2SignalGeneration`)
+
+**Input**: `S1Output`  
+**Output**: `S2Output` — `signals: dict[str, "buy"|"hold"|"sell"]`
+
+Ground truth: `view > 0.2 → buy`, `view < -0.2 → sell`, else `hold`.
+
+LLM prompt receives S1 views and must convert them to directional signals with strength scores.
+
+**Scoring**: Fraction of assets with correct signal direction.
+
+### S3 — Weight Optimization (`S3WeightOptimization`)
+
+**Input**: `S2Output`  
+**Output**: `S3Output` — `weights: dict[str, float]` summing to 1.0
+
+Ground truth: equal-weight among "buy" assets; 0 for "sell" assets; equal-weight all if no buys.
+
+LLM prompt receives signals and must output a weight allocation with sum=1, all values in [0,1].
+
+**Scoring**: Composite score — **70% weight accuracy + 30% correlation awareness**:
+
+- *Weight accuracy*: `1 - weight_MAE / 2`
+- *Correlation awareness*: measures whether the proposed weights achieve lower portfolio variance than the ground-truth weights, given the empirical covariance matrix. Computed as `clip(2 - var(actual) / var(gt), 0, 1)`. This penalizes allocations that ignore the correlation structure (e.g., concentrating in highly correlated assets when diversification is available).
+
+### S4 — Execution Simulation (`S4ExecutionSimulation`)
+
+**Deterministic** — no LLM call. Simulates execution costs:
+- Slippage: 10 bps linear market impact
+- Commission: 5 bps per trade value
+- Adjusts executed weights for cost drag
+
+### S5 — Risk Monitoring (`S5RiskMonitoring`)
+
+**Deterministic** — computes portfolio risk metrics numerically:
+- 1-day VaR at 95% confidence (historical simulation)
+- Maximum drawdown from peak
+- Weight drift vs equal-weight target
+- Triggers alerts and `rebalance_needed` flag when limits are breached
+
+**Scoring**: 50% correct `rebalance_needed` decision + 50% VaR/drawdown accuracy.
+
+## LLM Adapters
+
+### Cloud Adapters (`llm_adapters.py`)
+
+| Adapter | Model examples | Env var needed |
+|---------|---------------|---------------|
+| `AnthropicAdapter` | `claude-opus-4-6`, `claude-sonnet-4-6` | `ANTHROPIC_API_KEY` |
+| `OpenAIAdapter` | `gpt-4o`, `gpt-4-turbo` | `OPENAI_API_KEY` |
+| `LiteLLMAdapter` | any litellm string: `anthropic/...`, `ollama/llama3` | depends on model |
+
+### Local Adapters (`local_adapter.py`)
+
+For evaluation without external API calls:
+
+| Adapter | Backend | Best for |
+|---------|---------|---------|
+| `VLLMAdapter` | vLLM OpenAI-compatible server | Batch evaluation, high throughput |
+| `OllamaAdapter` | Ollama HTTP API | Desktop experiments, easy setup |
+| `HuggingFaceAdapter` | Direct transformers inference | No server needed, any HF model |
+
+```python
+# vLLM (start server first: python -m vllm.entrypoints.openai.api_server --model ...)
+from portbench.agent_eval import VLLMAdapter, build_default_pipeline
+adapter = VLLMAdapter(model="meta-llama/Llama-3.1-8B-Instruct", base_url="http://localhost:8000/v1")
+
+# Ollama (start server: ollama serve; ollama pull llama3.1)
+from portbench.agent_eval import OllamaAdapter
+adapter = OllamaAdapter(model="llama3.1")
+
+# HuggingFace (no server; loads model into GPU/CPU memory)
+from portbench.agent_eval import HuggingFaceAdapter
+adapter = HuggingFaceAdapter(model_name="microsoft/Phi-3-mini-4k-instruct", load_in_4bit=True)
+
+pipeline = build_default_pipeline(adapter)
+```
+
+All adapters (cloud and local):
+- Retry up to 3 times with exponential backoff on transient errors
+- Accept a configurable `system_prompt` and `temperature`
+
+```python
+from portbench.agent_eval import AnthropicAdapter, build_default_pipeline
+
+adapter = AnthropicAdapter(model="claude-opus-4-6", temperature=0.0)
+pipeline = build_default_pipeline(adapter)
+```
+
+## Evaluation Logging
+
+Every evaluation run can be fully persisted to disk for replay and analysis.
+
+```python
+pipeline = build_default_pipeline(adapter)
+pipeline.enable_logging(
+    output_dir="outputs/eval_logs",
+    model_name="claude-opus-4-6",
+    config={"dataset": "test_2024", "n_episodes": 50},
+)
+
+for snapshot in snapshots:
+    result = pipeline.run_episode(snapshot)
+
+log_dir = pipeline.finalize_logging()
+print(f"Logs saved to: {log_dir}")
+```
+
+### Log Directory Structure
+
+```
+outputs/eval_logs/{run_id}/
+├── run_meta.json          # Model name, timestamps, config
+├── run_summary.json       # Total episodes, duration (written on close)
+├── errors.jsonl           # Rolling log of stage-level errors
+└── episodes/
+    ├── 2024-01-05_0001.json
+    ├── 2024-01-10_0002.json
+    └── ...
+```
+
+### Episode Log Format
+
+Each episode file contains:
+```json
+{
+  "episode_id": "2024-01-05_0001",
+  "decision_date": "2024-01-05",
+  "model_name": "anthropic/claude-opus-4-6",
+  "ceps_score": 0.74,
+  "duration_ms": 3420.5,
+  "stages": [
+    {
+      "stage_id": "S1",
+      "score": 0.85,
+      "latency_ms": 1200.0,
+      "prompt": "You are a portfolio manager analyzing...",
+      "raw_response": "{\"asset_views\": {...}}",
+      "parsed_output": {"asset_views": {...}, "detected_regime": "bear"},
+      "ground_truth": {"asset_views": {...}, "detected_regime": "bear"},
+      "error": ""
+    },
+    ...
+  ]
+}
+```
+
+## Stress Testing
+
+```python
+from portbench.agent_eval import ScenarioInjector, STRESS_SCENARIOS
+
+injector = ScenarioInjector(provider=provider, assets=assets, lookback_days=60)
+
+for scenario in STRESS_SCENARIOS:
+    result = injector.run_stress_test(scenario, pipeline, step_days=10)
+    print(f"{scenario.name}: {'PASSED' if result['passed'] else 'FAILED'} "
+          f"(CEPS={result['mean_ceps']:.3f}, threshold={scenario.min_pass_score})")
+```
+
+Predefined scenarios:
+
+| Scenario | Period | Min pass score |
+|----------|--------|---------------|
+| 2008 Global Financial Crisis | 2008-09 – 2009-03 | 0.40 |
+| 2020 COVID Flash Crash | 2020-02 – 2020-05 | 0.45 |
+| 2022 Crypto Collapse | 2022-05 – 2022-12 | 0.50 |
+
+## Oracle Mode (Ablation)
+
+Inject ground truth at any stage to isolate the contribution of downstream stages:
+
+```python
+# Measure impact of S4+S5 errors only (S1–S3 are perfect)
+result = pipeline.run_episode(snapshot, inject_gt_at=StageID.S3_WEIGHT_OPTIMIZATION)
+```
+
+## Running Evaluation
+
+```bash
+# Mock agent (no API keys, tests pipeline end-to-end)
+python examples/agent_eval/run_evaluation.py
+
+# Real cloud LLM
+ANTHROPIC_API_KEY=... python examples/agent_eval/run_evaluation.py
+
+# Local model — vLLM
+python examples/agent_eval/run_evaluation.py --local-model vllm:meta-llama/Llama-3.1-8B-Instruct
+
+# Local model — Ollama
+python examples/agent_eval/run_evaluation.py --local-model ollama:llama3.1
+
+# Local model — HuggingFace
+python examples/agent_eval/run_evaluation.py --local-model hf:microsoft/Phi-3-mini-4k-instruct
+
+# Baselines
+python examples/agent_eval/run_evaluation.py --baseline risk_parity
+
+# Stress tests only
+python examples/agent_eval/run_evaluation.py --stress-only
+```
+
+Output: `outputs/eval_results/{model_name}/`
+- `per_stage_scores.json` — per-episode and mean stage scores
+- `ceps_scores.json` — CEPS with propagation penalty breakdown
+- `stress_test_results.json` — per-scenario pass/fail
+- `risk_first_ranking.json` — final ranking entry (stress-gated)
+- `summary.txt` — human-readable summary
