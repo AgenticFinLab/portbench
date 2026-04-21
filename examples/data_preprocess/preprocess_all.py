@@ -104,6 +104,34 @@ def main():
     print("=" * 60)
 
 
+def _load_asset_output(processed_dir: Path, asset_class: str) -> pd.DataFrame | None:
+    """
+    Load an asset-class output, transparently handling single-file and
+    chunked (manifest + partNNN.csv) layouts from the preprocess pipeline.
+    """
+    single = processed_dir / f"{asset_class}.csv"
+    manifest = processed_dir / f"{asset_class}.manifest.json"
+
+    if manifest.exists():
+        info = json.loads(manifest.read_text(encoding="utf-8"))
+        parts = [processed_dir / p for p in info.get("parts", [])]
+        frames = [pd.read_csv(p, low_memory=False) for p in parts if p.exists()]
+        if frames:
+            return pd.concat(frames, ignore_index=True)
+        return None
+
+    if single.exists():
+        return pd.read_csv(single, low_memory=False)
+
+    # Orphan parts without manifest
+    orphan = sorted(processed_dir.glob(f"{asset_class}.part*.csv"))
+    if orphan:
+        frames = [pd.read_csv(p, low_memory=False) for p in orphan]
+        return pd.concat(frames, ignore_index=True)
+
+    return None
+
+
 def _build_portbench_csv(processed_dir: Path) -> None:
     """
     Build portbench.csv — a single file covering the common date window where
@@ -119,11 +147,10 @@ def _build_portbench_csv(processed_dir: Path) -> None:
     frames: dict[str, pd.DataFrame] = {}
 
     for ac in asset_classes:
-        p = processed_dir / f"{ac}.csv"
-        if not p.exists():
+        df = _load_asset_output(processed_dir, ac)
+        if df is None:
             print(f"  [SKIP] {ac}.csv not found — run preprocessing first")
             continue
-        df = pd.read_csv(p, low_memory=False)
         if "date" not in df.columns:
             print(f"  [SKIP] {ac}.csv has no date column")
             continue

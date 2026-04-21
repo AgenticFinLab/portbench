@@ -1,5 +1,5 @@
 """
-Build a QA dataset using all seven templates with mock data.
+Build a QA dataset using all seven templates with real processed data.
 
 Usage:
     python examples/qa_builder/build_qa_dataset.py
@@ -10,15 +10,15 @@ Output:
         train.jsonl              — training split
         val.jsonl                — validation split
         test.jsonl               — test split
-        stats.json               — dataset statistics by template and regime
+        stats.json               — dataset statistics by template, regime, and text coverage
 
-Split boundaries are computed dynamically from the data provider's actual date
-range (70% train / 15% val / 15% test, snapped to year boundaries). To override,
-pass explicit dates to QAConfig instead of using QAConfig.from_date_range().
+Split boundaries are computed dynamically from the actual data date range
+(70% train / 15% val / 15% test, snapped to year boundaries).
 
-The mock data provider generates synthetic GBM price paths, so this script
-runs without any external API keys.  To use real data, swap MockDataProvider
-for ProcessedDataProvider (once Phase 1 data collection is complete).
+Requires datasets/processed/ to be populated. Run:
+    python examples/data_collect/get_all.py
+    python examples/data_preprocess/preprocess_all.py
+first if needed.
 """
 
 import json
@@ -29,7 +29,7 @@ from pathlib import Path
 # Ensure package is importable when running from repo root
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from portbench.qa_builder.mock_data import MockDataProvider
+from portbench.qa_builder.processed_data import ProcessedDataProvider
 from portbench.qa_builder.base import QAConfig, Split
 from portbench.qa_builder.t1_return_prediction import T1ReturnPrediction
 from portbench.qa_builder.t2_risk_assessment import T2RiskAssessment
@@ -47,16 +47,22 @@ from portbench.qa_builder.t7_regime_detection import T7RegimeDetection
 OUTPUT_DIR = Path("outputs/qa_dataset")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-provider = MockDataProvider(seed=42)
+import pandas as pd
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
 
-# Derive split boundaries dynamically from the provider's actual date range.
-# MockDataProvider simulates 2015-01-01 → 2025-12-31 (11 years).
-# With 70/15/15 fractions, snapped to year ends:
-#   train: 2015-01-01 – 2022-12-31  (70%)
-#   val:   2023-01-01 – 2023-12-31  (15%)
-#   test:  2024-01-01 – 2025-12-31  (15%)
-DATA_START = date(2015, 1, 1)
-DATA_END   = date(2025, 12, 31)
+provider = ProcessedDataProvider(
+    data_dir="datasets/processed",
+    sec_dir="datasets/sec",
+)
+
+# Derive split boundaries from the actual data date range in portbench.csv
+portbench_csv = Path("datasets/processed/portbench.csv")
+_dates = pd.read_csv(portbench_csv, usecols=["date"], low_memory=False)["date"]
+_dates = pd.to_datetime(_dates, errors="coerce").dropna()
+DATA_START = _dates.min().date()
+DATA_END   = _dates.max().date()
+print(f"Data range: {DATA_START} – {DATA_END}")
 
 config = QAConfig.from_date_range(
     data_start=DATA_START,
@@ -65,20 +71,51 @@ config = QAConfig.from_date_range(
     val_frac=0.15,
     lookback_days=60,
     horizon_days=21,
-    samples_per_template=1000,  # 1000 examples per template → 7000 total
+    samples_per_template=1000,  # max per template (adaptive — actual count may be lower)
 )
-
 print(f"Split boundaries: {config.describe()}")
 
-# Sample decision dates from all three splits, interleaved via shuffle
-import pandas as pd
+# Build candidate decision dates per split, then prioritize text-bearing dates
+# so the first dates the build loop hits are most likely to yield text context.
 import random
 TRAIN_DATES = pd.bdate_range(config.train_start, config.train_end).date.tolist()
 VAL_DATES   = pd.bdate_range(config.val_start,   config.val_end).date.tolist()
 TEST_DATES  = pd.bdate_range(config.test_start,  config.test_end).date.tolist()
-SAMPLE_DATES = TRAIN_DATES + VAL_DATES + TEST_DATES
-random.seed(config.random_seed)
-random.shuffle(SAMPLE_DATES)
+
+def rank_text_first(dates, seed):
+    """Split dates into text-bearing vs not (using SPY/BTC-USD as flagship probes),
+    shuffle each bucket deterministically, then concat text-first."""
+    rng = random.Random(seed)
+    text_dates, plain_dates = [], []
+    for d in dates:
+        if provider.has_text("SPY", d) or provider.has_text("BTC-USD", d):
+            text_dates.append(d)
+        else:
+            plain_dates.append(d)
+    rng.shuffle(text_dates)
+    rng.shuffle(plain_dates)
+    return text_dates + plain_dates
+
+train_ranked = rank_text_first(TRAIN_DATES, config.random_seed)
+val_ranked   = rank_text_first(VAL_DATES,   config.random_seed + 1)
+test_ranked  = rank_text_first(TEST_DATES,  config.random_seed + 2)
+
+# Round-robin interleave so each split gets representation even if the per-template
+# cap is hit before exhausting all candidates.
+SAMPLE_DATES = []
+iters = [iter(train_ranked), iter(val_ranked), iter(test_ranked)]
+exhausted = [False, False, False]
+while not all(exhausted):
+    for i, it in enumerate(iters):
+        if exhausted[i]:
+            continue
+        try:
+            SAMPLE_DATES.append(next(it))
+        except StopIteration:
+            exhausted[i] = True
+
+print(f"Candidate decision dates: {len(SAMPLE_DATES)} "
+      f"(train={len(TRAIN_DATES)}, val={len(VAL_DATES)}, test={len(TEST_DATES)})")
 
 
 # ---------------------------------------------------------------------------
