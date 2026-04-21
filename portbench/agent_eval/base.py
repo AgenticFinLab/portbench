@@ -325,6 +325,23 @@ class AgentAdapter(ABC):
         """
         pass
 
+    def complete_with_tools(self, prompt: str, tools: list) -> str:
+        """
+        Call the LLM with tool-calling support.
+
+        The default implementation ignores tools and falls back to complete().
+        Cloud adapters (AnthropicAdapter, OpenAIAdapter, LiteLLMAdapter) override
+        this with a native multi-turn tool execution loop.
+
+        Args:
+            prompt: Full prompt string.
+            tools:  List of ToolSpec objects available to the model.
+
+        Returns:
+            Model's final text response after all tool calls are resolved.
+        """
+        return self.complete(prompt)
+
 
 # ---------------------------------------------------------------------------
 # Evaluation pipeline

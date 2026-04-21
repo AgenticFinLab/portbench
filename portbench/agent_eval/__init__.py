@@ -25,14 +25,17 @@ from .stages import (
 from .stress_scenarios import ScenarioInjector, StressScenario, STRESS_SCENARIOS
 
 
-def build_default_pipeline(adapter: AgentAdapter = None) -> EvalPipeline:
+from .tools import ToolSpec, get_tools, dispatch_tool, BUILTIN_TOOLS
+
+
+def build_default_pipeline(adapter: AgentAdapter = None, use_tools: bool = False) -> EvalPipeline:
     """
     Construct a default five-stage EvalPipeline with the given adapter.
 
     Args:
-        adapter: AgentAdapter to use. Defaults to MockAgentAdapter if None.
-                 Pass AnthropicAdapter / OpenAIAdapter / LiteLLMAdapter for cloud LLMs.
-                 Pass VLLMAdapter / OllamaAdapter / HuggingFaceAdapter for local models.
+        adapter:    AgentAdapter to use. Defaults to MockAgentAdapter if None.
+        use_tools:  If True, S1/S2/S3 stages call complete_with_tools() instead of
+                    complete(), enabling multi-turn tool execution for cloud adapters.
 
     Returns:
         EvalPipeline ready to call run_episode().
@@ -41,9 +44,9 @@ def build_default_pipeline(adapter: AgentAdapter = None) -> EvalPipeline:
         adapter = MockAgentAdapter()
 
     stages = [
-        S1MarketInterpretation(adapter),
-        S2SignalGeneration(adapter),
-        S3WeightOptimization(adapter),
+        S1MarketInterpretation(adapter, use_tools=use_tools),
+        S2SignalGeneration(adapter, use_tools=use_tools),
+        S3WeightOptimization(adapter, use_tools=use_tools),
         S4ExecutionSimulation(adapter),
         S5RiskMonitoring(adapter),
     ]
@@ -69,6 +72,8 @@ __all__ = [
     "StressScenario", "ScenarioInjector", "STRESS_SCENARIOS",
     # Logging
     "EvalLogger", "EpisodeLog", "StageLog",
+    # Tools
+    "ToolSpec", "get_tools", "dispatch_tool", "BUILTIN_TOOLS",
     # Factory
     "build_default_pipeline",
 ]

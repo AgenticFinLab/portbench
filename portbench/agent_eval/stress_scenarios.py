@@ -21,19 +21,25 @@ class StressScenario:
     Definition of a stress test scenario.
 
     Attributes:
-        name:          Scenario identifier (used in result filenames).
-        start:         Start date of the stress period.
-        end:           End date of the stress period.
-        description:   Human-readable description of the event.
-        min_pass_score: Minimum per-stage score required to "pass" this scenario.
-                        Agents scoring below this threshold fail the risk gate.
+        name:           Scenario identifier (used in result filenames).
+        start:          Start date of the stress period (primary, real-data window).
+        end:            End date of the stress period (primary).
+        description:    Human-readable description of the event.
+        min_pass_score: Minimum CEPS required to "pass" this scenario.
+        fallback_start: Alternative start date used when primary window has no data
+                        coverage (e.g., mock data that only goes back to 2015).
+        fallback_end:   Alternative end date for the fallback window.
+        fallback_description: Description of the fallback event.
     """
 
     name: str
     start: date
     end: date
     description: str
-    min_pass_score: float = 0.50   # Must score ≥ 50% on each stage to pass
+    min_pass_score: float = 0.50
+    fallback_start: Optional[date] = None
+    fallback_end: Optional[date] = None
+    fallback_description: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -50,7 +56,16 @@ STRESS_SCENARIOS: list[StressScenario] = [
             "S&P 500 fell ~57% peak-to-trough. Extreme cross-asset correlation breakdown, "
             "credit market freeze, and massive drawdowns across all risky assets."
         ),
-        min_pass_score=0.40,   # Lower threshold: conditions are extremely severe
+        min_pass_score=0.40,
+        # Fallback for mock data (origin 2015-01-01): China devaluation shock + oil crash
+        fallback_start=date(2015, 8, 1),
+        fallback_end=date(2016, 2, 29),
+        fallback_description=(
+            "China currency devaluation shock (Aug 2015) + oil price collapse. "
+            "S&P 500 fell ~12% in two weeks; broad cross-asset sell-off with "
+            "elevated VIX and credit spread widening. Used as mock-data proxy "
+            "for the 2008 GFC window."
+        ),
     ),
     StressScenario(
         name="2020_covid_flash_crash",
@@ -129,11 +144,19 @@ class ScenarioInjector:
                 for asset in self.assets:
                     prices = self.provider.get_price_series(asset, start, end)
                     prices = prices.iloc[-self.lookback_days:]
-                    price_data[asset] = prices
-
                     returns = self.provider.get_return_series(asset, start, end)
                     returns = returns.iloc[-self.lookback_days:]
+                    # Skip assets with no data in this window — otherwise an
+                    # empty snapshot looks valid and the pipeline scores it as
+                    # actual=gt=0 (false pass).
+                    if prices.empty or returns.empty:
+                        continue
+                    price_data[asset] = prices
                     return_data[asset] = returns
+
+                # Require at least 2 assets with usable data to build a snapshot
+                if len(price_data) < 2:
+                    continue
 
                 macro = self.provider.get_macro(end)
                 regime = self.provider.get_regime(end).value
@@ -142,6 +165,17 @@ class ScenarioInjector:
                 n = len(self.assets)
                 current_weights = {a: round(1.0 / n, 4) for a in self.assets}
 
+                # Pull news text from the first asset that has any
+                news_text = ""
+                for asset in self.assets:
+                    try:
+                        txt = self.provider.get_news(asset, decision_date)
+                        if txt:
+                            news_text = txt
+                            break
+                    except Exception:
+                        continue
+
                 snapshots.append(MarketSnapshot(
                     decision_date=decision_date,
                     price_data=price_data,
@@ -149,6 +183,7 @@ class ScenarioInjector:
                     macro_data=macro,
                     current_weights=current_weights,
                     market_regime=regime,
+                    news_text=news_text,
                 ))
             except Exception:
                 continue   # Skip dates where data is unavailable
@@ -176,6 +211,33 @@ class ScenarioInjector:
         from ..metrics.ceps import CEPS
 
         snapshots = self.generate_snapshots(scenario, step_days=step_days)
+        fallback_used = False
+        if not snapshots and scenario.fallback_start and scenario.fallback_end:
+            # Primary window has no data coverage — try the fallback window
+            fallback = StressScenario(
+                name=scenario.name,
+                start=scenario.fallback_start,
+                end=scenario.fallback_end,
+                description=scenario.fallback_description or scenario.description,
+                min_pass_score=scenario.min_pass_score,
+            )
+            snapshots = self.generate_snapshots(fallback, step_days=step_days)
+            fallback_used = True
+
+        if not snapshots:
+            # No usable data for this scenario window — fail the risk gate
+            # rather than silently pass on empty episodes.
+            return {
+                "scenario_name": scenario.name,
+                "passed": False,
+                "mean_ceps": 0.0,
+                "per_stage_mean": {},
+                "n_episodes": 0,
+                "min_pass_score": scenario.min_pass_score,
+                "description": scenario.description,
+                "error": "no snapshots generated (data coverage missing for window)",
+            }
+
         episodes = []
         for snap in snapshots:
             result = pipeline.run_episode(snap)
@@ -185,7 +247,7 @@ class ScenarioInjector:
         mean_score = ceps_result["mean_ceps"]
         passed = mean_score >= scenario.min_pass_score
 
-        return {
+        result = {
             "scenario_name": scenario.name,
             "passed": passed,
             "mean_ceps": mean_score,
@@ -194,3 +256,9 @@ class ScenarioInjector:
             "min_pass_score": scenario.min_pass_score,
             "description": scenario.description,
         }
+        if fallback_used:
+            result["fallback_window"] = (
+                f"{scenario.fallback_start} → {scenario.fallback_end}"
+            )
+            result["fallback_description"] = scenario.fallback_description
+        return result
