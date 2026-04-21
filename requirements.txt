@@ -1,19 +1,39 @@
+numpy
 pandas
-torch
-transformers
-selenium
+scipy
+requests
 python-dotenv
-pyarrow
-networkx
-pydot
-datasets
-matplotlib
-graphviz
-tenacity
-txtai
-h5py
-wandb
-einops
-litellm
+
+# Data collection
+yfinance
 kaggle
 fredapi
+
+# Visualization
+matplotlib
+
+# LLM agent interface
+litellm
+anthropic
+openai
+
+# LLM evaluation
+# Uncomment when needed (large downloads, not required for mock/baseline evaluation)
+# torch
+# transformers
+# einops
+# txtai
+# datasets
+
+# Optional: experiment tracking
+# wandb
+
+# Optional: data serialization
+# pyarrow
+# h5py
+
+# Optional: web scraping (SEC dynamic pages)
+# selenium
+
+# Optional: retry logic
+# tenacity
