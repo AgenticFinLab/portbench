@@ -381,6 +381,41 @@ class DataProvider(ABC):
         """
         return ""
 
+    def has_text(self, asset: str, before_date: date) -> bool:
+        """
+        Return True if get_news() would return non-empty text for this asset/date.
+
+        Default returns False. ProcessedDataProvider overrides with a fast
+        column-presence check used for text-priority ranking during QA build.
+        """
+        return False
+
+    def get_volume_series(self, asset: str, start: date, end: date) -> pd.Series:
+        """
+        Return daily trading volume for asset in [start, end].
+
+        Default returns empty Series. Override in subclasses with volume data.
+        """
+        return pd.Series(dtype=float)
+
+    def get_ohlc_series(
+        self, asset: str, start: date, end: date
+    ) -> "pd.DataFrame":
+        """
+        Return daily OHLC DataFrame for asset in [start, end].
+
+        Columns: open, high, low, close (float). Index: DatetimeIndex.
+        Default returns empty DataFrame. Override in subclasses with OHLC data.
+        """
+        return pd.DataFrame(columns=["open", "high", "low", "close"])
+
+    def get_asset_metadata(self, asset: str) -> dict:
+        """
+        Return static fundamental/metadata about an asset (e.g. market cap,
+        launch year, sector). Returns empty dict if not available.
+        """
+        return {}
+
     def build_context(
         self,
         decision_date: date,
@@ -493,12 +528,18 @@ class QABuilder(ABC):
         """
         Generate up to n QA pairs over the provided list of candidate decision_dates.
 
+        This is **adaptive**: returns however many pairs the data supports, capped
+        at n. If feasibility is low (e.g., T5/T6 needing 3+ aligned assets), the
+        returned list may be much shorter than n. To bias toward text-rich pairs,
+        order decision_dates so text-bearing dates come first.
+
         Dates that fall outside all configured splits, or for which the provider
         cannot supply sufficient history, are silently skipped.
 
         Args:
-            n:               Target number of QA pairs to generate.
-            decision_dates:  Candidate dates (typically a random sample from split range).
+            n:               Max number of QA pairs to generate (cap, not target).
+            decision_dates:  Candidate dates, ideally ordered so text-bearing
+                             dates appear first.
 
         Returns:
             List of QAPair, length <= n.

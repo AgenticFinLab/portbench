@@ -55,9 +55,10 @@ class T3PositionSizing(QABuilder):
 
     def _select_assets(self, decision_date: date) -> list[str]:
         import random
-        all_classes = ["equities", "bonds", "commodities", "real_estate", "cryptocurrency", "cash"]
+        text_classes = ["equities", "cryptocurrency"]
+        other_classes = ["bonds", "commodities", "real_estate", "cash"]
         rng = random.Random(hash(decision_date) + 2)
-        cls = rng.choice(all_classes)
+        cls = rng.choice(text_classes) if rng.random() < 0.8 else rng.choice(other_classes)
         candidates = self.provider.list_assets(cls)
         if not candidates:
             candidates = self.provider.list_assets("equities")

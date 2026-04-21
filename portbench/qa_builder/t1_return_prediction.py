@@ -43,10 +43,12 @@ class T1ReturnPrediction(QABuilder):
         return "all"
 
     def _select_assets(self, decision_date: date) -> list[str]:
-        # Rotate across all six asset classes so T1 covers the full universe
-        all_classes = ["equities", "bonds", "commodities", "real_estate", "cryptocurrency", "cash"]
+        # Bias toward text-bearing classes (equities/crypto) to maximize text coverage,
+        # but still rotate across all six asset classes so T1 covers the full universe.
+        text_classes = ["equities", "cryptocurrency"]
+        other_classes = ["bonds", "commodities", "real_estate", "cash"]
         rng = random.Random(hash(decision_date))
-        cls = rng.choice(all_classes)
+        cls = rng.choice(text_classes) if rng.random() < 0.8 else rng.choice(other_classes)
         candidates = self.provider.list_assets(cls)
         if not candidates:
             candidates = self.provider.list_assets("equities")

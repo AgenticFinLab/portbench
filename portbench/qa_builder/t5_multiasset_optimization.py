@@ -51,9 +51,13 @@ class T5MultiAssetOptimization(QABuilder):
         return "all"
 
     def _select_assets(self, decision_date: date) -> list[str]:
-        all_classes = ["equities", "bonds", "commodities", "real_estate", "cryptocurrency", "cash"]
+        # Always include equities + crypto (text-bearing classes); fill remaining
+        # slots from other classes for cross-asset diversity.
+        text_classes = ["equities", "cryptocurrency"]
+        other_classes = ["bonds", "commodities", "real_estate", "cash"]
         rng = random.Random(hash(decision_date) + 4)
-        chosen_classes = rng.sample(all_classes, min(self.n_assets, len(all_classes)))
+        n_others = max(0, self.n_assets - len(text_classes))
+        chosen_classes = text_classes + rng.sample(other_classes, min(n_others, len(other_classes)))
         assets = []
         for cls in chosen_classes:
             candidates = self.provider.list_assets(cls)

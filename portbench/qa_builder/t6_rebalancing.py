@@ -60,9 +60,11 @@ class T6RebalancingDecision(QABuilder):
 
     def _select_assets(self, decision_date: date) -> list[str]:
         import random
-        all_classes = ["equities", "bonds", "commodities", "real_estate", "cryptocurrency", "cash"]
+        # Always include equities + crypto for text coverage; add 2 more from others.
+        text_classes = ["equities", "cryptocurrency"]
+        other_classes = ["bonds", "commodities", "real_estate", "cash"]
         rng = random.Random(hash(decision_date) + 5)
-        chosen = rng.sample(all_classes, 4)
+        chosen = text_classes + rng.sample(other_classes, 2)
         assets = []
         for cls in chosen:
             candidates = self.provider.list_assets(cls)

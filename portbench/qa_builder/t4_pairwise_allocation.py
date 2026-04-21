@@ -42,9 +42,16 @@ class T4PairwiseAllocation(QABuilder):
         return "all"
 
     def _select_assets(self, decision_date: date) -> list[str]:
-        all_classes = ["equities", "bonds", "commodities", "real_estate", "cryptocurrency", "cash"]
+        # Always include at least one text-bearing class (equities or crypto)
+        text_classes = ["equities", "cryptocurrency"]
+        other_classes = ["bonds", "commodities", "real_estate", "cash"]
         rng = random.Random(hash(decision_date) + 3)
-        cls1, cls2 = rng.sample(all_classes, 2)
+        cls1 = rng.choice(text_classes)
+        # Second class: 50% another text class, 50% from non-text classes
+        if rng.random() < 0.5:
+            cls2 = rng.choice([c for c in text_classes if c != cls1] + other_classes)
+        else:
+            cls2 = rng.choice(other_classes)
         c1 = self.provider.list_assets(cls1) or self.provider.list_assets("equities")
         c2 = self.provider.list_assets(cls2) or self.provider.list_assets("bonds")
         return [rng.choice(c1), rng.choice(c2)]

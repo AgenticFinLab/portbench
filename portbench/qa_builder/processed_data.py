@@ -24,6 +24,7 @@ Usage:
 """
 
 from datetime import date, timedelta
+import json
 from pathlib import Path
 from typing import Optional
 import re
@@ -42,16 +43,24 @@ from .base import DataProvider, MarketRegime
 _CLOSE_SUFFIX = "_close"
 _RETURN_SUFFIX = "_return"
 
-# Macro series fetched from the CASH / BONDS CSVs
-_MACRO_COLUMNS = {
-    "fed_funds_rate":   "fred_DFF",
-    "cpi_yoy":          "fred_CPIAUCSL",
-    "unemployment":     "fred_UNRATE",
-    "gdp_growth_qoq":   "fred_GDPC1",
-    "vix":              "yahoo_^VIX_close",
-    "t10y2y_spread":    "fred_T10Y2Y",
-    "breakeven_10y":    "fred_T10YIE",
-    "hy_oas":           "fred_BAMLH0A0HYM2",
+# Macro series fetched from the CASH / BONDS / EQUITIES CSVs.
+# Each entry: indicator_name -> (csv_frame_key, column_name)
+_MACRO_COLUMNS: dict[str, tuple[str, str]] = {
+    # Money / rates (from cash.csv)
+    "fed_funds_rate":   ("cash",     "fred_DFF"),
+    "cpi_yoy":          ("cash",     "fred_CPIAUCSL"),
+    "unemployment":     ("cash",     "fred_UNRATE"),
+    "gdp_growth_qoq":   ("cash",     "fred_GDPC1"),
+    # Yield curve / credit (from bonds.csv)
+    "t10y2y_spread":    ("bonds",    "fred_T10Y2Y"),
+    "t10y3m_spread":    ("bonds",    "fred_T10Y3M"),
+    "breakeven_10y":    ("bonds",    "fred_T10YIE"),
+    "hy_oas":           ("bonds",    "fred_BAMLH0A0HYM2"),
+    "ig_oas":           ("bonds",    "fred_BAMLC0A0CM"),
+    "ted_spread":       ("bonds",    "fred_TEDRATE"),
+    "mortgage_30y":     ("bonds",    "fred_MORTGAGE30US"),
+    # Equity volatility (from equities.csv — VIX lives here)
+    "vix":              ("equities", "^VIX_close"),
 }
 
 # Map from short ticker name → possible column prefixes in the processed CSV
@@ -210,19 +219,15 @@ class ProcessedDataProvider(DataProvider):
         """
         Return macro indicators as of date d (most recent observation ≤ d).
 
-        Reads from the cash.csv and bonds.csv frames.  Missing values are
-        interpolated with the last known observation.
+        Reads from cash.csv, bonds.csv, and equities.csv as mapped in
+        _MACRO_COLUMNS. Missing values default to 0.0.
         """
         result = {}
-        for macro_key, col_name in _MACRO_COLUMNS.items():
-            # Determine which frame holds this column
-            frame_key = "bonds" if col_name.startswith("fred_DGS") or col_name.startswith("fred_T10") \
-                                   or col_name.startswith("fred_BAML") else "cash"
+        for macro_key, (frame_key, col_name) in _MACRO_COLUMNS.items():
             df = self._frames.get(frame_key)
             if df is None or col_name not in df.columns:
                 result[macro_key] = 0.0
                 continue
-            # Last observation on or before d
             candidates = df.loc[df.index.date <= d, col_name].dropna()
             result[macro_key] = float(candidates.iloc[-1]) if not candidates.empty else 0.0
 
@@ -270,35 +275,167 @@ class ProcessedDataProvider(DataProvider):
             return [t for t, cls in self._ASSET_CLASS_MAP.items() if cls == asset_class]
         return list(self._ASSET_CLASS_MAP.keys())
 
+    def get_volume_series(self, asset: str, start: date, end: date) -> pd.Series:
+        """Return daily trading volume for asset in [start, end]."""
+        df = self._get_frame(asset)
+        col = self._find_column(df, asset, suffix="_volume")
+        if col is None:
+            return pd.Series(dtype=float)
+        series = df[col].copy()
+        series = self._ffill(series)
+        mask = (series.index.date >= start) & (series.index.date <= end)
+        return series[mask].dropna()
+
+    def get_ohlc_series(self, asset: str, start: date, end: date) -> pd.DataFrame:
+        """
+        Return daily OHLC DataFrame for asset in [start, end].
+
+        Columns: open, high, low, close (float). Index: DatetimeIndex.
+        """
+        df = self._get_frame(asset)
+        ohlc: dict[str, pd.Series] = {}
+        for field_name in ("open", "high", "low", "close"):
+            col = self._find_column(df, asset, suffix=f"_{field_name}")
+            if col is not None:
+                series = self._ffill(df[col].copy())
+                mask = (series.index.date >= start) & (series.index.date <= end)
+                ohlc[field_name] = series[mask]
+        if not ohlc:
+            return pd.DataFrame(columns=["open", "high", "low", "close"])
+        result = pd.DataFrame(ohlc)
+        result = result.dropna(how="all")
+        return result
+
+    def get_asset_metadata(self, asset: str) -> dict:
+        """
+        Return static metadata for an asset.
+
+        For cryptocurrency assets: returns available columns such as
+        launch_year, market_cap, circulating_supply, platform, cmc_rank, tvl.
+        For other assets: returns asset_class.
+        """
+        asset_class = self._ASSET_CLASS_MAP.get(asset)
+        meta: dict = {"asset_class": asset_class}
+
+        if asset_class == "cryptocurrency":
+            df = self._frames.get("cryptocurrency")
+            if df is None:
+                return meta
+            # Crypto metadata columns written by CryptocurrencyPreprocessor
+            meta_suffixes = (
+                "launch_year", "market_cap", "circulating_supply",
+                "platform", "cmc_rank", "tvl",
+            )
+            # Column names vary by Kaggle dataset name prefix; search by suffix
+            for sfx in meta_suffixes:
+                for col in df.columns:
+                    if col.endswith(f"_{sfx}") or col == sfx:
+                        # Take most recent non-null value (static field, rarely changes)
+                        values = df[col].dropna()
+                        if not values.empty:
+                            meta[sfx] = values.iloc[-1]
+                        break
+
+        return meta
+        """
+        Fast check: does any text_json record exist for this asset class strictly
+        before before_date? Used to rank candidate dates without invoking the
+        full get_news() pipeline (which sorts records and formats output).
+        """
+        cls = self._ASSET_CLASS_MAP.get(asset)
+        if cls not in ("equities", "cryptocurrency"):
+            return False
+        df = self._frames.get(cls)
+        if df is None or "text_json" not in df.columns:
+            return False
+        mask = (df.index.date < before_date) & df["text_json"].notna()
+        return bool(mask.any())
+
     def get_news(self, asset: str, before_date: date) -> str:
         """
         Return the most recent text context strictly before before_date for asset.
 
         Priority order:
-          1. SEC 10-K / 10-Q filings (equities only, ~20 tickers)
-          2. Kaggle stock-data-with-news daily news column (99 equity tickers)
-          3. Kaggle crypto-news (all crypto assets, keyed by subject keywords)
+          1. Preprocessed text_json column from loaded frames (equities/cryptocurrency CSV)
+             — this is the canonical source, produced by the preprocessing pipeline and
+             aggregates SEC filings + Kaggle news per trading day.
+          2. Raw SEC 10-K/10-Q htm files (fallback for equities not yet re-preprocessed)
+          3. Raw Kaggle stock-data-with-news CSV (per-ticker fallback for equities)
+          4. Raw Kaggle crypto-news CSV (fallback for cryptocurrency assets)
 
         Returns empty string if no text is available for this asset/date.
         """
-        ticker = asset.upper()
-
-        # 1. SEC filings
-        sec_text = self._get_sec_news(ticker, before_date)
-        if sec_text:
-            return sec_text
-
-        # 2. Kaggle per-ticker stock news (equities)
-        kaggle_equity = self._get_kaggle_stock_news(ticker, before_date)
-        if kaggle_equity:
-            return kaggle_equity
-
-        # 3. Kaggle crypto news (for crypto assets)
         asset_class = self._ASSET_CLASS_MAP.get(asset)
+
+        # 1. Preprocessed text_json from loaded frames (fastest, most complete)
+        frame_key = asset_class if asset_class in ("equities", "cryptocurrency") else None
+        if frame_key:
+            text = self._get_text_from_frame(frame_key, before_date)
+            if text:
+                return text
+
+        # 2. Raw SEC filings fallback (equities only)
+        if asset_class == "equities":
+            sec_text = self._get_sec_news(asset.upper(), before_date)
+            if sec_text:
+                return sec_text
+
+            # 3. Kaggle per-ticker stock news fallback
+            kaggle_text = self._get_kaggle_stock_news(asset.upper(), before_date)
+            if kaggle_text:
+                return kaggle_text
+
+        # 4. Raw Kaggle crypto-news fallback
         if asset_class == "cryptocurrency":
             return self._get_kaggle_crypto_news(before_date)
 
         return ""
+
+    def _get_text_from_frame(self, frame_key: str, before_date: date) -> str:
+        """
+        Read the most recent text_json entry from the loaded frame for frame_key,
+        strictly before before_date. Returns a plain-text excerpt or empty string.
+        """
+        df = self._frames.get(frame_key)
+        if df is None or "text_json" not in df.columns:
+            return ""
+
+        # Filter to rows before before_date that have text
+        mask = (df.index.date < before_date) & df["text_json"].notna()
+        candidates = df.loc[mask, "text_json"]
+        if candidates.empty:
+            return ""
+
+        raw = candidates.iloc[-1]  # most recent entry
+        try:
+            records = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            # Stored as Python repr (old format) — extract plain text with regex
+            texts = re.findall(r"'text':\s*'([^']{20,})'", str(raw))
+            if texts:
+                return f"[News {candidates.index[-1].date()}] {texts[0][:3000]}"
+            return ""
+
+        if not records:
+            return ""
+
+        # Pick the most informative record: prefer SEC over kaggle, longer text
+        records.sort(key=lambda r: (r.get("source") == "sec", len(r.get("text", ""))), reverse=True)
+        best = records[0]
+        source = best.get("source", "news")
+        ticker = best.get("ticker", "")
+        filing_type = best.get("type", "")
+        # Respect the per-source text budgets from the preprocessing pipeline:
+        #   SEC (head_tail): up to 9000 chars already trimmed by preprocess
+        #   Kaggle stock:    up to 3000 chars
+        #   Kaggle crypto:   up to 2000 chars
+        # Do not re-truncate here — the preprocess budget is already applied.
+        text = str(best.get("text", ""))
+        entry_date = candidates.index[-1].date()
+
+        if source == "sec" and ticker and filing_type:
+            return f"[SEC {filing_type} {ticker} {entry_date}] {text}"
+        return f"[{source.capitalize()} {entry_date}] {text}"
 
     def _get_sec_news(self, ticker: str, before_date: date) -> str:
         """Return most recent SEC 10-K/10-Q htm text before before_date."""
@@ -327,12 +464,12 @@ class ProcessedDataProvider(DataProvider):
 
         candidates.sort(key=lambda x: x[0], reverse=True)
         filing_date, filing_path = candidates[0]
-        return self._read_htm_text(filing_path, max_chars=2000, filing_date=filing_date)
+        return self._read_htm_text(filing_path, max_chars=9000, filing_date=filing_date)
 
     def _get_kaggle_stock_news(self, ticker: str, before_date: date) -> str:
         """
-        Return most recent news headline(s) from Kaggle stock-data-with-news
-        for ticker strictly before before_date.
+        Return most recent news from Kaggle stock-data-with-news for ticker
+        strictly before before_date.
         """
         csv_path = self._KAGGLE_STOCK_NEWS_DIR / f"{ticker}.csv"
         if not csv_path.exists():
@@ -348,18 +485,16 @@ class ProcessedDataProvider(DataProvider):
                 return ""
 
         df = self._kaggle_stock_cache[ticker]
-        candidates = df[df["date"] < before_date]
-        if candidates.empty:
+        rows = df[df["date"] < before_date]
+        if rows.empty:
             return ""
 
-        row = candidates.iloc[-1]
-        news_text = str(row["news"])[:1500]
-        news_date = row["date"]
-        return f"[News {news_date}] {news_text}"
+        row = rows.iloc[-1]
+        return f"[News {row['date']}] {str(row['news'])[:3000]}"
 
     def _get_kaggle_crypto_news(self, before_date: date) -> str:
         """
-        Return the most recent crypto news headline before before_date
+        Return the most recent crypto news before before_date
         from the Kaggle crypto-news dataset.
         """
         if not self._KAGGLE_CRYPTO_NEWS_CSV.exists():
@@ -367,25 +502,21 @@ class ProcessedDataProvider(DataProvider):
 
         if self._kaggle_crypto_df is None:
             try:
-                df = pd.read_csv(
-                    self._KAGGLE_CRYPTO_NEWS_CSV,
-                    usecols=["date", "title", "text"],
-                )
+                df = pd.read_csv(self._KAGGLE_CRYPTO_NEWS_CSV, usecols=["date", "title", "text"])
                 df["date"] = pd.to_datetime(df["date"], format="mixed", utc=True).dt.tz_localize(None).dt.date
                 self._kaggle_crypto_df = df.sort_values("date")
             except Exception:
                 return ""
 
-        df = self._kaggle_crypto_df
-        candidates = df[df["date"] < before_date]
-        if candidates.empty:
+        rows = self._kaggle_crypto_df
+        rows = rows[rows["date"] < before_date]
+        if rows.empty:
             return ""
 
-        row = candidates.iloc[-1]
+        row = rows.iloc[-1]
         title = str(row.get("title", ""))
-        text = str(row.get("text", ""))[:1200]
-        news_date = row["date"]
-        return f"[Crypto news {news_date}] {title}. {text}"
+        text = str(row.get("text", ""))[:2000]
+        return f"[Crypto news {row['date']}] {title}. {text}"
 
     @staticmethod
     def _read_htm_text(path: Path, max_chars: int = 2000, filing_date: Optional[date] = None) -> str:
@@ -408,22 +539,62 @@ class ProcessedDataProvider(DataProvider):
     def _load_all(self) -> None:
         """Load all per-asset-class CSVs into self._frames."""
         for cls, filename in self._CLASS_TO_FILE.items():
-            path = self.data_dir / filename
-            if path.exists():
-                self._frames[cls] = self._load_csv(str(path))
+            df = self._load_asset_frame(cls, filename)
+            if df is not None:
+                self._frames[cls] = df
             else:
-                # Warn but don't fail — some asset classes may not be downloaded yet
                 import warnings
                 warnings.warn(
-                    f"Processed file not found: {path} — {cls} data will be unavailable.",
+                    f"Processed file not found for {cls} in {self.data_dir} "
+                    f"— {cls} data will be unavailable.",
                     UserWarning,
                     stacklevel=2,
                 )
 
+    def _load_asset_frame(self, cls: str, filename: str) -> Optional[pd.DataFrame]:
+        """
+        Load an asset-class frame, supporting both single-file and chunked
+        (manifest + partNNN.csv) outputs from the preprocess pipeline.
+        """
+        single = self.data_dir / filename
+        stem = filename[: -len(".csv")] if filename.endswith(".csv") else filename
+        manifest = self.data_dir / f"{stem}.manifest.json"
+
+        if manifest.exists():
+            info = json.loads(manifest.read_text(encoding="utf-8"))
+            parts = [self.data_dir / p for p in info.get("parts", [])]
+            frames = [self._load_csv(str(p)) for p in parts if p.exists()]
+            if frames:
+                merged = pd.concat(frames).sort_index()
+                # Collapse cross-chunk duplicates if any slipped through
+                if merged.index.duplicated().any():
+                    merged = merged.groupby(merged.index).first()
+                return merged
+            return None
+
+        if single.exists():
+            return self._load_csv(str(single))
+
+        # Orphan parts without manifest
+        orphan_parts = sorted(self.data_dir.glob(f"{stem}.part*.csv"))
+        if orphan_parts:
+            frames = [self._load_csv(str(p)) for p in orphan_parts]
+            merged = pd.concat(frames).sort_index()
+            if merged.index.duplicated().any():
+                merged = merged.groupby(merged.index).first()
+            return merged
+
+        return None
+
     @staticmethod
     def _load_csv(path: str) -> pd.DataFrame:
-        """Load a processed CSV with DatetimeIndex."""
-        df = pd.read_csv(path, parse_dates=["date"])
+        """Load a processed CSV with DatetimeIndex, deduplicating any repeated dates."""
+        df = pd.read_csv(path, parse_dates=["date"], low_memory=False)
+        # Some preprocessed CSVs (notably equities.csv after text merge) contain
+        # duplicate date rows from the text-records explosion. Collapse to first
+        # occurrence per date so price/return slicing returns scalars, not vectors.
+        if df["date"].duplicated().any():
+            df = df.groupby("date", as_index=False).first()
         df = df.set_index("date").sort_index()
         return df
 
@@ -442,14 +613,13 @@ class ProcessedDataProvider(DataProvider):
                 f"exists in a processed CSV."
             )
         if cls not in self._frames:
-            # Lazy load
-            path = self.data_dir / self._CLASS_TO_FILE[cls]
-            if not path.exists():
+            df = self._load_asset_frame(cls, self._CLASS_TO_FILE[cls])
+            if df is None:
                 raise FileNotFoundError(
-                    f"Processed file not found: {path}. "
+                    f"Processed data not found for {cls} in {self.data_dir}. "
                     "Run the data collection and preprocessing pipeline first."
                 )
-            self._frames[cls] = self._load_csv(str(path))
+            self._frames[cls] = df
         return self._frames[cls]
 
     @staticmethod
@@ -458,16 +628,30 @@ class ProcessedDataProvider(DataProvider):
         Find the best matching column for an asset with a given suffix.
 
         Search order: yahoo → kaggle → fred → any column containing asset name + suffix.
+        Falls back to alternative suffixes (_open if _close missing) since some
+        preprocessed CSVs drop _close after deduplication.
         """
+        # Try exact prefixed match first
         for prefix in _SOURCE_PREFIXES:
             candidate = f"{prefix}_{asset}{suffix}"
             if candidate in df.columns:
                 return candidate
-        # Fallback: fuzzy search (e.g., "SPY_close" without source prefix)
-        asset_upper = asset.upper()
-        for col in df.columns:
-            if asset_upper in col.upper() and col.endswith(suffix):
-                return col
+
+        # Build asset name variants (BTC-USD -> BTC_USD for crypto column convention)
+        variants = {asset.upper(), asset.upper().replace("-", "_")}
+
+        # Try the requested suffix first, then fall back to _open / _close interchangeably
+        suffix_chain = [suffix]
+        if suffix == "_close":
+            suffix_chain.append("_open")
+        elif suffix == "_open":
+            suffix_chain.append("_close")
+
+        for sfx in suffix_chain:
+            for col in df.columns:
+                col_up = col.upper()
+                if col.endswith(sfx) and any(v in col_up for v in variants):
+                    return col
         return None
 
     def _ffill(self, series: pd.Series) -> pd.Series:
