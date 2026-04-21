@@ -18,9 +18,15 @@ Generates synthetic price paths via Geometric Brownian Motion for 12 predefined 
 ### `ProcessedDataProvider` (production, requires `datasets/processed/`)
 ```python
 from portbench.qa_builder import ProcessedDataProvider
-provider = ProcessedDataProvider(data_dir="datasets/processed")
+provider = ProcessedDataProvider(data_dir="datasets/processed", sec_dir="datasets/sec")
 ```
-Reads real `datasets/processed/*.csv` files. Drop-in replacement for `MockDataProvider`. Column lookup searches for `yahoo_<TICKER>_close` → `kaggle_<TICKER>_close` → any matching column. Supports `market_regimes.csv` for pre-computed regime labels.
+Reads real `datasets/processed/*.csv` files. Drop-in replacement for `MockDataProvider`.
+
+**Price column lookup** (`_find_column`): tries `yahoo_<TICKER>_close` → `kaggle_<TICKER>_close` → fuzzy match on ticker name. Handles `BTC-USD` ↔ `BTC_USD` naming variants. Falls back to `_open` columns when `_close` is missing (some preprocessed CSVs drop `_close` after de-duplication).
+
+**Duplicate-date handling**: `_load_csv` collapses duplicate date rows to first occurrence per date (`equities.csv` may contain duplicates from the SEC text-record explosion).
+
+**Text retrieval** (`get_news`, `has_text`): see [Text Context Pipeline](#text-context-pipeline) below.
 
 ## Dataset Splits
 
@@ -101,6 +107,106 @@ print(ctx.correlation_matrix)
 # GLD  0.012344  0.234567  1.000000
 ```
 
+## Text Context Pipeline
+
+Because PortBench evaluates **agents**, not time-series predictors, news/filing text is treated as a first-class context input alongside numeric features. Text is injected into the QA `question` field whenever available.
+
+### Text source priority (`ProcessedDataProvider.get_news`)
+
+For an asset and decision date, `get_news()` returns the most recent text strictly before the decision date, falling back through four sources:
+
+1. **Preprocessed `text_json` column** in `equities.csv` / `cryptocurrency.csv` — JSON-aggregated SEC + Kaggle records, produced by the preprocessing pipeline (canonical, fastest)
+2. **Raw SEC 10-K / 10-Q htm files** under `datasets/sec/equities/<TICKER>/` — for equities not yet covered by preprocessing
+3. **Kaggle `stock-data-with-news`** per-ticker CSVs — daily news column for 99 equity tickers
+4. **Kaggle `crypto-news`** — 2021–2023 crypto news headlines (cryptocurrency assets only)
+
+Returns empty string for assets in non-text classes (bonds, commodities, real estate, cash).
+
+### Cheap probe: `has_text(asset, before_date) -> bool`
+
+Used by the build script to rank candidate dates without running the full text-retrieval pipeline. Returns True iff the loaded `text_json` frame for the asset's class has any non-null record before `before_date`. The default implementation on `DataProvider` returns False; `ProcessedDataProvider` overrides it.
+
+### Pipeline integration
+
+`DataProvider.build_context()` automatically calls `get_news(assets[0], decision_date)` and stores the result in `ContextWindow.news_text`. Each template appends this to the question:
+
+```python
+question = (
+    f"Asset: {asset}\n..."
+    + (f"Recent filing/news:\n{context.news_text}\n" if context.news_text else "")
+    + "\nPredict whether the return..."
+)
+```
+
+`QABuilder.build()` injects `metadata["has_text"]` and `metadata["text_chars"]` on every QAPair so `stats.json` can report text coverage.
+
+## QA Generation Strategy
+
+The build pipeline is designed to **maximize text coverage** (since the benchmark is for agent evaluation, not time-series prediction) while remaining **adaptive to data feasibility** (templates that need 3+ aligned assets generate as many pairs as the data supports, up to a per-template cap).
+
+### 1. Text-first date ordering
+
+`build_qa_dataset.py` partitions each split's business-day candidate list into two buckets via `provider.has_text("SPY", d) or provider.has_text("BTC-USD", d)`:
+- **text-bearing dates** (most dates after 2015)
+- **plain dates** (early dates before any news data starts)
+
+Each bucket is shuffled deterministically (seeded by `config.random_seed`), then concatenated text-first. The three splits are then **round-robin interleaved** so that hitting the per-template cap early still yields balanced train/val/test coverage.
+
+### 2. Text-bearing asset preference per template
+
+`_select_assets()` in each template biases class selection toward text-bearing classes (`equities`, `cryptocurrency`):
+
+| Template | Asset selection rule |
+|----------|---------------------|
+| T1 / T2 / T3 (single asset) | 80% pick from {equities, crypto}, 20% from {bonds, commodities, real_estate, cash} |
+| T4 (2 assets) | First asset always from {equities, crypto}; second is 50/50 text-class vs other-class |
+| T5 (3+ assets) | Always include both equities + crypto, fill remaining slots from other classes |
+| T6 (4 assets) | Same as T5 |
+| T7 (regime detection) | Always uses equities (regime signal) — no change needed |
+
+Per-date determinism is preserved via `random.Random(hash(decision_date) + offset)`.
+
+### 3. Adaptive per-template cap
+
+`samples_per_template` (default 1000) is now a **cap, not a target**. `QABuilder.build(n, decision_dates)` iterates candidate dates and:
+- Skips dates outside any configured split
+- Skips dates where `_select_assets()` or `build_context()` raises (e.g., insufficient price history)
+- Stops at `n` pairs OR when all candidates are exhausted
+
+Templates with high feasibility (T1–T4, single or pair-asset) typically reach the cap. Templates needing 3+ aligned assets (T5/T6) generate fewer — currently ~500 each on the real dataset.
+
+### 4. Text statistics in `stats.json`
+
+Every template entry includes a `text` block, plus a global `_meta.text_overall`:
+
+```json
+"T1": {
+  "n_total": 1000,
+  "by_split": {"train": 700, "val": 200, "test": 100},
+  "by_regime": {...},
+  "text": {
+    "n_with_text": 693,
+    "pct_with_text": 69.3,
+    "avg_chars": 1024.5,
+    "max_chars": 1528,
+    "min_chars": 20
+  }
+}
+```
+
+### Observed coverage
+
+On the current real dataset (2015–2025):
+
+| Template | Pairs | With text | Coverage |
+|----------|-------|-----------|----------|
+| T1 / T2 / T3 | 1000 each | ~700 | ~70% |
+| T4 | 1000 | 884 | 88% |
+| T5 | 509 | 509 | 100% |
+| T6 | 464 | 464 | 100% |
+| T7 | 491 | 491 | 100% |
+| **Total** | **5464** | **4436** | **81%** |
+
 ## QAPair Format
 
 ```json
@@ -114,11 +220,16 @@ print(ctx.correlation_matrix)
   "assets": ["SPY"],
   "decision_date": "2020-03-15",
   "context_summary": "...",
-  "question": "Given the 60-day market context for SPY ending 2020-03-15, predict the return direction over the next 21 trading days.",
+  "question": "Given the 60-day market context for SPY ending 2020-03-15, predict the return direction over the next 21 trading days.\nRecent filing/news:\n[SEC 10-K AAPL 2020-01-30] ...",
   "answer": "down",
   "answer_numeric": -0.342,
   "explanation": "S&P 500 fell 34% in 33 days during COVID-19 crash...",
-  "metadata": {}
+  "metadata": {
+    "has_text": true,
+    "text_chars": 1487,
+    "future_return": -0.342,
+    "horizon_days": 21
+  }
 }
 ```
 
@@ -132,6 +243,8 @@ print(ctx.correlation_matrix)
 python examples/qa_builder/build_qa_dataset.py
 ```
 
+Requires `datasets/processed/` populated by `examples/data_preprocess/preprocess_all.py` first.
+
 Output:
 ```
 outputs/qa_dataset/
@@ -139,29 +252,40 @@ outputs/qa_dataset/
 ├── train.jsonl
 ├── val.jsonl
 ├── test.jsonl
-└── stats.json         # Template × regime × split distribution + split boundary metadata
+└── stats.json         # Template × regime × split + text coverage + split boundary metadata
 ```
+
+The build script:
+1. Loads `ProcessedDataProvider`, derives split boundaries from actual data range
+2. Ranks candidate dates text-first per split, round-robin interleaves splits
+3. For each template, calls `builder.build(n=samples_per_template, decision_dates=...)`
+4. Writes per-split JSONL files and `stats.json` with text statistics
 
 ## Programmatic Usage
 
 ```python
-from portbench.qa_builder import MockDataProvider, QAConfig, get_all_builders
+from portbench.qa_builder import ProcessedDataProvider, QAConfig, get_all_builders
 from datetime import date
 
-provider = MockDataProvider(seed=42)
+provider = ProcessedDataProvider(data_dir="datasets/processed", sec_dir="datasets/sec")
 config = QAConfig.from_date_range(
     data_start=date(2015, 1, 1),
     data_end=date(2025, 12, 31),
-    samples_per_template=100,
+    samples_per_template=1000,  # cap, not target — actual count adapts to data feasibility
 )
 builders = get_all_builders(provider, config)
 
 import pandas as pd, random
-dates = pd.bdate_range(config.train_start, config.test_end).date.tolist()[::5]
-random.shuffle(dates)
+dates = pd.bdate_range(config.train_start, config.test_end).date.tolist()
+# Optional: rank text-first to maximize text coverage
+text_dates = [d for d in dates if provider.has_text("SPY", d) or provider.has_text("BTC-USD", d)]
+plain_dates = [d for d in dates if d not in set(text_dates)]
+random.Random(42).shuffle(text_dates)
+random.Random(43).shuffle(plain_dates)
+ranked = text_dates + plain_dates
 
 all_pairs = []
 for builder in builders:
-    pairs = builder.build(n=100, decision_dates=dates)
+    pairs = builder.build(n=1000, decision_dates=ranked)
     all_pairs.extend(pairs)
 ```

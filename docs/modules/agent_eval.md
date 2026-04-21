@@ -22,7 +22,7 @@ MarketSnapshot (includes correlation_matrix)
 
 ## MarketSnapshot
 
-`MarketSnapshot` is the single external input to the pipeline. It now includes a `correlation_matrix` field capturing cross-asset return correlations:
+`MarketSnapshot` is the single external input to the pipeline. It carries numeric market data, a cross-asset correlation matrix, and (when available) recent news/filing text:
 
 ```python
 @dataclass
@@ -31,6 +31,7 @@ class MarketSnapshot:
     price_data: dict[str, pd.Series]
     return_data: dict[str, pd.Series]
     macro_data: dict[str, float]
+    news_text: str = ""                          # SEC filing / news excerpt, lifted from DataProvider.get_news()
     current_weights: dict[str, float]
     portfolio_value: float
     market_regime: Optional[str]
@@ -40,29 +41,31 @@ class MarketSnapshot:
         """Compute (and cache) Pearson correlation matrix from return_data."""
 ```
 
-This captures both cross-class correlations (e.g., equity–bond flight-to-quality during crises) and intra-class correlations (e.g., sector concentration). It is used in S3 scoring and may be included in LLM prompts for weight optimization.
+`news_text` is populated by the snapshot builders (`build_snapshots()` in the example, and `ScenarioInjector.generate_snapshots()`) by walking the asset list and calling `provider.get_news(asset, decision_date)` until a non-empty result is found. Empty when no asset in the snapshot has text data (e.g., MockDataProvider, or a snapshot containing only bonds/commodities/cash).
+
+The `correlation_matrix` captures both cross-class correlations (e.g., equity–bond flight-to-quality during crises) and intra-class correlations (e.g., sector concentration). It is used in S3 scoring and may be included in LLM prompts for weight optimization.
 
 ## Pipeline Stages
 
 ### S1 — Market Interpretation (`S1MarketInterpretation`)
 
-**Input**: `MarketSnapshot` (price data, return data, macro context)  
+**Input**: `MarketSnapshot` (price data, return data, macro context, optional `news_text`)
 **Output**: `S1Output` — `asset_views: dict[str, float]` in [-1, +1]
 
 Ground truth: `view = clip(trailing_return / 0.10, -1, 1)` — normalizes a ±10% trailing return to ±1.0.
 
-LLM prompt asks the model to analyze price/return data and output a JSON dict of sentiment scores per asset.
+LLM prompt asks the model to analyze price/return data and output a JSON dict of sentiment scores per asset. When `snapshot.news_text` is non-empty, a `RECENT NEWS / FILINGS:` block is appended to the prompt so the model can incorporate qualitative context.
 
 **Scoring**: `1 - MAE(actual_views, gt_views) / 2`
 
 ### S2 — Signal Generation (`S2SignalGeneration`)
 
-**Input**: `S1Output`  
+**Input**: `S1Output` (and `snapshot.news_text` from the carried-through `MarketSnapshot`)
 **Output**: `S2Output` — `signals: dict[str, "buy"|"hold"|"sell"]`
 
 Ground truth: `view > 0.2 → buy`, `view < -0.2 → sell`, else `hold`.
 
-LLM prompt receives S1 views and must convert them to directional signals with strength scores.
+LLM prompt receives S1 views and must convert them to directional signals with strength scores. News/filing text is included when present, allowing the model to override pure-numeric views (e.g., bearish view but bullish-rated earnings filing).
 
 **Scoring**: Fraction of assets with correct signal direction.
 
@@ -235,11 +238,18 @@ result = pipeline.run_episode(snapshot, inject_gt_at=StageID.S3_WEIGHT_OPTIMIZAT
 ## Running Evaluation
 
 ```bash
-# Mock agent (no API keys, tests pipeline end-to-end)
+# Mock agent + mock data (no API keys, tests pipeline end-to-end)
 python examples/agent_eval/run_evaluation.py
 
-# Real cloud LLM
+# Real cloud LLM (uses MockDataProvider unless --data-provider=processed is set)
 ANTHROPIC_API_KEY=... python examples/agent_eval/run_evaluation.py
+
+# Real data from datasets/processed/ — populates news_text into snapshots
+python examples/agent_eval/run_evaluation.py --data-provider processed
+
+# Custom data dirs
+python examples/agent_eval/run_evaluation.py --data-provider processed \
+    --data-dir datasets/processed --sec-dir datasets/sec
 
 # Local model — vLLM
 python examples/agent_eval/run_evaluation.py --local-model vllm:meta-llama/Llama-3.1-8B-Instruct
@@ -256,6 +266,17 @@ python examples/agent_eval/run_evaluation.py --baseline risk_parity
 # Stress tests only
 python examples/agent_eval/run_evaluation.py --stress-only
 ```
+
+### Data Provider Selection
+
+The `--data-provider` flag chooses between:
+
+| Provider | Source | News text | Use case |
+|----------|--------|-----------|----------|
+| `mock` (default) | Synthetic GBM, deterministic | Always empty | CI, agent debugging, no setup |
+| `processed` | `datasets/processed/*.csv` | SEC + Kaggle (where available) | Real-world benchmark runs |
+
+`processed` requires `examples/data_collect/get_all.py` and `examples/data_preprocess/preprocess_all.py` to have been run. It also requires `datasets/processed/` to span the stress-test windows (2008/2020/2022); if it doesn't, those stress tests will return zero snapshots and fail the gate.
 
 Output: `outputs/eval_results/{model_name}/`
 - `per_stage_scores.json` — per-episode and mean stage scores
