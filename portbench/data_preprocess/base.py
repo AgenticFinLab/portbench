@@ -544,33 +544,64 @@ class NumericPreprocessor:
                     f"  [DEDUP] {canonical}: kept {best_col}, merged from {len(close_cols)-1} sources"
                 )
 
-        # Also detect highly correlated columns (correlation > 0.99)
-        numeric_cols = [
-            c
-            for c in df.select_dtypes(include=[np.number]).columns
-            if c not in cols_to_drop
-        ]
-        if len(numeric_cols) > 1:
-            corr_matrix = df[numeric_cols].corr()
-            for i, col1 in enumerate(numeric_cols):
-                for col2 in numeric_cols[i + 1 :]:
-                    if col1 in cols_to_drop or col2 in cols_to_drop:
-                        continue
-                    if abs(corr_matrix.loc[col1, col2]) > 0.99:
-                        # Keep column with fewer NaN
-                        nan1, nan2 = df[col1].isna().sum(), df[col2].isna().sum()
-                        if nan1 <= nan2:
-                            df[col1] = df[col1].fillna(df[col2])
-                            cols_to_drop.append(col2)
-                        else:
-                            df[col2] = df[col2].fillna(df[col1])
-                            cols_to_drop.append(col1)
-                        print(f"  [DEDUP] High corr: kept one of ({col1}, {col2})")
-
         # Drop duplicate columns
         df = df.drop(columns=[c for c in cols_to_drop if c in df.columns])
 
         return df
+
+
+def _truncate_records_json(records: list, max_chars: int = 16000) -> str:
+    """
+    Serialize a list of record dicts to JSON, dropping records from the end
+    until the result fits within max_chars. Always produces valid JSON.
+    """
+    kept = list(records)
+    while kept:
+        s = json.dumps(kept, ensure_ascii=False, default=str)
+        if len(s) <= max_chars:
+            return s
+        kept.pop()
+    return "[]"
+
+
+# Per-source text length budgets (characters). Chosen to preserve signal
+# density: long-form filings get head+tail sampling so both the business
+# overview and risk-factor / MD&A closing sections survive; short news items
+# get a single head slice since tail of short articles is often boilerplate.
+TEXT_BUDGETS: dict[str, dict] = {
+    # SEC 10-K / 10-Q: long filings. Keep opening (business / risk factors
+    # usually start there) and tail (often contains MD&A or signatures with
+    # forward-looking language).
+    "sec":           {"strategy": "head_tail", "head": 6000, "tail": 3000},
+    # Kaggle per-ticker stock news: short-to-medium articles. Head only.
+    "kaggle_stock":  {"strategy": "head",      "head": 3000},
+    # Kaggle crypto news items: short posts. Head only.
+    "kaggle_crypto": {"strategy": "head",      "head": 2000},
+}
+
+
+def truncate_text_for_source(text: str, source_type: str) -> str:
+    """
+    Apply source-aware truncation to a single raw text record.
+
+    - "head":      keep the first N chars (good for news where the lead covers it).
+    - "head_tail": keep first H chars + sentinel + last T chars (for long filings
+                   where signals cluster at both ends).
+
+    Unknown source types fall back to a conservative head slice.
+    """
+    if not isinstance(text, str):
+        return ""
+    budget = TEXT_BUDGETS.get(source_type, {"strategy": "head", "head": 2000})
+    strategy = budget["strategy"]
+    if strategy == "head":
+        return text[: budget["head"]]
+    if strategy == "head_tail":
+        h, t = budget["head"], budget["tail"]
+        if len(text) <= h + t + 20:
+            return text
+        return text[:h] + " [...TRUNCATED...] " + text[-t:]
+    return text[:2000]
 
 
 class TextPreprocessor:
@@ -745,6 +776,11 @@ class AssetPreprocessor(ABC):
 
         return text_files
 
+    # Split output into chunks once uncompressed bytes exceed this threshold.
+    # Each chunk is written as <asset>.partNNN.csv; the loader concatenates them.
+    _CHUNK_BYTES_THRESHOLD = 200 * 1024 * 1024   # 200 MB per chunk
+    _CHUNK_ROWS = 1000                            # approx rows per chunk probe
+
     def save_output(
         self,
         numeric_df: pd.DataFrame,
@@ -754,20 +790,25 @@ class AssetPreprocessor(ABC):
         """
         Save processed data to output directory.
 
+        If the merged DataFrame exceeds _CHUNK_BYTES_THRESHOLD when serialized,
+        it is written as multiple part files (<asset>.part000.csv,
+        <asset>.part001.csv, …) to avoid producing a single file so large
+        that downstream consumers OOM when loading it whole. A companion
+        manifest `<asset>.manifest.json` records the part list.
+
         Args:
             numeric_df: Processed numeric data.
             text_df: Processed text data.
             suffix: Optional suffix for filename.
 
         Returns:
-            Path to saved file.
+            Path to the primary output (either the single CSV or the manifest).
         """
         asset_name = self.asset_class.value
         output_file = self.output_dir / f"{asset_name}{suffix}.csv"
 
         # Merge numeric and text data on date
         if not numeric_df.empty and not text_df.empty:
-            # Ensure date columns are compatible
             if "date" in numeric_df.columns:
                 numeric_df["date"] = pd.to_datetime(numeric_df["date"]).dt.date
             if "date" in text_df.columns:
@@ -781,8 +822,65 @@ class AssetPreprocessor(ABC):
         else:
             merged = pd.DataFrame()
 
-        if not merged.empty:
-            merged.to_csv(output_file, index=False)
-            print(f"Saved: {output_file} ({len(merged)} rows)")
+        if merged.empty:
+            return output_file
 
-        return output_file
+        # Guard against row explosion (e.g., text-records multiplying numeric rows,
+        # or intraday timestamps preventing cross-row merges). Normalize the
+        # date column to calendar-day granularity before dedup so rows that
+        # share a trading day but differ in hour collapse correctly.
+        if "date" in merged.columns:
+            merged["date"] = pd.to_datetime(merged["date"], errors="coerce").dt.date
+            merged = merged.dropna(subset=["date"])
+            if merged["date"].duplicated().any():
+                before = len(merged)
+                merged = merged.groupby("date", as_index=False).first()
+                print(f"  [dedup] collapsed {before} -> {len(merged)} rows by date")
+
+        self._clean_existing_outputs(asset_name, suffix)
+
+        # Estimate serialized size with a small probe
+        probe_rows = min(len(merged), 50)
+        probe_bytes = len(
+            merged.head(probe_rows).to_csv(index=False).encode("utf-8", errors="replace")
+        )
+        avg_row_bytes = probe_bytes / max(probe_rows, 1)
+        est_total_bytes = int(avg_row_bytes * len(merged))
+
+        if est_total_bytes <= self._CHUNK_BYTES_THRESHOLD:
+            merged.to_csv(output_file, index=False)
+            print(f"Saved: {output_file} ({len(merged)} rows, ~{est_total_bytes/1e6:.1f} MB)")
+            return output_file
+
+        # Chunked write
+        rows_per_chunk = max(1, int(self._CHUNK_BYTES_THRESHOLD / max(avg_row_bytes, 1)))
+        part_files: list[str] = []
+        for i, start in enumerate(range(0, len(merged), rows_per_chunk)):
+            part = merged.iloc[start:start + rows_per_chunk]
+            part_path = self.output_dir / f"{asset_name}{suffix}.part{i:03d}.csv"
+            part.to_csv(part_path, index=False)
+            part_files.append(part_path.name)
+            print(f"Saved: {part_path} ({len(part)} rows)")
+
+        manifest_path = self.output_dir / f"{asset_name}{suffix}.manifest.json"
+        manifest = {
+            "asset_class": asset_name,
+            "parts": part_files,
+            "rows": int(len(merged)),
+            "rows_per_chunk": rows_per_chunk,
+            "chunk_bytes_threshold": self._CHUNK_BYTES_THRESHOLD,
+        }
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        print(f"Saved manifest: {manifest_path} ({len(part_files)} parts)")
+        return manifest_path
+
+    def _clean_existing_outputs(self, asset_name: str, suffix: str = "") -> None:
+        """Remove stale single-file / chunked outputs before rewriting."""
+        single = self.output_dir / f"{asset_name}{suffix}.csv"
+        if single.exists():
+            single.unlink()
+        for part in self.output_dir.glob(f"{asset_name}{suffix}.part*.csv"):
+            part.unlink()
+        manifest = self.output_dir / f"{asset_name}{suffix}.manifest.json"
+        if manifest.exists():
+            manifest.unlink()

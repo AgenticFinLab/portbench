@@ -5,7 +5,7 @@ from datetime import datetime
 
 import pandas as pd
 
-from .base import AssetClass, AssetPreprocessor
+from .base import AssetClass, AssetPreprocessor, _truncate_records_json, truncate_text_for_source
 
 
 class CryptocurrencyPreprocessor(AssetPreprocessor):
@@ -84,7 +84,7 @@ class CryptocurrencyPreprocessor(AssetPreprocessor):
                 result["date"] = pd.to_datetime(df[date_col], errors="coerce")
                 result = result.dropna(subset=["date"])
 
-                for col in numeric_cols[:5]:
+                for col in numeric_cols[:30]:
                     result[f"kaggle_{dataset_name}_{col}"] = df[col].values[
                         : len(result)
                     ]
@@ -152,7 +152,12 @@ class CryptocurrencyPreprocessor(AssetPreprocessor):
                     for col in text_cols:
                         text = str(row.get(col, ""))
                         if text and len(text) > 5 and text != "nan":
-                            texts.append(self.text_processor.clean_text(text)[:1000])
+                            texts.append(
+                                truncate_text_for_source(
+                                    self.text_processor.clean_text(text),
+                                    "kaggle_crypto",
+                                )
+                            )
 
                     if texts:
                         all_texts.append(
@@ -174,8 +179,6 @@ class CryptocurrencyPreprocessor(AssetPreprocessor):
             text_df.groupby("date").apply(lambda x: x.to_dict("records")).reset_index()
         )
         aggregated.columns = ["date", "text_json"]
-        aggregated["text_json"] = aggregated["text_json"].apply(
-            lambda x: json.dumps(x, ensure_ascii=False)[:10000]
-        )
+        aggregated["text_json"] = aggregated["text_json"].apply(_truncate_records_json)
 
         return aggregated

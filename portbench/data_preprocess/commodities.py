@@ -79,7 +79,7 @@ class CommoditiesPreprocessor(AssetPreprocessor):
 
                 # Add numeric columns
                 numeric_cols = df.select_dtypes(include=["float64", "int64"]).columns
-                for col in numeric_cols[:5]:  # Limit columns
+                for col in numeric_cols[:30]:  # Cap per-dataset column count
                     result[f"{dataset_name}_{col}"] = df[col].values[: len(result)]
 
                 result = self.numeric_processor.align_to_dates(
