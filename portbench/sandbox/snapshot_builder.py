@@ -60,21 +60,21 @@ class SnapshotBuilder:
         return_data: dict[str, pd.Series] = {}
 
         for asset in self.assets:
-            try:
-                prices = self.provider.get_price_series(
-                    asset, lookback_start, decision_date
-                )
-                prices = prices.iloc[-self.lookback_days :]
-                returns = self.provider.get_return_series(
-                    asset, lookback_start, decision_date
-                )
-                returns = returns.iloc[-self.lookback_days :]
-                if prices.empty or returns.empty:
-                    continue
-                price_data[asset] = prices
-                return_data[asset] = returns
-            except Exception:
+            prices = self.provider.get_price_series(
+                asset, lookback_start, decision_date
+            )
+            prices = prices.iloc[-self.lookback_days :]
+            returns = self.provider.get_return_series(
+                asset, lookback_start, decision_date
+            )
+            returns = returns.iloc[-self.lookback_days :]
+            if prices.empty or returns.empty:
+                # Asset has no observations in this window — skip silently is
+                # acceptable here because some assets (e.g., crypto pre-2014)
+                # legitimately don't exist yet on a given decision date.
                 continue
+            price_data[asset] = prices
+            return_data[asset] = returns
 
         # Correlation matrix from return data
         corr = None
@@ -87,13 +87,10 @@ class SnapshotBuilder:
 
         news_text = ""
         for asset in self.assets:
-            try:
-                txt = self.provider.get_news(asset, decision_date)
-                if txt:
-                    news_text = txt
-                    break
-            except Exception:
-                continue
+            txt = self.provider.get_news(asset, decision_date)
+            if txt:
+                news_text = txt
+                break
 
         return MarketSnapshot(
             decision_date=decision_date,

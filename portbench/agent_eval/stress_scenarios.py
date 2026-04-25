@@ -125,63 +125,57 @@ class ScenarioInjector:
 
         for d in dates:
             decision_date = d.date()
-            try:
-                price_data = {}
-                return_data = {}
-                end = decision_date
-                # Approximate start for lookback
-                from datetime import timedelta as td
+            price_data = {}
+            return_data = {}
+            end = decision_date
+            # Approximate start for lookback
+            from datetime import timedelta as td
 
-                start = end - td(days=int(self.lookback_days * 1.5))
+            start = end - td(days=int(self.lookback_days * 1.5))
 
-                for asset in self.assets:
-                    prices = self.provider.get_price_series(asset, start, end)
-                    prices = prices.iloc[-self.lookback_days :]
-                    returns = self.provider.get_return_series(asset, start, end)
-                    returns = returns.iloc[-self.lookback_days :]
-                    # Skip assets with no data in this window — otherwise an
-                    # empty snapshot looks valid and the pipeline scores it as
-                    # actual=gt=0 (false pass).
-                    if prices.empty or returns.empty:
-                        continue
-                    price_data[asset] = prices
-                    return_data[asset] = returns
-
-                # Require at least 2 assets with usable data to build a snapshot
-                if len(price_data) < 2:
+            for asset in self.assets:
+                prices = self.provider.get_price_series(asset, start, end)
+                prices = prices.iloc[-self.lookback_days :]
+                returns = self.provider.get_return_series(asset, start, end)
+                returns = returns.iloc[-self.lookback_days :]
+                # Skip assets with no data in this window — otherwise an
+                # empty snapshot looks valid and the pipeline scores it as
+                # actual=gt=0 (false pass).
+                if prices.empty or returns.empty:
                     continue
+                price_data[asset] = prices
+                return_data[asset] = returns
 
-                macro = self.provider.get_macro(end)
-                regime = self.provider.get_regime(end).value
+            # Require at least 2 assets with usable data to build a snapshot
+            if len(price_data) < 2:
+                continue
 
-                # Equal-weight initial portfolio
-                n = len(self.assets)
-                current_weights = {a: round(1.0 / n, 4) for a in self.assets}
+            macro = self.provider.get_macro(end)
+            regime = self.provider.get_regime(end).value
 
-                # Pull news text from the first asset that has any
-                news_text = ""
-                for asset in self.assets:
-                    try:
-                        txt = self.provider.get_news(asset, decision_date)
-                        if txt:
-                            news_text = txt
-                            break
-                    except Exception:
-                        continue
+            # Equal-weight initial portfolio
+            n = len(self.assets)
+            current_weights = {a: round(1.0 / n, 4) for a in self.assets}
 
-                snapshots.append(
-                    MarketSnapshot(
-                        decision_date=decision_date,
-                        price_data=price_data,
-                        return_data=return_data,
-                        macro_data=macro,
-                        current_weights=current_weights,
-                        market_regime=regime,
-                        news_text=news_text,
-                    )
+            # Pull news text from the first asset that has any
+            news_text = ""
+            for asset in self.assets:
+                txt = self.provider.get_news(asset, decision_date)
+                if txt:
+                    news_text = txt
+                    break
+
+            snapshots.append(
+                MarketSnapshot(
+                    decision_date=decision_date,
+                    price_data=price_data,
+                    return_data=return_data,
+                    macro_data=macro,
+                    current_weights=current_weights,
+                    market_regime=regime,
+                    news_text=news_text,
                 )
-            except Exception:
-                continue  # Skip dates where data is unavailable
+            )
 
         return snapshots
 

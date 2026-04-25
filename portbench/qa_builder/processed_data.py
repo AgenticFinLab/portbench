@@ -396,6 +396,8 @@ class ProcessedDataProvider(DataProvider):
                         break
 
         return meta
+
+    def has_text(self, asset: str, before_date: date) -> bool:
         """
         Fast check: does any text_json record exist for this asset class strictly
         before before_date? Used to rank candidate dates without invoking the

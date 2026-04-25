@@ -245,25 +245,25 @@ class BacktestEngine:
         if isinstance(self.strategy, BaselineStrategy):
             return self.strategy.allocate(snapshot)
 
-        n = len(self.assets)
-        return {a: round(1.0 / n, 6) for a in self.assets}
+        raise RuntimeError(
+            "Pipeline produced no usable target weights and strategy is not a "
+            "BaselineStrategy — refusing to fall back to equal-weight."
+        )
 
     def _get_daily_returns(self, d: date) -> dict[str, float]:
         """
         Fetch single-day returns for all assets.
 
         Returns a dict of asset → daily return for date d.
-        Returns empty dict if data is unavailable.
+        Assets with empty series are skipped (no observation that day);
+        any other error is propagated so data issues fail loudly.
         """
         from datetime import timedelta
 
         returns = {}
         prev = d - timedelta(days=7)  # wide window to ensure we get prev business day
         for asset in self.assets:
-            try:
-                series = self.provider.get_return_series(asset, prev, d)
-                if not series.empty:
-                    returns[asset] = float(series.iloc[-1])
-            except Exception:
-                continue
+            series = self.provider.get_return_series(asset, prev, d)
+            if not series.empty:
+                returns[asset] = float(series.iloc[-1])
         return returns

@@ -34,7 +34,8 @@ def build_default_pipeline(adapter: AgentAdapter = None, use_tools: bool = False
     Construct a default five-stage EvalPipeline with the given adapter.
 
     Args:
-        adapter:    AgentAdapter to use. Defaults to MockAgentAdapter if None.
+        adapter:    AgentAdapter to use. REQUIRED — passing None raises ValueError
+                    so production runs cannot silently fall back to MockAgentAdapter.
         use_tools:  If True, S1/S2/S3 stages call complete_with_tools() instead of
                     complete(), enabling multi-turn tool execution for cloud adapters.
 
@@ -42,7 +43,11 @@ def build_default_pipeline(adapter: AgentAdapter = None, use_tools: bool = False
         EvalPipeline ready to call run_episode().
     """
     if adapter is None:
-        adapter = MockAgentAdapter()
+        raise ValueError(
+            "build_default_pipeline requires an explicit AgentAdapter. "
+            "Mock fallback is disabled — pass MockAgentAdapter() yourself if "
+            "that is genuinely what you want."
+        )
 
     stages = [
         S1MarketInterpretation(adapter, use_tools=use_tools),

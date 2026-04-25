@@ -50,17 +50,100 @@ def _extract_json(text: str) -> dict:
     Extract the first JSON object from a model response string.
 
     Handles common LLM formatting patterns:
-      - Bare JSON:              {"key": "value"}
-      - Markdown code block:    ```json\n{...}\n```
-      - JSON embedded in prose: "Here is the answer: {...} Done."
+      - Bare JSON:                       {"key": "value"}
+      - Markdown code block:             ```json\n{...}\n```
+      - JSON embedded in prose:          "Here is the answer: {...} Done."
+      - Body without outer braces:       '"asset_views": {...}, "regime": "bull"'
+      - Multiple sibling JSON fragments: picks the first balanced object
     """
     # Strip markdown code fences
     text = re.sub(r"```(?:json)?\s*", "", text).strip().rstrip("`").strip()
-    # Find the first {...} block
+    if not text:
+        raise ValueError("Empty model response")
+
+    # Case A: text begins with `{` — find the FIRST balanced object
+    if text.lstrip().startswith("{"):
+        s = text.lstrip()
+        depth = 0
+        in_str = False
+        esc = False
+        start = None
+        for i, ch in enumerate(s):
+            if esc:
+                esc = False
+                continue
+            if ch == "\\":
+                esc = True
+                continue
+            if ch == '"':
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if ch == "{":
+                if depth == 0:
+                    start = i
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0 and start is not None:
+                    return json.loads(s[start : i + 1])
+        # Fall through to greedy regex
+        match = re.search(r"\{.*\}", s, re.DOTALL)
+        if match:
+            return json.loads(match.group())
+
+    # Case B: looks like the body without outer braces — wrap and try
+    if '"' in text and ":" in text:
+        try:
+            return json.loads("{" + text.rstrip(",").rstrip() + "}")
+        except json.JSONDecodeError:
+            pass
+
+    # Case C: greedy fallback
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if match:
         return json.loads(match.group())
     raise ValueError(f"No JSON object found in model response: {text[:200]}")
+
+
+_JSON_RETRY_LIMIT = 2  # additional attempts after the first parse failure
+
+
+def _call_with_json_retry(adapter, prompt: str, use_tools: bool, stage_name: str) -> dict:
+    """
+    Call the LLM and parse a JSON object, retrying on parse failure.
+
+    Only LLM-format errors trigger retries. Network / API / HTTP errors
+    propagate immediately so the experiment fails loudly.
+    """
+    last_err: Optional[Exception] = None
+    last_raw: str = ""
+    for attempt in range(_JSON_RETRY_LIMIT + 1):
+        if attempt == 0:
+            full_prompt = prompt
+        else:
+            full_prompt = (
+                prompt
+                + "\n\nIMPORTANT: Your previous response was not valid JSON "
+                  f"(error: {last_err}). Respond ONLY with a single valid JSON "
+                  "object enclosed in curly braces. No prose, no markdown fences, "
+                  "no trailing text."
+            )
+        if use_tools:
+            raw = adapter.complete_with_tools(full_prompt, get_tools())
+        else:
+            raw = adapter.complete(full_prompt)
+        last_raw = raw
+        try:
+            return _extract_json(raw), raw
+        except (json.JSONDecodeError, ValueError) as exc:
+            last_err = exc
+            continue
+    raise RuntimeError(
+        f"{stage_name} JSON parse failed after {_JSON_RETRY_LIMIT + 1} attempts. "
+        f"Last error: {last_err}. Last raw output: {last_raw!r}"
+    )
 
 
 def _format_price_context(snapshot: MarketSnapshot, max_assets: int = 8) -> str:
@@ -231,12 +314,8 @@ Respond with ONLY a JSON object in this exact format:
 }}"""
 
         self._last_prompt = prompt
-        if self.use_tools:
-            raw = self.adapter.complete_with_tools(prompt, get_tools())
-        else:
-            raw = self.adapter.complete(prompt)
+        parsed, raw = _call_with_json_retry(self.adapter, prompt, self.use_tools, "S1")
         try:
-            parsed = _extract_json(raw)
             return S1Output(
                 asset_views={a: float(np.clip(parsed["asset_views"].get(a, 0.0), -1, 1))
                              for a in assets},
@@ -245,9 +324,9 @@ Respond with ONLY a JSON object in this exact format:
                 macro_summary=str(parsed.get("macro_summary", "")),
                 raw_llm_output=raw,
             )
-        except (json.JSONDecodeError, KeyError, ValueError) as exc:
+        except (KeyError, ValueError, TypeError) as exc:
             raise RuntimeError(
-                f"S1 LLM response parse failed: {exc}. Raw output: {raw!r}"
+                f"S1 parsed JSON missing required fields: {exc}. Parsed: {parsed!r}"
             ) from exc
 
     def score(self, actual: S1Output, ground_truth: S1Output) -> float:
@@ -352,12 +431,8 @@ Respond with ONLY a JSON object:
 }}"""
 
         self._last_prompt = prompt
-        if self.use_tools:
-            raw = self.adapter.complete_with_tools(prompt, get_tools())
-        else:
-            raw = self.adapter.complete(prompt)
+        parsed, raw = _call_with_json_retry(self.adapter, prompt, self.use_tools, "S2")
         try:
-            parsed = _extract_json(raw)
             valid_signals = {"buy", "hold", "sell"}
             signals = {
                 a: parsed["signals"].get(a, "hold")
@@ -374,9 +449,9 @@ Respond with ONLY a JSON object:
                 reasoning=str(parsed.get("reasoning", "")),
                 raw_llm_output=raw,
             )
-        except (json.JSONDecodeError, KeyError, ValueError) as exc:
+        except (KeyError, ValueError, TypeError) as exc:
             raise RuntimeError(
-                f"S2 LLM response parse failed: {exc}. Raw output: {raw!r}"
+                f"S2 parsed JSON missing required fields: {exc}. Parsed: {parsed!r}"
             ) from exc
 
     def score(self, actual: S2Output, ground_truth: S2Output) -> float:
@@ -486,12 +561,8 @@ Respond with ONLY a JSON object:
 The weights MUST sum to 1.0."""
 
         self._last_prompt = prompt
-        if self.use_tools:
-            raw = self.adapter.complete_with_tools(prompt, get_tools())
-        else:
-            raw = self.adapter.complete(prompt)
+        parsed, raw = _call_with_json_retry(self.adapter, prompt, self.use_tools, "S3")
         try:
-            parsed = _extract_json(raw)
             raw_weights = {a: float(parsed["weights"].get(a, 0.0)) for a in assets}
             # Clip negatives and renormalize to enforce constraints
             raw_weights = {a: max(0.0, w) for a, w in raw_weights.items()}
@@ -506,9 +577,9 @@ The weights MUST sum to 1.0."""
                 sharpe_estimate=float(parsed.get("sharpe_estimate", 0.0)),
                 raw_llm_output=raw,
             )
-        except (json.JSONDecodeError, KeyError, ValueError) as exc:
+        except (KeyError, ValueError, TypeError) as exc:
             raise RuntimeError(
-                f"S3 LLM response parse failed: {exc}. Raw output: {raw!r}"
+                f"S3 parsed JSON missing required fields: {exc}. Parsed: {parsed!r}"
             ) from exc
 
     def score(self, actual: S3Output, ground_truth: S3Output) -> float:
@@ -557,30 +628,26 @@ The weights MUST sum to 1.0."""
 
         Returns a score in [0, 1].
         """
-        try:
-            df = pd.DataFrame({a: s for a, s in snapshot.return_data.items() if not s.empty})
-            if df.shape[1] < 2 or len(df) < 10:
-                return 1.0  # Insufficient data, skip this component
+        df = pd.DataFrame({a: s for a, s in snapshot.return_data.items() if not s.empty})
+        if df.shape[1] < 2 or len(df) < 10:
+            return 1.0  # Insufficient data, skip this component
 
-            cov = df.cov() * 252  # Annualized covariance
-            assets = list(cov.columns)
+        cov = df.cov() * 252  # Annualized covariance
+        assets = list(cov.columns)
 
-            def port_var(w_dict):
-                w = np.array([w_dict.get(a, 0.0) for a in assets])
-                return float(w @ cov.values @ w)
+        def port_var(w_dict):
+            w = np.array([w_dict.get(a, 0.0) for a in assets])
+            return float(w @ cov.values @ w)
 
-            var_actual = port_var(actual_weights)
-            var_gt     = port_var(gt_weights)
+        var_actual = port_var(actual_weights)
+        var_gt     = port_var(gt_weights)
 
-            if var_gt <= 0:
-                return 1.0
+        if var_gt <= 0:
+            return 1.0
 
-            # Reward lower variance: score = 1 if actual ≤ gt, penalizes proportionally if higher
-            ratio = var_actual / var_gt
-            return float(np.clip(2.0 - ratio, 0.0, 1.0))
-
-        except Exception:
-            return 1.0   # Graceful degradation
+        # Reward lower variance: score = 1 if actual ≤ gt, penalizes proportionally if higher
+        ratio = var_actual / var_gt
+        return float(np.clip(2.0 - ratio, 0.0, 1.0))
 
 
 # ---------------------------------------------------------------------------
