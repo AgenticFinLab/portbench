@@ -9,12 +9,9 @@ yfinance
 kaggle
 fredapi
 
-# Visualization
-matplotlib
-
 # LLM agent interface
 litellm
-anthropic
+# anthropic
 openai
 
 # LLM evaluation
@@ -31,6 +28,9 @@ openai
 # Optional: data serialization
 # pyarrow
 # h5py
+
+# Visualization
+matplotlib
 
 # Optional: web scraping (SEC dynamic pages)
 # selenium
