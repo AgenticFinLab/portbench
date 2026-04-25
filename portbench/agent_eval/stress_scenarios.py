@@ -43,29 +43,21 @@ class StressScenario:
 
 
 # ---------------------------------------------------------------------------
-# Canonical PortBench stress scenarios (from CLAUDE.md / paper_draft.md)
+# Canonical PortBench stress scenarios
+# All three windows are fully covered by datasets/processed/ (2015-01-02 to 2025-12-31).
 # ---------------------------------------------------------------------------
 
 STRESS_SCENARIOS: list[StressScenario] = [
     StressScenario(
-        name="2008_global_financial_crisis",
-        start=date(2008, 9, 1),
-        end=date(2009, 3, 31),
+        name="2015_china_shock",
+        start=date(2015, 8, 1),
+        end=date(2016, 2, 29),
         description=(
-            "Global Financial Crisis triggered by Lehman Brothers collapse (2008-09-15). "
-            "S&P 500 fell ~57% peak-to-trough. Extreme cross-asset correlation breakdown, "
-            "credit market freeze, and massive drawdowns across all risky assets."
-        ),
-        min_pass_score=0.40,
-        # Fallback for mock data (origin 2015-01-01): China devaluation shock + oil crash
-        fallback_start=date(2015, 8, 1),
-        fallback_end=date(2016, 2, 29),
-        fallback_description=(
             "China currency devaluation shock (Aug 2015) + oil price collapse. "
             "S&P 500 fell ~12% in two weeks; broad cross-asset sell-off with "
-            "elevated VIX and credit spread widening. Used as mock-data proxy "
-            "for the 2008 GFC window."
+            "elevated VIX and credit spread widening."
         ),
+        min_pass_score=0.40,
     ),
     StressScenario(
         name="2020_covid_flash_crash",
