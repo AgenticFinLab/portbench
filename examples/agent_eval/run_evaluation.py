@@ -12,7 +12,7 @@ Usage:
     python examples/agent_eval/run_evaluation.py --stress-only
 
 Output:
-    outputs/eval_results/{model_name}/
+    outputs/evaluation_results/eval_results/{model_name}/
         per_stage_scores.json    — per-stage scores across all episodes
         ceps_scores.json         — CEPS metric with propagation penalty
         stress_test_results.json — pass/fail for each stress scenario
@@ -331,12 +331,12 @@ def run_evaluation(args):
         adapter = MockAgentAdapter(noise_level=args.noise, seed=args.seed)
 
     model_name = adapter.model_name
-    run_id = datetime.now().strftime("%Y%m%d_%H%M%S") + f"_{model_name}"
-    output_dir = Path(f"outputs/eval_results/{run_id}")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = Path(f"outputs/ceps/{model_name}/{timestamp}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"PortBench Evaluation — Model: {model_name}")
-    print(f"Run ID:  {run_id}")
+    print(f"Timestamp: {timestamp}")
     print("=" * 60)
 
     use_tools = getattr(args, "use_tools", False)
@@ -367,21 +367,20 @@ def run_evaluation(args):
         actual_data_provider = f"mock(seed={args.seed})"
         print(f"Data provider: MockDataProvider(seed={args.seed})")
 
-    # Enable interaction logging — use the same run_id so eval_results/ and eval_logs/ match
-    log_dir = Path("outputs/eval_logs")
+    log_dir = output_dir / "logs"
     pipeline.enable_logging(
         output_dir=str(log_dir),
         model_name=model_name,
-        run_id=run_id,
+        run_id=timestamp,
         config={
-            "run_id": run_id,
+            "run_id": timestamp,
             "n_episodes": args.n_episodes,
             "data_provider": actual_data_provider,
             "seed": args.seed,
             "use_tools": use_tools,
         },
     )
-    print(f"Interaction logging → {log_dir / run_id}/")
+    print(f"Interaction logging → {log_dir}/")
 
     # -----------------------------------------------------------------------
     # Phase 1: Stress tests (risk gate)
@@ -470,7 +469,7 @@ def run_evaluation(args):
     # Phase 3: Risk-first ranking record
     # -----------------------------------------------------------------------
     ranking_entry = {
-        "run_id": run_id,
+        "run_id": timestamp,
         "model_name": model_name,
         "risk_gate_passed": all_passed,
         "mean_ceps": ceps_result["mean_ceps"],

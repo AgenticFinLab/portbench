@@ -23,6 +23,7 @@ from .stages import (
     S5RiskMonitoring,
 )
 from .stress_scenarios import ScenarioInjector, StressScenario, STRESS_SCENARIOS
+from .investor_profiles import InvestorProfile, PROFILES, ProfileAlignmentScorer, ProfiledPipeline
 
 
 from .tools import ToolSpec, get_tools, dispatch_tool, BUILTIN_TOOLS
@@ -70,6 +71,8 @@ __all__ = [
     "S4ExecutionSimulation", "S5RiskMonitoring",
     # Stress testing
     "StressScenario", "ScenarioInjector", "STRESS_SCENARIOS",
+    # Investor profiles
+    "InvestorProfile", "PROFILES", "ProfileAlignmentScorer", "ProfiledPipeline",
     # Logging
     "EvalLogger", "EpisodeLog", "StageLog",
     # Tools

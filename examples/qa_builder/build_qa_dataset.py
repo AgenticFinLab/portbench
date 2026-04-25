@@ -44,7 +44,7 @@ from portbench.qa_builder.t7_regime_detection import T7RegimeDetection
 # Configuration
 # ---------------------------------------------------------------------------
 
-OUTPUT_DIR = Path("outputs/qa_dataset")
+OUTPUT_DIR = Path("datasets/qa_dataset")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 import pandas as pd

@@ -92,7 +92,7 @@ def load_one_sample_per_template(qa_dir: Path) -> dict[str, dict]:
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate QA dataset figures")
-    parser.add_argument("--qa-dir", default="outputs/qa_dataset",
+    parser.add_argument("--qa-dir", default="datasets/qa_dataset",
                         help="Directory containing all_pairs.jsonl and stats.json")
     parser.add_argument("--output-dir", default="figures/datasets",
                         help="Output directory for figures")
