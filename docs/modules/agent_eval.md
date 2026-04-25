@@ -4,7 +4,59 @@
 
 End-to-end evaluation of LLM agents across a five-stage portfolio management pipeline. The pipeline models the full investment decision process from market interpretation to risk monitoring, and quantifies cross-stage error propagation via the CEPS metric.
 
-## Architecture
+## Evaluation Architecture
+
+PortBench uses a two-tier evaluation structure:
+
+```
+Tier 1: QA Static Evaluation
+  Script:  examples/agent_eval/run_qa_eval.py
+  Input:   datasets/qa_dataset/test.jsonl
+  Output:  outputs/qa/{model}/{timestamp}/qa_results.json
+  Metric:  per-template accuracy (T1–T7), exact-match comparison
+  Purpose: Measures knowledge and financial reasoning without market simulation
+
+Tier 2: Sandbox × 3 Investor Profiles
+  Script:  examples/sandbox/run_backtest.py
+  Output:  outputs/sandbox/{model}/{timestamp}/{profile}/
+  For each profile (conservative / balanced / aggressive):
+    Phase A — Stress gate (3 historical crisis windows)
+      2015_china_shock:   2015-08-01 → 2016-02-29
+      2020_covid:         2020-02-01 → 2020-05-31
+      2022_crypto:        2022-05-01 → 2022-12-31
+      Pass condition:     max_drawdown ≤ profile.max_drawdown_tolerance
+                          (profile-sensitive: conservative=10%, balanced=20%, aggressive=35%)
+    Phase B — Normal market backtest (2024, only if Phase A passed)
+      Outputs per rebalance: CEPS score + profile alignment score + NAV
+      Final outputs:         Sharpe, CAGR, max_drawdown (realized PnL)
+  Aggregated: profile_comparison.json with adaptation_score = std(per-profile returns)
+
+Unified entry: examples/run_all_eval.py --eval qa sandbox
+```
+
+**Key design principles:**
+- CEPS is not a standalone evaluation; it is a per-step byproduct of the Sandbox rebalance loop
+- Profile constraints are injected into the LLM prompt context at every rebalance step (not post-scored on static outputs)
+- Stress thresholds are portfolio drawdown limits tied to each profile's `max_drawdown_tolerance`, not fixed CEPS cutoffs
+- All three stress scenarios use real data from `datasets/processed/` (2015-01-02 to 2025-12-31)
+
+## Stress Test Scenarios
+
+| Scenario | Period | Event |
+|----------|--------|-------|
+| `2015_china_shock` | Aug 2015 – Feb 2016 | China currency devaluation + oil price collapse |
+| `2020_covid_flash_crash` | Feb 2020 – May 2020 | COVID-19 pandemic shock, 34% drawdown in 33 days |
+| `2022_crypto_collapse` | May 2022 – Dec 2022 | Terra/LUNA + FTX collapse, Fed rate hike cycle |
+
+Pass condition per profile:
+
+| Profile | max_drawdown_tolerance |
+|---------|----------------------|
+| Conservative | 10% |
+| Balanced | 20% |
+| Aggressive | 35% |
+
+## Pipeline Architecture
 
 ```
 MarketSnapshot (includes correlation_matrix)
@@ -17,8 +69,9 @@ MarketSnapshot (includes correlation_matrix)
  S5: Risk Monitoring         ─── alerts     ──►
       │
       ▼
- EpisodeResult → CEPS score
+ EpisodeResult → CEPS score (collected as Sandbox per-step byproduct)
 ```
+
 
 ## MarketSnapshot
 
@@ -154,7 +207,7 @@ Every evaluation run can be fully persisted to disk for replay and analysis.
 ```python
 pipeline = build_default_pipeline(adapter)
 pipeline.enable_logging(
-    output_dir="outputs/eval_logs",
+    output_dir="outputs/evaluation_results/eval_logs",
     model_name="claude-opus-4-6",
     config={"dataset": "test_2024", "n_episodes": 50},
 )
@@ -169,7 +222,7 @@ print(f"Logs saved to: {log_dir}")
 ### Log Directory Structure
 
 ```
-outputs/eval_logs/{run_id}/
+outputs/evaluation_results/eval_logs/{run_id}/
 ├── run_meta.json          # Model name, timestamps, config
 ├── run_summary.json       # Total episodes, duration (written on close)
 ├── errors.jsonl           # Rolling log of stage-level errors
@@ -278,7 +331,7 @@ The `--data-provider` flag chooses between:
 
 `processed` requires `examples/data_collect/get_all.py` and `examples/data_preprocess/preprocess_all.py` to have been run. It also requires `datasets/processed/` to span the stress-test windows (2008/2020/2022); if it doesn't, those stress tests will return zero snapshots and fail the gate.
 
-Output: `outputs/eval_results/{model_name}/`
+Output: `outputs/evaluation_results/eval_results/{run_id}/`
 - `per_stage_scores.json` — per-episode and mean stage scores
 - `ceps_scores.json` — CEPS with propagation penalty breakdown
 - `stress_test_results.json` — per-scenario pass/fail

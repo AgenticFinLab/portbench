@@ -36,7 +36,7 @@ Reads real `datasets/processed/*.csv` files. Drop-in replacement for `MockDataPr
 | `val` | next 15% | Hyperparameter selection |
 | `test` | remaining 15% | Final benchmark evaluation |
 
-Splits are computed **dynamically** from the actual data timeline via `QAConfig.from_date_range()`, rather than being hardcoded. Boundaries snap to year-ends for clean cutoffs. The computed boundaries are saved to `outputs/qa_dataset/stats.json` under `_meta` for reproducibility.
+Splits are computed **dynamically** from the actual data timeline via `QAConfig.from_date_range()`, rather than being hardcoded. Boundaries snap to year-ends for clean cutoffs. The computed boundaries are saved to `datasets/qa_dataset/stats.json` under `_meta` for reproducibility.
 
 ```python
 from portbench.qa_builder.base import QAConfig
@@ -247,7 +247,7 @@ Requires `datasets/processed/` populated by `examples/data_preprocess/preprocess
 
 Output:
 ```
-outputs/qa_dataset/
+datasets/qa_dataset/
 ├── all_pairs.jsonl    # Complete dataset
 ├── train.jsonl
 ├── val.jsonl
