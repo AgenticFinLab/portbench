@@ -36,6 +36,12 @@ from .base import (
     StageID,
 )
 from .mock_agent import MockAgentAdapter
+from .prompts import (
+    build_s1_prompt,
+    build_s2_prompt,
+    build_s3_prompt,
+    build_format_correction_suffix,
+)
 from .tools import get_tools
 from ..metrics.risk_metrics import var, max_drawdown
 from ..metrics.base import MetricsConfig
@@ -123,13 +129,7 @@ def _call_with_json_retry(adapter, prompt: str, use_tools: bool, stage_name: str
         if attempt == 0:
             full_prompt = prompt
         else:
-            full_prompt = (
-                prompt
-                + "\n\nIMPORTANT: Your previous response was not valid JSON "
-                  f"(error: {last_err}). Respond ONLY with a single valid JSON "
-                  "object enclosed in curly braces. No prose, no markdown fences, "
-                  "no trailing text."
-            )
+            full_prompt = prompt + build_format_correction_suffix(str(last_err))
         if use_tools:
             raw = adapter.complete_with_tools(full_prompt, get_tools())
         else:
@@ -281,37 +281,15 @@ class S1MarketInterpretation(PipelineStage):
         context = _format_price_context(snapshot)
         macro_block = _format_macro_context(snapshot)
         corr_block = _format_correlation(snapshot)
-        news_block = (
-            f"\nRECENT NEWS / FILINGS:\n{snapshot.news_text[:3000]}\n"
-            if snapshot.news_text else ""
+        trailing_days = len(next(iter(snapshot.return_data.values()), pd.Series()))
+        prompt = build_s1_prompt(
+            snapshot=snapshot,
+            assets=assets,
+            price_context=context,
+            macro_block=macro_block,
+            corr_block=corr_block,
+            trailing_days=trailing_days,
         )
-        prompt = f"""You are a portfolio manager analyzing market conditions on {snapshot.decision_date}.
-
-MARKET DATA (trailing {len(next(iter(snapshot.return_data.values()), pd.Series()))} trading days):
-{context}
-
-{macro_block}
-
-{corr_block}
-
-Current market regime context: {snapshot.market_regime or "unknown"}
-{news_block}
-TASK: Interpret the market data and provide structured asset views.
-
-For each asset, assign a sentiment score in [-1.0, +1.0]:
-  +1.0 = strongly bullish (expect strong outperformance)
-   0.0 = neutral
-  -1.0 = strongly bearish (expect significant underperformance)
-
-Also identify the overall market regime: one of "bull", "bear", "sideways", "crisis".
-
-Respond with ONLY a JSON object in this exact format:
-{{
-  "asset_views": {{{", ".join(f'"{a}": <float -1 to 1>' for a in assets)}}},
-  "detected_regime": "<bull|bear|sideways|crisis>",
-  "confidence": <float 0 to 1>,
-  "macro_summary": "<one sentence summary of macro environment>"
-}}"""
 
         self._last_prompt = prompt
         parsed, raw = _call_with_json_retry(self.adapter, prompt, self.use_tools, "S1")
@@ -400,35 +378,7 @@ class S2SignalGeneration(PipelineStage):
         # Real LLM path
         # ----------------------------------------------------------------
         assets = list(s1.asset_views.keys())
-        views_str = "\n".join(f"  {a}: view={v:+.3f}" for a, v in s1.asset_views.items())
-        news_block = (
-            f"\nRecent news / filings:\n{snapshot.news_text}\n"
-            if snapshot.news_text else ""
-        )
-        prompt = f"""You are a portfolio manager on {snapshot.decision_date}.
-
-Stage 1 market interpretation produced these asset views (scale: -1=bearish, +1=bullish):
-{views_str}
-
-Detected market regime: {s1.detected_regime}
-Macro summary: {s1.macro_summary}
-{news_block}
-TASK: Convert each asset view into an actionable trading signal.
-
-Rules:
-  - view >  0.15: consider "buy"
-  - view < -0.15: consider "sell"
-  - otherwise:    consider "hold"
-
-Use your judgement to refine signals based on regime and macro context.
-Signal strength should reflect conviction (0.0 = low, 1.0 = high).
-
-Respond with ONLY a JSON object:
-{{
-  "signals": {{{", ".join(f'"{a}": "<buy|hold|sell>"' for a in assets)}}},
-  "strengths": {{{", ".join(f'"{a}": <float 0 to 1>' for a in assets)}}},
-  "reasoning": "<one sentence explaining key decisions>"
-}}"""
+        prompt = build_s2_prompt(snapshot=snapshot, s1=s1, assets=assets)
 
         self._last_prompt = prompt
         parsed, raw = _call_with_json_retry(self.adapter, prompt, self.use_tools, "S2")
@@ -524,41 +474,10 @@ class S3WeightOptimization(PipelineStage):
         # Real LLM path
         # ----------------------------------------------------------------
         assets = list(s2.signals.keys())
-        signals_str = "\n".join(
-            f"  {a}: signal={s2.signals[a]}, strength={s2.strengths.get(a, 0.5):.2f}"
-            for a in assets
-        )
-        current_w_str = ", ".join(
-            f"{a}={w:.3f}" for a, w in snapshot.current_weights.items()
-        )
         corr_block = _format_correlation(snapshot)
-        corr_section = f"\n{corr_block}\n" if corr_block else ""
-        prompt = f"""You are a portfolio manager on {snapshot.decision_date}.
-
-Stage 2 signals:
-{signals_str}
-
-Current portfolio weights: {current_w_str}
-Portfolio NAV: ${snapshot.portfolio_value:,.0f}
-Market regime: {snapshot.market_regime or "unknown"}
-{corr_section}
-TASK: Allocate portfolio weights based on the signals above.
-
-Constraints:
-  - All weights must be in [0.0, 1.0]
-  - Weights must sum to exactly 1.0
-  - "sell" signals should receive reduced weight (ideally 0.0)
-  - "buy" signals should receive increased weight
-  - Minimize unnecessary turnover from current weights
-
-Respond with ONLY a JSON object:
-{{
-  "weights": {{{", ".join(f'"{a}": <float 0 to 1>' for a in assets)}}},
-  "expected_return": <annualized expected return as decimal, e.g. 0.08>,
-  "expected_vol": <annualized volatility as decimal, e.g. 0.12>,
-  "sharpe_estimate": <estimated Sharpe ratio>
-}}
-The weights MUST sum to 1.0."""
+        prompt = build_s3_prompt(
+            snapshot=snapshot, s2=s2, assets=assets, corr_block=corr_block
+        )
 
         self._last_prompt = prompt
         parsed, raw = _call_with_json_retry(self.adapter, prompt, self.use_tools, "S3")
