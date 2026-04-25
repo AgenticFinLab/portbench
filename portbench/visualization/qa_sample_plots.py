@@ -38,10 +38,10 @@ _TEMPLATE_NAMES = {
 }
 
 _COMPLEXITY_COLOR = {
-    1: "#3498db",
-    2: "#9b59b6",
-    3: "#e67e22",
-    4: "#e74c3c",
+    1: "#1e3d6e",   # darkest steel blue
+    2: "#4a6fa5",   # steel blue
+    3: "#7a9fc5",   # steel→ice midpoint
+    4: "#c0c0c0",   # silver
 }
 
 _COMPLEXITY_LABEL = {

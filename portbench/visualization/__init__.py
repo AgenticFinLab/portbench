@@ -6,6 +6,16 @@ from .ranking_plots import plot_risk_ranking
 from .dataset_plots import plot_dataset_overview, plot_regime_heatmap
 from .qa_sample_plots import plot_qa_sample_cards, plot_single_card
 from .regime_plots import plot_regime_distributions, build_regime_data_from_mock
+from .sandbox_plots import (
+    plot_sandbox_nav,
+    plot_sandbox_metrics,
+    plot_ceps_vs_pnl,
+    plot_stress_drawdown,
+    plot_profile_nav,
+    load_sandbox_results,
+    load_sandbox_results_full,
+)
+from .profile_plots import plot_profile_alignment, plot_profile_radar
 from .style import apply_paper_style, save_figure
 
 __all__ = [
@@ -20,6 +30,18 @@ __all__ = [
     "plot_single_card",
     "plot_regime_distributions",
     "build_regime_data_from_mock",
+    # Sandbox
+    "plot_sandbox_nav",
+    "plot_sandbox_metrics",
+    "plot_ceps_vs_pnl",
+    "plot_stress_drawdown",
+    "plot_profile_nav",
+    "load_sandbox_results",
+    "load_sandbox_results_full",
+    # Investor profiles
+    "plot_profile_alignment",
+    "plot_profile_radar",
+    # Shared
     "apply_paper_style",
     "save_figure",
 ]

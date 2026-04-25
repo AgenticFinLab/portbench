@@ -16,6 +16,10 @@ from matplotlib.figure import Figure
 
 from .style import apply_paper_style, REGIME_COLORS, MODEL_PALETTE, STAGE_COLORS
 
+# Arctic Frost source values used directly for split encoding
+_AF1 = "#4a6fa5"   # steel blue
+_AF2 = "#d4e4f7"   # ice blue
+_AF3 = "#c0c0c0"   # silver
 
 _TEMPLATE_FULL = {
     "T1": "T1: Return\nPrediction",
@@ -29,7 +33,7 @@ _TEMPLATE_FULL = {
 _TEMPLATE_IDS  = ["T1", "T2", "T3", "T4", "T5", "T6", "T7"]
 _SPLITS        = ["train", "val", "test"]
 _REGIMES       = ["sideways", "bull", "bear"]
-_SPLIT_COLORS  = ["#2c7bb6", "#fdae61", "#1a9641"]
+_SPLIT_COLORS  = ["#1e3d6e", _AF1, _AF2]   # dark→mid→light for train/val/test
 _COMPLEXITY    = {"T1": 1, "T2": 1, "T3": 1, "T4": 2, "T5": 3, "T6": 3, "T7": 4}
 _COMPLEXITY_LABEL = {1: "L1 Single-asset", 2: "L2 Pairwise",
                      3: "L3 Multi-asset",  4: "L4 Full portfolio"}
@@ -143,7 +147,7 @@ def plot_dataset_overview(
     # ----------------------------------------------------------------
     ax = axes[2, 0]
     pct_text = [stats[t]["text"]["pct_with_text"] for t in templates]
-    color_pct = "#2c7bb6"
+    color_pct = _AF1
     bars = ax.bar(templates, pct_text, color=color_pct, alpha=0.80, label="% with news/filing")
     ax.set_ylabel("% Samples with News / Filing Text", color=color_pct)
     ax.set_ylim(0, 115)
@@ -156,13 +160,13 @@ def plot_dataset_overview(
     ax2 = ax.twinx()
     ax2.spines["right"].set_visible(True)
     avg_chars = [stats[t]["text"]["avg_chars"] for t in templates]
-    ax2.plot(templates, avg_chars, "o--", color="#e67e22", linewidth=1.8,
+    ax2.plot(templates, avg_chars, "o--", color="#1e3d6e", linewidth=1.8,
              markersize=5, label="Avg context length (chars)")
-    ax2.set_ylabel("Avg Context Length (chars)", color="#e67e22")
-    ax2.tick_params(axis="y", labelcolor="#e67e22")
+    ax2.set_ylabel("Avg Context Length (chars)", color="#1e3d6e")
+    ax2.tick_params(axis="y", labelcolor="#1e3d6e")
 
     lines1 = [mpatches.Patch(color=color_pct, label="% with news")]
-    lines2 = [plt.Line2D([0], [0], color="#e67e22", marker="o", linestyle="--", label="Avg chars")]
+    lines2 = [plt.Line2D([0], [0], color="#1e3d6e", marker="o", linestyle="--", label="Avg chars")]
     ax.legend(handles=lines1 + lines2, fontsize=8, loc="upper left")
     ax.set_title("(e) Text Richness per Template", fontsize=10)
 
