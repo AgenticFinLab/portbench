@@ -146,10 +146,26 @@ Available tools:
 
 ### 6. Sandbox Environment
 
-The evaluation environment is built on top of **MarS** (ICLR 2025), a generative market simulation engine that models order flow as token sequences using a Large Market Model. MarS is extended to support:
+PortBench includes a **lightweight stateful backtest sandbox** (`portbench/sandbox/`) that closes the loop between LLM decisions and realized portfolio outcomes. It is the third and highest-level evaluation mechanism, complementing the QA dataset and the CEPS static pipeline.
 
-- Multi-asset joint simulation across all six asset classes
-- Stress scenario injection (historical events + synthetic shocks)
-- Market state labeling for per-state performance decomposition
+| Mechanism | Measures | Stateful |
+|-----------|---------|---------|
+| QA Dataset | Knowledge and reasoning accuracy | No |
+| CEPS Pipeline | Per-stage decision quality (S1–S5) | No |
+| **Sandbox** | **Realized PnL in a continuous simulation** | **Yes** |
 
-Interface conventions follow **FinRL-Meta** (NeurIPS 2022).
+**Architecture**: `BacktestEngine` drives a `PortfolioState` through historical dates, calling `SnapshotBuilder` to construct each `MarketSnapshot` with real portfolio state (NAV, drifted weights), then routing through either the full S1→S5 `EvalPipeline` (LLM agents) or `BaselineStrategy.allocate()` (non-LLM baselines). Transaction costs (10 bps slippage + 5 bps commission) mirror the S4 execution model.
+
+**Output metrics** (computed via `portbench/metrics/`): Total Return, CAGR, Sharpe, Sortino, Max Drawdown, Calmar, Volatility, Turnover.
+
+```bash
+# LLM agent sandbox evaluation
+python examples/sandbox/run_backtest.py --model qwen:qwen-plus --rebalance monthly
+
+# Baseline comparison (no API)
+python examples/sandbox/run_backtest.py --baseline equal_weight --no-pipeline
+```
+
+The sandbox is designed to validate whether CEPS scores correlate with actual PnL — a key claim of the risk-first evaluation paradigm.
+
+**Future integration**: A MarS-based sandbox (ICLR 2025) is planned as a follow-on contribution, extending the current replay-based simulation to a generative order-flow environment with true market impact modeling across all six asset classes.
