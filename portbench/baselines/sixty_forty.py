@@ -21,7 +21,7 @@ from .base import BaselineStrategy
 
 # Default asset-class membership heuristics (substring matching on ticker/name)
 _EQUITY_KEYWORDS = {"SPY", "QQQ", "IWM", "VTI", "EEM", "ACWI", "equity", "stock"}
-_BOND_KEYWORDS   = {"AGG", "TLT", "IEF", "BIL", "LQD", "HYG", "bond", "treasury"}
+_BOND_KEYWORDS = {"AGG", "TLT", "IEF", "BIL", "LQD", "HYG", "bond", "treasury"}
 _COMMODITY_KEYWORDS = {"GLD", "USO", "DJP", "commodity", "gold", "oil"}
 _REALESTATE_KEYWORDS = {"VNQ", "IYR", "REIT", "real_estate", "realestate"}
 _CRYPTO_KEYWORDS = {"BTC", "ETH", "crypto", "bitcoin"}
@@ -63,9 +63,9 @@ class SixtyFortyBaseline(BaselineStrategy):
         include_alternatives: bool = False,
         alt_fraction: float = 0.10,
     ):
-        assert abs(equity_fraction + bond_fraction - 1.0) < 1e-6 or include_alternatives, (
-            "equity_fraction + bond_fraction must equal 1.0 when include_alternatives=False"
-        )
+        assert (
+            abs(equity_fraction + bond_fraction - 1.0) < 1e-6 or include_alternatives
+        ), "equity_fraction + bond_fraction must equal 1.0 when include_alternatives=False"
         self.equity_fraction = equity_fraction
         self.bond_fraction = bond_fraction
         self.include_alternatives = include_alternatives

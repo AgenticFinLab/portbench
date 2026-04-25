@@ -28,7 +28,7 @@ Usage (manual):
 import json
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, date
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -38,6 +38,7 @@ from .base import EpisodeResult, StageID
 # ---------------------------------------------------------------------------
 # Per-stage interaction record
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class StageLog:
@@ -56,6 +57,7 @@ class StageLog:
         error:          Error message if the stage failed, else empty string.
         timestamp:      ISO-format timestamp when this stage was called.
     """
+
     stage_id: str
     decision_date: str
     prompt: str = ""
@@ -82,6 +84,7 @@ class EpisodeLog:
         duration_ms:   Total wall-clock time for the episode in milliseconds.
         timestamp:     ISO-format episode start time.
     """
+
     episode_id: str
     decision_date: str
     model_name: str
@@ -94,6 +97,7 @@ class EpisodeLog:
 # ---------------------------------------------------------------------------
 # Logger class
 # ---------------------------------------------------------------------------
+
 
 class EvalLogger:
     """
@@ -117,7 +121,9 @@ class EvalLogger:
         model_name: str = "unknown",
         config: Optional[dict] = None,
     ):
-        self.run_id = run_id or datetime.now().strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:6]
+        self.run_id = (
+            run_id or datetime.now().strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:6]
+        )
         self.model_name = model_name
         self.output_dir = Path(output_dir) / self.run_id
         self.episodes_dir = self.output_dir / "episodes"
@@ -176,17 +182,19 @@ class EvalLogger:
             actual = result.stage_outputs.get(sid)
             gt = result.gt_outputs.get(sid)
 
-            stage_logs.append(StageLog(
-                stage_id=sid.value,
-                decision_date=str(result.decision_date),
-                prompt=prompts.get(sid, ""),
-                raw_response=raw_responses.get(sid, ""),
-                parsed_output=self._to_dict(actual),
-                ground_truth=self._to_dict(gt),
-                score=result.stage_scores.get(sid, 0.0),
-                latency_ms=latencies_ms.get(sid, 0.0) if latencies_ms else 0.0,
-                error=result.errors.get(sid, ""),
-            ))
+            stage_logs.append(
+                StageLog(
+                    stage_id=sid.value,
+                    decision_date=str(result.decision_date),
+                    prompt=prompts.get(sid, ""),
+                    raw_response=raw_responses.get(sid, ""),
+                    parsed_output=self._to_dict(actual),
+                    ground_truth=self._to_dict(gt),
+                    score=result.stage_scores.get(sid, 0.0),
+                    latency_ms=latencies_ms.get(sid, 0.0) if latencies_ms else 0.0,
+                    error=result.errors.get(sid, ""),
+                )
+            )
 
         episode_log = EpisodeLog(
             episode_id=episode_id,

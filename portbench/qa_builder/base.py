@@ -30,8 +30,10 @@ import pandas as pd
 # Enumerations
 # ---------------------------------------------------------------------------
 
+
 class MarketRegime(Enum):
     """Market regime labels used for stratifying the QA dataset."""
+
     BULL = "bull"
     BEAR = "bear"
     SIDEWAYS = "sideways"
@@ -40,9 +42,10 @@ class MarketRegime(Enum):
 
 class Split(Enum):
     """Train / validation / test split."""
-    TRAIN = "train"       # 2015-01-01 – 2022-12-31
-    VAL = "val"           # 2023-01-01 – 2023-12-31
-    TEST = "test"         # 2024-01-01 – 2025-12-31
+
+    TRAIN = "train"  # 2015-01-01 – 2022-12-31
+    VAL = "val"  # 2023-01-01 – 2023-12-31
+    TEST = "test"  # 2024-01-01 – 2025-12-31
 
 
 class ComplexityLevel(Enum):
@@ -53,6 +56,7 @@ class ComplexityLevel(Enum):
       3 = multi-asset   (T5, T6)
       4 = full portfolio with regime detection (T7)
     """
+
     LEVEL_1 = 1
     LEVEL_2 = 2
     LEVEL_3 = 3
@@ -62,6 +66,7 @@ class ComplexityLevel(Enum):
 # ---------------------------------------------------------------------------
 # Context window
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ContextWindow:
@@ -87,12 +92,12 @@ class ContextWindow:
 
     decision_date: date
     assets: list[str]
-    price_history: dict[str, pd.Series]       # asset -> close price series
-    returns_history: dict[str, pd.Series]     # asset -> return series
+    price_history: dict[str, pd.Series]  # asset -> close price series
+    returns_history: dict[str, pd.Series]  # asset -> return series
     macro_context: dict[str, float] = field(default_factory=dict)
     news_text: str = ""
     market_regime: Optional[MarketRegime] = None
-    correlation_matrix: Optional["pd.DataFrame"] = None   # assets × assets
+    correlation_matrix: Optional["pd.DataFrame"] = None  # assets × assets
 
     def compute_correlation(self) -> "pd.DataFrame":
         """
@@ -131,6 +136,7 @@ class ContextWindow:
 # ---------------------------------------------------------------------------
 # QA pair
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class QAPair:
@@ -193,6 +199,7 @@ class QAPair:
 # Configuration
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class QAConfig:
     """
@@ -213,17 +220,17 @@ class QAConfig:
         total date range (rounded to whole calendar years at year boundaries).
     """
 
-    lookback_days: int = 60               # ~3 months of trading history
-    horizon_days: int = 21                # ~1 month forward horizon
-    samples_per_template: int = 100       # Per split per template
+    lookback_days: int = 60  # ~3 months of trading history
+    horizon_days: int = 21  # ~1 month forward horizon
+    samples_per_template: int = 100  # Per split per template
     random_seed: int = 42
 
     train_start: str = "2015-01-01"
-    train_end:   str = "2022-12-31"
-    val_start:   str = "2023-01-01"
-    val_end:     str = "2023-12-31"
-    test_start:  str = "2024-01-01"
-    test_end:    str = "2025-12-31"
+    train_end: str = "2022-12-31"
+    val_start: str = "2023-01-01"
+    val_end: str = "2023-12-31"
+    test_start: str = "2024-01-01"
+    test_end: str = "2025-12-31"
 
     @classmethod
     def from_date_range(
@@ -260,6 +267,7 @@ class QAConfig:
             config = QAConfig.from_date_range(date(2010, 1, 1), date(2025, 12, 31))
         """
         import math
+
         total_days = (data_end - data_start).days
         if total_days < 365 * 3:
             raise ValueError(
@@ -268,7 +276,9 @@ class QAConfig:
             )
 
         train_end_raw = data_start + timedelta(days=int(total_days * train_frac))
-        val_end_raw   = data_start + timedelta(days=int(total_days * (train_frac + val_frac)))
+        val_end_raw = data_start + timedelta(
+            days=int(total_days * (train_frac + val_frac))
+        )
 
         # Snap to year boundaries (first day of the following year) for clean cutoffs
         def snap_year_end(d: date) -> date:
@@ -277,11 +287,11 @@ class QAConfig:
         def snap_year_start(d: date) -> date:
             return date(d.year + 1, 1, 1)
 
-        train_end   = snap_year_end(train_end_raw)
-        val_start   = snap_year_start(train_end_raw)
-        val_end     = snap_year_end(val_end_raw)
-        test_start  = snap_year_start(val_end_raw)
-        test_end    = data_end
+        train_end = snap_year_end(train_end_raw)
+        val_start = snap_year_start(train_end_raw)
+        val_end = snap_year_end(val_end_raw)
+        test_start = snap_year_start(val_end_raw)
+        test_end = data_end
 
         return cls(
             train_start=str(data_start),
@@ -316,6 +326,7 @@ class QAConfig:
 # ---------------------------------------------------------------------------
 # Data provider interface
 # ---------------------------------------------------------------------------
+
 
 class DataProvider(ABC):
     """
@@ -398,9 +409,7 @@ class DataProvider(ABC):
         """
         return pd.Series(dtype=float)
 
-    def get_ohlc_series(
-        self, asset: str, start: date, end: date
-    ) -> "pd.DataFrame":
+    def get_ohlc_series(self, asset: str, start: date, end: date) -> "pd.DataFrame":
         """
         Return daily OHLC DataFrame for asset in [start, end].
 
@@ -470,6 +479,7 @@ class DataProvider(ABC):
 # ---------------------------------------------------------------------------
 # Abstract QA builder
 # ---------------------------------------------------------------------------
+
 
 class QABuilder(ABC):
     """
@@ -553,7 +563,9 @@ class QABuilder(ABC):
                 continue  # Date outside all configured splits
             try:
                 assets = self._select_assets(d)
-                context = self.provider.build_context(d, assets, self.config.lookback_days)
+                context = self.provider.build_context(
+                    d, assets, self.config.lookback_days
+                )
                 pair = self.build_one(context, seq)
                 # Inject text metadata so stats.json can track text coverage
                 pair.metadata["has_text"] = bool(context.news_text)

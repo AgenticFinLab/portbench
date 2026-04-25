@@ -7,11 +7,15 @@ Complexity level 1.
 
 from datetime import date
 
-import numpy as np
 
 from .base import (
-    ComplexityLevel, ContextWindow, MarketRegime,
-    QABuilder, QAConfig, QAPair, Split,
+    ComplexityLevel,
+    ContextWindow,
+    MarketRegime,
+    QABuilder,
+    QAConfig,
+    QAPair,
+    Split,
 )
 from ..metrics.risk_metrics import max_drawdown, var
 from ..metrics.base import MetricsConfig
@@ -33,7 +37,9 @@ class T3PositionSizing(QABuilder):
          fraction of portfolio."
     """
 
-    def __init__(self, provider, config: QAConfig, max_drawdown_threshold: float = 0.10):
+    def __init__(
+        self, provider, config: QAConfig, max_drawdown_threshold: float = 0.10
+    ):
         """
         Args:
             max_drawdown_threshold: Maximum acceptable portfolio drawdown (e.g., 0.10 = 10%).
@@ -55,10 +61,15 @@ class T3PositionSizing(QABuilder):
 
     def _select_assets(self, decision_date: date) -> list[str]:
         import random
+
         text_classes = ["equities", "cryptocurrency"]
         other_classes = ["bonds", "commodities", "real_estate", "cash"]
         rng = random.Random(hash(decision_date) + 2)
-        cls = rng.choice(text_classes) if rng.random() < 0.8 else rng.choice(other_classes)
+        cls = (
+            rng.choice(text_classes)
+            if rng.random() < 0.8
+            else rng.choice(other_classes)
+        )
         candidates = self.provider.list_assets(cls)
         if not candidates:
             candidates = self.provider.list_assets("equities")
@@ -98,7 +109,11 @@ class T3PositionSizing(QABuilder):
             f"worst_day={returns.min():.4f}\n"
             f"Maximum acceptable portfolio drawdown: {pct_threshold}%\n"
             f"Market regime: {context.market_regime.value if context.market_regime else 'unknown'}\n"
-            + (f"Recent filing/news:\n{context.news_text}\n" if context.news_text else "")
+            + (
+                f"Recent filing/news:\n{context.news_text}\n"
+                if context.news_text
+                else ""
+            )
             + f"\nUsing the fixed-fractional position sizing method, determine the maximum "
             f"position size in {asset} as a fraction of total portfolio. "
             f"(Approximate worst-case single-period loss as |VaR(99%)|.)"

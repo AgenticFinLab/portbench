@@ -13,12 +13,18 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.figure import Figure
 
-from .style import apply_paper_style, STAGE_COLORS, STAGE_LABELS, STAGE_IDS, MODEL_PALETTE
+from .style import (
+    apply_paper_style,
+    STAGE_LABELS,
+    STAGE_IDS,
+    MODEL_PALETTE,
+)
 
 
 # ---------------------------------------------------------------------------
 # Figure 1 — CEPS Radar Chart
 # ---------------------------------------------------------------------------
+
 
 def plot_ceps_radar(
     results: dict[str, dict[str, float]],
@@ -61,8 +67,12 @@ def plot_ceps_radar(
         ax.fill(angles, values, color=color, alpha=0.15)
         legend_handles.append(mpatches.Patch(color=color, label=model_name))
 
-    ax.legend(handles=legend_handles, loc="upper right",
-              bbox_to_anchor=(1.35, 1.15), fontsize=8)
+    ax.legend(
+        handles=legend_handles,
+        loc="upper right",
+        bbox_to_anchor=(1.35, 1.15),
+        fontsize=8,
+    )
     ax.set_title(title, pad=15, fontsize=11, fontweight="bold")
     fig.tight_layout()
     return fig
@@ -71,6 +81,7 @@ def plot_ceps_radar(
 # ---------------------------------------------------------------------------
 # Figure 2 — CEPS Error Propagation Heatmap
 # ---------------------------------------------------------------------------
+
 
 def plot_ceps_heatmap(
     results: dict[str, dict[str, float]],
@@ -96,7 +107,13 @@ def plot_ceps_heatmap(
 
     model_names = list(results.keys())
     col_ids = STAGE_IDS.copy()
-    col_labels = ["S1\nInterpret.", "S2\nSignal", "S3\nOptim.", "S4\nExecute", "S5\nRisk"]
+    col_labels = [
+        "S1\nInterpret.",
+        "S2\nSignal",
+        "S3\nOptim.",
+        "S4\nExecute",
+        "S5\nRisk",
+    ]
 
     if ceps_totals:
         col_ids.append("CEPS")
@@ -125,8 +142,16 @@ def plot_ceps_heatmap(
         for c in range(len(col_ids)):
             val = data[r, c]
             text_color = "black" if 0.35 < val < 0.85 else "white"
-            ax.text(c, r, f"{val:.2f}", ha="center", va="center",
-                    fontsize=9, color=text_color, fontweight="bold")
+            ax.text(
+                c,
+                r,
+                f"{val:.2f}",
+                ha="center",
+                va="center",
+                fontsize=9,
+                color=text_color,
+                fontweight="bold",
+            )
 
     ax.set_xticks(range(len(col_ids)))
     ax.set_xticklabels(col_labels, fontsize=9)
@@ -144,6 +169,7 @@ def plot_ceps_heatmap(
 # ---------------------------------------------------------------------------
 # Figure 3 — CEPS Distribution Violin Plot
 # ---------------------------------------------------------------------------
+
 
 def plot_ceps_violin(
     episode_scores: dict[str, list[float]],
@@ -168,8 +194,13 @@ def plot_ceps_violin(
 
     fig, ax = plt.subplots(figsize=figsize)
 
-    parts = ax.violinplot(data, positions=range(len(model_names)),
-                          showmedians=True, showextrema=True, widths=0.7)
+    parts = ax.violinplot(
+        data,
+        positions=range(len(model_names)),
+        showmedians=True,
+        showextrema=True,
+        widths=0.7,
+    )
 
     for i, pc in enumerate(parts["bodies"]):
         pc.set_facecolor(MODEL_PALETTE[i % len(MODEL_PALETTE)])
@@ -183,15 +214,22 @@ def plot_ceps_violin(
     rng = np.random.default_rng(0)
     for i, scores in enumerate(data):
         jitter = rng.uniform(-0.12, 0.12, size=len(scores))
-        ax.scatter(np.full(len(scores), i) + jitter, scores,
-                   s=12, color=MODEL_PALETTE[i % len(MODEL_PALETTE)],
-                   alpha=0.5, zorder=3)
+        ax.scatter(
+            np.full(len(scores), i) + jitter,
+            scores,
+            s=12,
+            color=MODEL_PALETTE[i % len(MODEL_PALETTE)],
+            alpha=0.5,
+            zorder=3,
+        )
 
     ax.set_xticks(range(len(model_names)))
     ax.set_xticklabels(model_names, rotation=15, ha="right")
     ax.set_ylabel("CEPS Score")
     ax.set_ylim(0, 1.05)
-    ax.axhline(0.5, color="red", linestyle="--", linewidth=1, alpha=0.7, label="Pass threshold")
+    ax.axhline(
+        0.5, color="red", linestyle="--", linewidth=1, alpha=0.7, label="Pass threshold"
+    )
     ax.legend(fontsize=8)
     ax.set_title(title, fontsize=11, fontweight="bold")
     fig.tight_layout()

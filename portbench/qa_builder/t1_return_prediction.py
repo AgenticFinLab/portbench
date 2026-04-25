@@ -7,13 +7,16 @@ Complexity level 1 (single asset).
 
 import random
 from datetime import date, timedelta
-from typing import Optional
 
 import numpy as np
 
 from .base import (
-    ComplexityLevel, ContextWindow, DataProvider, MarketRegime,
-    QABuilder, QAConfig, QAPair, Split,
+    ComplexityLevel,
+    ContextWindow,
+    MarketRegime,
+    QABuilder,
+    QAPair,
+    Split,
 )
 
 
@@ -48,7 +51,11 @@ class T1ReturnPrediction(QABuilder):
         text_classes = ["equities", "cryptocurrency"]
         other_classes = ["bonds", "commodities", "real_estate", "cash"]
         rng = random.Random(hash(decision_date))
-        cls = rng.choice(text_classes) if rng.random() < 0.8 else rng.choice(other_classes)
+        cls = (
+            rng.choice(text_classes)
+            if rng.random() < 0.8
+            else rng.choice(other_classes)
+        )
         candidates = self.provider.list_assets(cls)
         if not candidates:
             candidates = self.provider.list_assets("equities")
@@ -67,8 +74,11 @@ class T1ReturnPrediction(QABuilder):
             raise ValueError(f"Insufficient future data for {asset} at {d}")
 
         # Use the horizon-th trading day after decision_date
-        future_return = float(future_prices.iloc[min(horizon, len(future_prices) - 1)]
-                              / future_prices.iloc[0] - 1)
+        future_return = float(
+            future_prices.iloc[min(horizon, len(future_prices) - 1)]
+            / future_prices.iloc[0]
+            - 1
+        )
 
         # Classify direction
         if future_return > 0.01:
@@ -80,8 +90,14 @@ class T1ReturnPrediction(QABuilder):
 
         # --- Build context summary ---
         prices = context.price_history[asset]
-        hist_return = float(prices.iloc[-1] / prices.iloc[0] - 1) if len(prices) > 1 else 0.0
-        vol = float(context.returns_history[asset].std() * np.sqrt(252)) if len(context.returns_history[asset]) > 1 else 0.0
+        hist_return = (
+            float(prices.iloc[-1] / prices.iloc[0] - 1) if len(prices) > 1 else 0.0
+        )
+        vol = (
+            float(context.returns_history[asset].std() * np.sqrt(252))
+            if len(context.returns_history[asset]) > 1
+            else 0.0
+        )
 
         context_summary = (
             f"{asset} over past {self.config.lookback_days} days: "
@@ -96,7 +112,11 @@ class T1ReturnPrediction(QABuilder):
             f"cumulative_return={hist_return:+.1%}, annualized_volatility={vol:.1%}\n"
             f"Macro context: {context.macro_context}\n"
             f"Market regime: {context.market_regime.value if context.market_regime else 'unknown'}\n"
-            + (f"Recent filing/news:\n{context.news_text}\n" if context.news_text else "")
+            + (
+                f"Recent filing/news:\n{context.news_text}\n"
+                if context.news_text
+                else ""
+            )
             + f"\nPredict whether the return of {asset} over the next {horizon} trading days "
             f"will be: positive (>+1%), negative (<-1%), or flat (within ±1%)."
         )

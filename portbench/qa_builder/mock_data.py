@@ -33,26 +33,31 @@ from .base import DataProvider, MarketRegime
 
 _ASSET_PARAMS: dict[str, dict] = {
     # Equities
-    "SPY":  {"mu": 0.10, "sigma": 0.18, "start_price": 300.0, "class": "equities"},
-    "QQQ":  {"mu": 0.12, "sigma": 0.22, "start_price": 250.0, "class": "equities"},
-    "EEM":  {"mu": 0.07, "sigma": 0.20, "start_price": 40.0,  "class": "equities"},
+    "SPY": {"mu": 0.10, "sigma": 0.18, "start_price": 300.0, "class": "equities"},
+    "QQQ": {"mu": 0.12, "sigma": 0.22, "start_price": 250.0, "class": "equities"},
+    "EEM": {"mu": 0.07, "sigma": 0.20, "start_price": 40.0, "class": "equities"},
     # Bonds
-    "TLT":  {"mu": 0.03, "sigma": 0.08, "start_price": 150.0, "class": "bonds"},
-    "IEF":  {"mu": 0.02, "sigma": 0.05, "start_price": 110.0, "class": "bonds"},
-    "LQD":  {"mu": 0.04, "sigma": 0.07, "start_price": 130.0, "class": "bonds"},
+    "TLT": {"mu": 0.03, "sigma": 0.08, "start_price": 150.0, "class": "bonds"},
+    "IEF": {"mu": 0.02, "sigma": 0.05, "start_price": 110.0, "class": "bonds"},
+    "LQD": {"mu": 0.04, "sigma": 0.07, "start_price": 130.0, "class": "bonds"},
     # Commodities
-    "GLD":  {"mu": 0.06, "sigma": 0.14, "start_price": 140.0, "class": "commodities"},
-    "USO":  {"mu": 0.04, "sigma": 0.30, "start_price": 60.0,  "class": "commodities"},
+    "GLD": {"mu": 0.06, "sigma": 0.14, "start_price": 140.0, "class": "commodities"},
+    "USO": {"mu": 0.04, "sigma": 0.30, "start_price": 60.0, "class": "commodities"},
     # Real Estate
-    "VNQ":  {"mu": 0.07, "sigma": 0.16, "start_price": 85.0,  "class": "real_estate"},
+    "VNQ": {"mu": 0.07, "sigma": 0.16, "start_price": 85.0, "class": "real_estate"},
     # Cryptocurrency
-    "BTC":  {"mu": 0.50, "sigma": 0.80, "start_price": 8000.0, "class": "cryptocurrency"},
-    "ETH":  {"mu": 0.45, "sigma": 0.90, "start_price": 200.0,  "class": "cryptocurrency"},
+    "BTC": {
+        "mu": 0.50,
+        "sigma": 0.80,
+        "start_price": 8000.0,
+        "class": "cryptocurrency",
+    },
+    "ETH": {"mu": 0.45, "sigma": 0.90, "start_price": 200.0, "class": "cryptocurrency"},
     # Cash
-    "BIL":  {"mu": 0.02, "sigma": 0.005, "start_price": 91.0, "class": "cash"},
+    "BIL": {"mu": 0.02, "sigma": 0.005, "start_price": 91.0, "class": "cash"},
 }
 
-_ORIGIN_DATE = date(2015, 1, 1)   # Simulation start date
+_ORIGIN_DATE = date(2015, 1, 1)  # Simulation start date
 
 
 class MockDataProvider(DataProvider):
@@ -154,7 +159,7 @@ class MockDataProvider(DataProvider):
             s0 = params["start_price"]
 
             # GBM: dS = S*(mu*dt + sigma*sqrt(dt)*dW)
-            drift = (mu - 0.5 * sigma ** 2) * dt
+            drift = (mu - 0.5 * sigma**2) * dt
             diffusion = sigma * np.sqrt(dt)
             increments = drift + diffusion * rng.standard_normal(n)
 

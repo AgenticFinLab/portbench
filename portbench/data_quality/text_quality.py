@@ -1,6 +1,5 @@
 """Text data quality checker for SEC filings and news documents."""
 
-import json
 import re
 from pathlib import Path
 from typing import Optional
@@ -10,7 +9,6 @@ import pandas as pd
 from .base import (
     DataQualityChecker,
     DatasetQualityReport,
-    QualityConfig,
     QualityLevel,
 )
 
@@ -153,9 +151,7 @@ class TextQualityChecker(DataQualityChecker):
 
         # Temporal coverage when date column is available
         if date_col in df.columns:
-            report.checks.append(
-                self._check_text_temporal_coverage(df, date_col)
-            )
+            report.checks.append(self._check_text_temporal_coverage(df, date_col))
 
         return report
 
@@ -265,9 +261,7 @@ class TextQualityChecker(DataQualityChecker):
             details={"duplicate_count": dupes, "unique_count": len(seen)},
         )
 
-    def _check_text_temporal_coverage(
-        self, df: pd.DataFrame, date_col: str
-    ) -> object:
+    def _check_text_temporal_coverage(self, df: pd.DataFrame, date_col: str) -> object:
         """Check whether text documents span train through test periods."""
         try:
             dates = pd.to_datetime(df[date_col], errors="coerce").dropna()

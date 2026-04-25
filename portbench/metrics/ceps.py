@@ -16,12 +16,12 @@ penalizes cascading errors more heavily than isolated ones.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 # ---------------------------------------------------------------------------
 # Stage score container
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class StageScore:
@@ -39,7 +39,7 @@ class StageScore:
 
     stage_id: str
     stage_name: str
-    score: float                              # 0 = total failure, 1 = perfect
+    score: float  # 0 = total failure, 1 = perfect
     ground_truth: object = None
     actual_output: object = None
     error_details: dict = field(default_factory=dict)
@@ -48,6 +48,7 @@ class StageScore:
 # ---------------------------------------------------------------------------
 # CEPS computation
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class CEPSResult:
@@ -111,8 +112,7 @@ class CEPS:
 
         # Cascade penalty: sum of drops between consecutive stages
         cascade_drops = sum(
-            max(scores[i] - scores[i + 1], 0.0)
-            for i in range(len(scores) - 1)
+            max(scores[i] - scores[i + 1], 0.0) for i in range(len(scores) - 1)
         )
         penalty = self.propagation_weight * cascade_drops
 
@@ -125,9 +125,7 @@ class CEPS:
             isolated_avg=round(isolated_avg, 4),
         )
 
-    def compute_batch(
-        self, episodes: list[list[StageScore]]
-    ) -> dict:
+    def compute_batch(self, episodes: list[list[StageScore]]) -> dict:
         """
         Compute CEPS over a batch of evaluation episodes and return summary stats.
 

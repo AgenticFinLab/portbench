@@ -65,7 +65,8 @@ class SmartFolioBaseline(BaselineStrategy):
 
         if use_real_model:
             try:
-                import smartfolio as sf   # noqa: F401
+                import smartfolio as sf  # noqa: F401
+
                 self._real_model = sf
             except ImportError as e:
                 raise ImportError(
@@ -114,7 +115,11 @@ class SmartFolioBaseline(BaselineStrategy):
         Combined score: convex combination controlled by `momentum_weight`.
         Long-only: negative momentum assets receive zero weight.
         """
-        assets = list(snapshot.return_data.keys()) if snapshot.return_data else list(snapshot.price_data.keys())
+        assets = (
+            list(snapshot.return_data.keys())
+            if snapshot.return_data
+            else list(snapshot.price_data.keys())
+        )
 
         scores: dict[str, float] = {}
         for asset in assets:
@@ -126,17 +131,27 @@ class SmartFolioBaseline(BaselineStrategy):
             r_clean = r.dropna()
 
             # Momentum: cumulative return over last momentum_window days
-            window_r = r_clean.iloc[-self.momentum_window:] if len(r_clean) >= self.momentum_window else r_clean
+            window_r = (
+                r_clean.iloc[-self.momentum_window :]
+                if len(r_clean) >= self.momentum_window
+                else r_clean
+            )
             momentum = float((1 + window_r).prod() - 1)
 
             # Volatility: annualized std over last vol_window days
-            window_v = r_clean.iloc[-self.vol_window:] if len(r_clean) >= self.vol_window else r_clean
+            window_v = (
+                r_clean.iloc[-self.vol_window :]
+                if len(r_clean) >= self.vol_window
+                else r_clean
+            )
             vol = max(float(window_v.std()) * np.sqrt(252), 1e-8)
             inv_vol = 1.0 / vol
 
             # Combined score (normalize inv_vol to same scale as momentum)
-            combined = self.momentum_weight * momentum + (1 - self.momentum_weight) * inv_vol
-            scores[asset] = max(combined, 0.0)   # Long-only
+            combined = (
+                self.momentum_weight * momentum + (1 - self.momentum_weight) * inv_vol
+            )
+            scores[asset] = max(combined, 0.0)  # Long-only
 
         # If all scores are zero (e.g., all momentum negative) → equal weight
         if sum(scores.values()) == 0:

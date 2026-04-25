@@ -14,9 +14,9 @@ import pandas as pd
 class QualityLevel(Enum):
     """Overall quality level for a dataset or check."""
 
-    PASS = "pass"        # Meets all thresholds
-    WARN = "warn"        # Minor issues, usable with caution
-    FAIL = "fail"        # Critical issues, not suitable for benchmark
+    PASS = "pass"  # Meets all thresholds
+    WARN = "warn"  # Minor issues, usable with caution
+    FAIL = "fail"  # Critical issues, not suitable for benchmark
 
 
 @dataclass
@@ -25,9 +25,9 @@ class CheckResult:
 
     check_name: str
     level: QualityLevel
-    value: Optional[float]          # Numeric measurement (e.g., coverage rate)
-    threshold: Optional[float]      # Pass threshold for reference
-    message: str                    # Human-readable explanation
+    value: Optional[float]  # Numeric measurement (e.g., coverage rate)
+    threshold: Optional[float]  # Pass threshold for reference
+    message: str  # Human-readable explanation
     details: dict = field(default_factory=dict)  # Extra structured data
 
 
@@ -36,7 +36,7 @@ class DatasetQualityReport:
     """Quality report for a single dataset (one asset class)."""
 
     asset_class: str
-    source: str                     # "yahoo", "fred", "kaggle", "sec", or "processed"
+    source: str  # "yahoo", "fred", "kaggle", "sec", or "processed"
     dataset_id: str
     assessed_at: str = field(default_factory=lambda: datetime.now().isoformat())
     checks: list[CheckResult] = field(default_factory=list)
@@ -101,6 +101,7 @@ class BenchmarkQualityReport:
 
     def save(self, path: str) -> None:
         """Save the full report to a JSON file."""
+
         def _serial(obj):
             if isinstance(obj, QualityLevel):
                 return obj.value
@@ -135,36 +136,38 @@ class QualityConfig:
     output_dir: str = "outputs/quality_reports"
 
     # Temporal coverage
-    min_coverage_rate: float = 0.95       # At least 95% of trading days must have data
-    max_ffill_gap_days: int = 5           # Gaps longer than this are flagged
+    min_coverage_rate: float = 0.95  # At least 95% of trading days must have data
+    max_ffill_gap_days: int = 5  # Gaps longer than this are flagged
 
     # Stress period completeness — must have data for these windows
     # Note: 2008_crisis (2008-09-01 to 2009-03-31) is excluded because the
     # benchmark data starts in 2015 and cannot cover that period.
-    stress_periods: list[tuple[str, str, str]] = field(default_factory=lambda: [
-        ("2020_covid",     "2020-02-01", "2020-05-31"),
-        ("2022_crypto",    "2022-05-01", "2022-12-31"),
-    ])
-    min_stress_coverage: float = 0.90    # 90% coverage required inside stress periods
+    stress_periods: list[tuple[str, str, str]] = field(
+        default_factory=lambda: [
+            ("2020_covid", "2020-02-01", "2020-05-31"),
+            ("2022_crypto", "2022-05-01", "2022-12-31"),
+        ]
+    )
+    min_stress_coverage: float = 0.90  # 90% coverage required inside stress periods
 
     # Train / val / test splits
     train_start: str = "2015-01-01"
-    train_end:   str = "2022-12-31"
-    val_start:   str = "2023-01-01"
-    val_end:     str = "2023-12-31"
-    test_start:  str = "2024-01-01"
-    test_end:    str = "2025-12-31"
+    train_end: str = "2022-12-31"
+    val_start: str = "2023-01-01"
+    val_end: str = "2023-12-31"
+    test_start: str = "2024-01-01"
+    test_end: str = "2025-12-31"
 
     # Statistical sanity for price data
     max_single_day_return: float = 0.50  # Flag daily returns > 50%
-    min_price: float = 0.0               # Prices must be positive
+    min_price: float = 0.0  # Prices must be positive
 
     # Cross-source consistency
     min_cross_source_corr: float = 0.95  # Overlapping columns should correlate > 0.95
 
     # Text data
-    min_avg_text_length: int = 50        # Average document must be > 50 chars
-    min_document_count: int = 10         # At least 10 documents per asset
+    min_avg_text_length: int = 50  # Average document must be > 50 chars
+    min_document_count: int = 10  # At least 10 documents per asset
 
 
 class DataQualityChecker(ABC):

@@ -1,9 +1,7 @@
 """SEC EDGAR dataset collector for PortBench."""
 
 import os
-import re
 import time
-import json
 import requests
 from pathlib import Path
 from typing import Optional

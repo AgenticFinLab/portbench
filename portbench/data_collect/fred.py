@@ -43,110 +43,242 @@ FRED_SERIES = [
     # -----------------------------------------------------------------------
     # Bonds — Nominal Treasury Yields (yield curve)
     # -----------------------------------------------------------------------
-    FREDSeries("DGS1MO", AssetClass.BONDS, "1-Month Treasury Constant Maturity Rate", "D"),
-    FREDSeries("DGS3MO", AssetClass.BONDS, "3-Month Treasury Constant Maturity Rate", "D"),
-    FREDSeries("DGS6MO", AssetClass.BONDS, "6-Month Treasury Constant Maturity Rate", "D"),
-    FREDSeries("DGS1",   AssetClass.BONDS, "1-Year Treasury Constant Maturity Rate", "D"),
-    FREDSeries("DGS2",   AssetClass.BONDS, "2-Year Treasury Constant Maturity Rate", "D"),
-    FREDSeries("DGS5",   AssetClass.BONDS, "5-Year Treasury Constant Maturity Rate", "D"),
-    FREDSeries("DGS10",  AssetClass.BONDS, "10-Year Treasury Constant Maturity Rate", "D"),
-    FREDSeries("DGS30",  AssetClass.BONDS, "30-Year Treasury Constant Maturity Rate", "D"),
-
+    FREDSeries(
+        "DGS1MO", AssetClass.BONDS, "1-Month Treasury Constant Maturity Rate", "D"
+    ),
+    FREDSeries(
+        "DGS3MO", AssetClass.BONDS, "3-Month Treasury Constant Maturity Rate", "D"
+    ),
+    FREDSeries(
+        "DGS6MO", AssetClass.BONDS, "6-Month Treasury Constant Maturity Rate", "D"
+    ),
+    FREDSeries("DGS1", AssetClass.BONDS, "1-Year Treasury Constant Maturity Rate", "D"),
+    FREDSeries("DGS2", AssetClass.BONDS, "2-Year Treasury Constant Maturity Rate", "D"),
+    FREDSeries("DGS5", AssetClass.BONDS, "5-Year Treasury Constant Maturity Rate", "D"),
+    FREDSeries(
+        "DGS10", AssetClass.BONDS, "10-Year Treasury Constant Maturity Rate", "D"
+    ),
+    FREDSeries(
+        "DGS30", AssetClass.BONDS, "30-Year Treasury Constant Maturity Rate", "D"
+    ),
     # Bonds — Yield Curve Spreads (recession / inversion signals)
-    FREDSeries("T10Y2Y",  AssetClass.BONDS, "10-Year Minus 2-Year Treasury Spread", "D"),
-    FREDSeries("T10Y3M",  AssetClass.BONDS, "10-Year Minus 3-Month Treasury Spread", "D"),
-    FREDSeries("T5YIFR",  AssetClass.BONDS, "5-Year, 5-Year Forward Inflation Expectation Rate", "D"),
-
+    FREDSeries("T10Y2Y", AssetClass.BONDS, "10-Year Minus 2-Year Treasury Spread", "D"),
+    FREDSeries(
+        "T10Y3M", AssetClass.BONDS, "10-Year Minus 3-Month Treasury Spread", "D"
+    ),
+    FREDSeries(
+        "T5YIFR",
+        AssetClass.BONDS,
+        "5-Year, 5-Year Forward Inflation Expectation Rate",
+        "D",
+    ),
     # Bonds — TIPS / Real Yields
-    FREDSeries("DFII5",  AssetClass.BONDS, "5-Year Treasury Inflation-Indexed Security (TIPS) Yield", "D"),
-    FREDSeries("DFII10", AssetClass.BONDS, "10-Year Treasury Inflation-Indexed Security (TIPS) Yield", "D"),
-    FREDSeries("DFII30", AssetClass.BONDS, "30-Year Treasury Inflation-Indexed Security (TIPS) Yield", "D"),
-
+    FREDSeries(
+        "DFII5",
+        AssetClass.BONDS,
+        "5-Year Treasury Inflation-Indexed Security (TIPS) Yield",
+        "D",
+    ),
+    FREDSeries(
+        "DFII10",
+        AssetClass.BONDS,
+        "10-Year Treasury Inflation-Indexed Security (TIPS) Yield",
+        "D",
+    ),
+    FREDSeries(
+        "DFII30",
+        AssetClass.BONDS,
+        "30-Year Treasury Inflation-Indexed Security (TIPS) Yield",
+        "D",
+    ),
     # Bonds — Breakeven Inflation (nominal minus real yield)
-    FREDSeries("T5YIE",  AssetClass.BONDS, "5-Year Breakeven Inflation Rate", "D"),
+    FREDSeries("T5YIE", AssetClass.BONDS, "5-Year Breakeven Inflation Rate", "D"),
     FREDSeries("T10YIE", AssetClass.BONDS, "10-Year Breakeven Inflation Rate", "D"),
-
     # Bonds — Credit Spreads
-    FREDSeries("BAMLH0A0HYM2",  AssetClass.BONDS, "ICE BofA US High Yield OAS", "D"),
-    FREDSeries("BAMLC0A0CM",    AssetClass.BONDS, "ICE BofA US Corporate Bond OAS", "D"),
-    FREDSeries("BAMLC0A4CBBB",  AssetClass.BONDS, "ICE BofA BBB US Corporate Bond OAS", "D"),
-    FREDSeries("TEDRATE",       AssetClass.BONDS, "TED Spread (LIBOR minus T-bill, funding stress)", "D"),
-
+    FREDSeries("BAMLH0A0HYM2", AssetClass.BONDS, "ICE BofA US High Yield OAS", "D"),
+    FREDSeries("BAMLC0A0CM", AssetClass.BONDS, "ICE BofA US Corporate Bond OAS", "D"),
+    FREDSeries(
+        "BAMLC0A4CBBB", AssetClass.BONDS, "ICE BofA BBB US Corporate Bond OAS", "D"
+    ),
+    FREDSeries(
+        "TEDRATE",
+        AssetClass.BONDS,
+        "TED Spread (LIBOR minus T-bill, funding stress)",
+        "D",
+    ),
     # Bonds — Mortgage Rates (real estate finance linkage)
-    FREDSeries("MORTGAGE30US", AssetClass.BONDS, "30-Year Fixed Rate Mortgage Average", "W"),
-    FREDSeries("MORTGAGE15US", AssetClass.BONDS, "15-Year Fixed Rate Mortgage Average", "W"),
-
+    FREDSeries(
+        "MORTGAGE30US", AssetClass.BONDS, "30-Year Fixed Rate Mortgage Average", "W"
+    ),
+    FREDSeries(
+        "MORTGAGE15US", AssetClass.BONDS, "15-Year Fixed Rate Mortgage Average", "W"
+    ),
     # -----------------------------------------------------------------------
     # Real Estate — Housing Prices
     # -----------------------------------------------------------------------
-    FREDSeries("CSUSHPINSA",  AssetClass.REAL_ESTATE, "S&P/Case-Shiller US National Home Price Index (NSA)", "M"),
-    FREDSeries("CSUSHPISA",   AssetClass.REAL_ESTATE, "S&P/Case-Shiller US National Home Price Index (SA)", "M"),
-    FREDSeries("SPCS20RSA",   AssetClass.REAL_ESTATE, "S&P/Case-Shiller 20-City Composite Home Price Index (SA)", "M"),
-    FREDSeries("MSPUS",       AssetClass.REAL_ESTATE, "Median Sales Price of Houses Sold", "Q"),
-
+    FREDSeries(
+        "CSUSHPINSA",
+        AssetClass.REAL_ESTATE,
+        "S&P/Case-Shiller US National Home Price Index (NSA)",
+        "M",
+    ),
+    FREDSeries(
+        "CSUSHPISA",
+        AssetClass.REAL_ESTATE,
+        "S&P/Case-Shiller US National Home Price Index (SA)",
+        "M",
+    ),
+    FREDSeries(
+        "SPCS20RSA",
+        AssetClass.REAL_ESTATE,
+        "S&P/Case-Shiller 20-City Composite Home Price Index (SA)",
+        "M",
+    ),
+    FREDSeries(
+        "MSPUS", AssetClass.REAL_ESTATE, "Median Sales Price of Houses Sold", "Q"
+    ),
     # Real Estate — Activity Indicators
-    FREDSeries("HOUST",   AssetClass.REAL_ESTATE, "Housing Starts: Total New Privately Owned", "M"),
-    FREDSeries("PERMIT",  AssetClass.REAL_ESTATE, "New Private Housing Units Authorized by Building Permits", "M"),
-    FREDSeries("HSN1F",   AssetClass.REAL_ESTATE, "New One-Family Houses Sold", "M"),
+    FREDSeries(
+        "HOUST",
+        AssetClass.REAL_ESTATE,
+        "Housing Starts: Total New Privately Owned",
+        "M",
+    ),
+    FREDSeries(
+        "PERMIT",
+        AssetClass.REAL_ESTATE,
+        "New Private Housing Units Authorized by Building Permits",
+        "M",
+    ),
+    FREDSeries("HSN1F", AssetClass.REAL_ESTATE, "New One-Family Houses Sold", "M"),
     FREDSeries("EXHOSLUSM495S", AssetClass.REAL_ESTATE, "Existing Home Sales", "M"),
-
     # Real Estate — Affordability & Inventory
-    FREDSeries("MSACSR",  AssetClass.REAL_ESTATE, "Monthly Supply of New Houses (months of supply)", "M"),
-
+    FREDSeries(
+        "MSACSR",
+        AssetClass.REAL_ESTATE,
+        "Monthly Supply of New Houses (months of supply)",
+        "M",
+    ),
     # -----------------------------------------------------------------------
     # Commodities — Price Indices
     # -----------------------------------------------------------------------
-    FREDSeries("DCOILWTICO",  AssetClass.COMMODITIES, "Crude Oil Prices: West Texas Intermediate (WTI)", "D"),
-    FREDSeries("DCOILBRENTEU",AssetClass.COMMODITIES, "Crude Oil Prices: Brent Europe", "D"),
-    FREDSeries("DHHNGSP",     AssetClass.COMMODITIES, "Henry Hub Natural Gas Spot Price", "D"),
+    FREDSeries(
+        "DCOILWTICO",
+        AssetClass.COMMODITIES,
+        "Crude Oil Prices: West Texas Intermediate (WTI)",
+        "D",
+    ),
+    FREDSeries(
+        "DCOILBRENTEU", AssetClass.COMMODITIES, "Crude Oil Prices: Brent Europe", "D"
+    ),
+    FREDSeries(
+        "DHHNGSP", AssetClass.COMMODITIES, "Henry Hub Natural Gas Spot Price", "D"
+    ),
     # GOLDPMGBD228NLBM removed (invalid FRED ID); gold covered by Yahoo GLD/IAU
-    FREDSeries("PWHEAMTUSDM", AssetClass.COMMODITIES, "Global Price of Wheat (USD per Metric Ton)", "M"),
-    FREDSeries("PMAIZMTUSDM", AssetClass.COMMODITIES, "Global Price of Maize/Corn (USD per Metric Ton)", "M"),
+    FREDSeries(
+        "PWHEAMTUSDM",
+        AssetClass.COMMODITIES,
+        "Global Price of Wheat (USD per Metric Ton)",
+        "M",
+    ),
+    FREDSeries(
+        "PMAIZMTUSDM",
+        AssetClass.COMMODITIES,
+        "Global Price of Maize/Corn (USD per Metric Ton)",
+        "M",
+    ),
     # PSOYBNUSDM removed (invalid FRED ID); soybeans covered by Yahoo SOYB
-    FREDSeries("PCOPPUSDM",   AssetClass.COMMODITIES, "Global Price of Copper (USD per Metric Ton)", "M"),
-
+    FREDSeries(
+        "PCOPPUSDM",
+        AssetClass.COMMODITIES,
+        "Global Price of Copper (USD per Metric Ton)",
+        "M",
+    ),
     # Commodities — Supply / Inventory
     # GOLDPMGBD228NLBM (invalid ID), PSOYBNUSDM (invalid), DPRODUCERAT (invalid) removed;
     # gold covered by Yahoo GLD/IAU, soybeans by Yahoo SOYB, crude production not available on FRED
-
     # -----------------------------------------------------------------------
     # Cash & Macro — Monetary Policy
     # -----------------------------------------------------------------------
-    FREDSeries("DFF",      AssetClass.CASH, "Federal Funds Effective Rate (Daily)", "D"),
-    FREDSeries("FEDFUNDS", AssetClass.CASH, "Federal Funds Effective Rate (Monthly)", "M"),
-    FREDSeries("SOFR",     AssetClass.CASH, "Secured Overnight Financing Rate (SOFR)", "D"),
-    FREDSeries("IOER",     AssetClass.CASH, "Interest Rate on Excess Reserves", "D"),
-    FREDSeries("WALCL",    AssetClass.CASH, "Fed Total Assets (Balance Sheet, USD millions)", "W"),
-
+    FREDSeries("DFF", AssetClass.CASH, "Federal Funds Effective Rate (Daily)", "D"),
+    FREDSeries(
+        "FEDFUNDS", AssetClass.CASH, "Federal Funds Effective Rate (Monthly)", "M"
+    ),
+    FREDSeries("SOFR", AssetClass.CASH, "Secured Overnight Financing Rate (SOFR)", "D"),
+    FREDSeries("IOER", AssetClass.CASH, "Interest Rate on Excess Reserves", "D"),
+    FREDSeries(
+        "WALCL", AssetClass.CASH, "Fed Total Assets (Balance Sheet, USD millions)", "W"
+    ),
     # Cash & Macro — Inflation
-    FREDSeries("CPIAUCSL",  AssetClass.CASH, "CPI: All Urban Consumers (All Items)", "M"),
-    FREDSeries("CPILFESL",  AssetClass.CASH, "CPI: Core (Excluding Food and Energy)", "M"),
-    FREDSeries("PCEPILFE",  AssetClass.CASH, "PCE: Core Price Index (Fed's Preferred Inflation Gauge)", "M"),
-    FREDSeries("PCEPI",     AssetClass.CASH, "PCE: All Items Price Index", "M"),
-
+    FREDSeries(
+        "CPIAUCSL", AssetClass.CASH, "CPI: All Urban Consumers (All Items)", "M"
+    ),
+    FREDSeries(
+        "CPILFESL", AssetClass.CASH, "CPI: Core (Excluding Food and Energy)", "M"
+    ),
+    FREDSeries(
+        "PCEPILFE",
+        AssetClass.CASH,
+        "PCE: Core Price Index (Fed's Preferred Inflation Gauge)",
+        "M",
+    ),
+    FREDSeries("PCEPI", AssetClass.CASH, "PCE: All Items Price Index", "M"),
     # Cash & Macro — Economic Growth
-    FREDSeries("GDP",    AssetClass.CASH, "Gross Domestic Product (Quarterly, USD billions)", "Q"),
-    FREDSeries("GDPC1",  AssetClass.CASH, "Real GDP (Chained 2017 USD)", "Q"),
+    FREDSeries(
+        "GDP", AssetClass.CASH, "Gross Domestic Product (Quarterly, USD billions)", "Q"
+    ),
+    FREDSeries("GDPC1", AssetClass.CASH, "Real GDP (Chained 2017 USD)", "Q"),
     FREDSeries("INDPRO", AssetClass.CASH, "Industrial Production Index", "M"),
-    FREDSeries("TCU",    AssetClass.CASH, "Capacity Utilization: Total Industry (%)", "M"),
-
+    FREDSeries("TCU", AssetClass.CASH, "Capacity Utilization: Total Industry (%)", "M"),
     # Cash & Macro — Labor Market
     FREDSeries("UNRATE", AssetClass.CASH, "Unemployment Rate (%)", "M"),
     FREDSeries("PAYEMS", AssetClass.CASH, "Total Nonfarm Payrolls (thousands)", "M"),
-    FREDSeries("ICSA",   AssetClass.CASH, "Initial Jobless Claims (weekly, leading indicator)", "W"),
-
+    FREDSeries(
+        "ICSA",
+        AssetClass.CASH,
+        "Initial Jobless Claims (weekly, leading indicator)",
+        "W",
+    ),
     # Cash & Macro — Sentiment & Leading Indicators
-    FREDSeries("UMCSENT",  AssetClass.CASH, "University of Michigan Consumer Sentiment Index", "M"),
-    FREDSeries("USSLIND",  AssetClass.CASH, "Leading Index for the United States (Conference Board)", "M"),
-    FREDSeries("BAMLH0A0HYM2EY", AssetClass.CASH, "ICE BofA US High Yield Effective Yield (risk appetite proxy)", "D"),
-
+    FREDSeries(
+        "UMCSENT",
+        AssetClass.CASH,
+        "University of Michigan Consumer Sentiment Index",
+        "M",
+    ),
+    FREDSeries(
+        "USSLIND",
+        AssetClass.CASH,
+        "Leading Index for the United States (Conference Board)",
+        "M",
+    ),
+    FREDSeries(
+        "BAMLH0A0HYM2EY",
+        AssetClass.CASH,
+        "ICE BofA US High Yield Effective Yield (risk appetite proxy)",
+        "D",
+    ),
     # Cash & Macro — Money Supply
-    FREDSeries("M2SL",  AssetClass.CASH, "M2 Money Supply (seasonally adjusted, USD billions)", "M"),
-    FREDSeries("M2V",   AssetClass.CASH, "Velocity of M2 Money Stock (GDP/M2)", "Q"),
-
+    FREDSeries(
+        "M2SL",
+        AssetClass.CASH,
+        "M2 Money Supply (seasonally adjusted, USD billions)",
+        "M",
+    ),
+    FREDSeries("M2V", AssetClass.CASH, "Velocity of M2 Money Stock (GDP/M2)", "Q"),
     # Cash & Macro — Credit Conditions
-    FREDSeries("DPSACBW027SBOG", AssetClass.CASH, "Deposits at Commercial Banks (USD billions)", "W"),
-    FREDSeries("TOTCI",          AssetClass.CASH, "Total Consumer Credit Outstanding (USD millions)", "M"),
+    FREDSeries(
+        "DPSACBW027SBOG",
+        AssetClass.CASH,
+        "Deposits at Commercial Banks (USD billions)",
+        "W",
+    ),
+    FREDSeries(
+        "TOTCI",
+        AssetClass.CASH,
+        "Total Consumer Credit Outstanding (USD millions)",
+        "M",
+    ),
 ]
 
 

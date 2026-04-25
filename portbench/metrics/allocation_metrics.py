@@ -1,7 +1,6 @@
 """Allocation accuracy metrics for evaluating predicted portfolio weights."""
 
 import numpy as np
-import pandas as pd
 
 
 def weight_mae(predicted: dict[str, float], actual: dict[str, float]) -> float:
@@ -46,7 +45,10 @@ def portfolio_return_gap(
     Returns:
         Return gap as a decimal. Negative = underperformance.
     """
-    def _portfolio_return(weights: dict[str, float], returns: dict[str, float]) -> float:
+
+    def _portfolio_return(
+        weights: dict[str, float], returns: dict[str, float]
+    ) -> float:
         return sum(weights.get(a, 0.0) * returns.get(a, 0.0) for a in returns)
 
     r_pred = _portfolio_return(predicted_weights, asset_returns)

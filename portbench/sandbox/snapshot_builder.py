@@ -61,10 +61,14 @@ class SnapshotBuilder:
 
         for asset in self.assets:
             try:
-                prices = self.provider.get_price_series(asset, lookback_start, decision_date)
-                prices = prices.iloc[-self.lookback_days:]
-                returns = self.provider.get_return_series(asset, lookback_start, decision_date)
-                returns = returns.iloc[-self.lookback_days:]
+                prices = self.provider.get_price_series(
+                    asset, lookback_start, decision_date
+                )
+                prices = prices.iloc[-self.lookback_days :]
+                returns = self.provider.get_return_series(
+                    asset, lookback_start, decision_date
+                )
+                returns = returns.iloc[-self.lookback_days :]
                 if prices.empty or returns.empty:
                     continue
                 price_data[asset] = prices

@@ -10,8 +10,13 @@ from datetime import date
 import numpy as np
 
 from .base import (
-    ComplexityLevel, ContextWindow, MarketRegime,
-    QABuilder, QAConfig, QAPair, Split,
+    ComplexityLevel,
+    ContextWindow,
+    MarketRegime,
+    QABuilder,
+    QAConfig,
+    QAPair,
+    Split,
 )
 from ..metrics.base import MetricsConfig
 
@@ -57,7 +62,9 @@ class T5MultiAssetOptimization(QABuilder):
         other_classes = ["bonds", "commodities", "real_estate", "cash"]
         rng = random.Random(hash(decision_date) + 4)
         n_others = max(0, self.n_assets - len(text_classes))
-        chosen_classes = text_classes + rng.sample(other_classes, min(n_others, len(other_classes)))
+        chosen_classes = text_classes + rng.sample(
+            other_classes, min(n_others, len(other_classes))
+        )
         assets = []
         for cls in chosen_classes:
             candidates = self.provider.list_assets(cls)
@@ -65,8 +72,10 @@ class T5MultiAssetOptimization(QABuilder):
                 assets.append(rng.choice(candidates))
         if len(assets) < 2:
             fallback = self.provider.list_assets("equities")
-            assets += rng.sample(fallback, min(self.n_assets - len(assets), len(fallback)))
-        return assets[:self.n_assets]
+            assets += rng.sample(
+                fallback, min(self.n_assets - len(assets), len(fallback))
+            )
+        return assets[: self.n_assets]
 
     def build_one(self, context: ContextWindow, seq: int) -> QAPair:
         from scipy.optimize import minimize
@@ -84,15 +93,19 @@ class T5MultiAssetOptimization(QABuilder):
         # Find common date index across all assets
         common_idx = None
         for r in return_matrix.values():
-            common_idx = r.index if common_idx is None else common_idx.intersection(r.index)
+            common_idx = (
+                r.index if common_idx is None else common_idx.intersection(r.index)
+            )
 
         if common_idx is None or len(common_idx) < 30:
-            raise ValueError(f"Insufficient aligned returns for T5 at {d}: {len(common_idx) if common_idx is not None else 0} rows")
+            raise ValueError(
+                f"Insufficient aligned returns for T5 at {d}: {len(common_idx) if common_idx is not None else 0} rows"
+            )
 
         R = np.array([return_matrix[a].reindex(common_idx).values for a in assets]).T
-        mu = R.mean(axis=0) * ann          # Annualized mean returns
-        cov = np.cov(R.T) * ann            # Annualized covariance matrix
-        rf = 0.04                          # Risk-free rate
+        mu = R.mean(axis=0) * ann  # Annualized mean returns
+        cov = np.cov(R.T) * ann  # Annualized covariance matrix
+        rf = 0.04  # Risk-free rate
 
         n = len(assets)
 
@@ -107,9 +120,14 @@ class T5MultiAssetOptimization(QABuilder):
         bounds = [(0.0, 1.0)] * n
         w0 = np.ones(n) / n
 
-        result = minimize(neg_sharpe, w0, method="SLSQP",
-                          bounds=bounds, constraints=constraints,
-                          options={"ftol": 1e-9, "maxiter": 500})
+        result = minimize(
+            neg_sharpe,
+            w0,
+            method="SLSQP",
+            bounds=bounds,
+            constraints=constraints,
+            options={"ftol": 1e-9, "maxiter": 500},
+        )
 
         if not result.success:
             # Fall back to equal weight if optimizer fails

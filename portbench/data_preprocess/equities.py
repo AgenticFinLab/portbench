@@ -1,11 +1,15 @@
 """Equities data preprocessor."""
 
-import json
 from datetime import datetime
 
 import pandas as pd
 
-from .base import AssetClass, AssetPreprocessor, _truncate_records_json, truncate_text_for_source
+from .base import (
+    AssetClass,
+    AssetPreprocessor,
+    _truncate_records_json,
+    truncate_text_for_source,
+)
 
 
 class EquitiesPreprocessor(AssetPreprocessor):

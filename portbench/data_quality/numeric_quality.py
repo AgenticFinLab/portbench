@@ -1,6 +1,5 @@
 """Numeric data quality checker for price and macro time series."""
 
-from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -10,7 +9,6 @@ from .base import (
     CheckResult,
     DataQualityChecker,
     DatasetQualityReport,
-    QualityConfig,
     QualityLevel,
 )
 
@@ -103,7 +101,8 @@ class NumericQualityChecker(DataQualityChecker):
         # Detect price columns automatically if not provided
         if price_cols is None:
             price_cols = [
-                c for c in numeric_cols
+                c
+                for c in numeric_cols
                 if any(k in c.lower() for k in ("close", "price", "value", "adj"))
             ]
             if not price_cols:
@@ -139,8 +138,12 @@ class NumericQualityChecker(DataQualityChecker):
             threshold=self.config.min_coverage_rate,
             level=level,
             message=f"{coverage:.1%} of trading days covered ({start.date()} – {end.date()}).",
-            details={"start": str(start.date()), "end": str(end.date()),
-                     "expected_days": len(expected), "actual_days": len(actual_dates)},
+            details={
+                "start": str(start.date()),
+                "end": str(end.date()),
+                "expected_days": len(expected),
+                "actual_days": len(actual_dates),
+            },
         )
 
     def _check_stress_coverage(self, df: pd.DataFrame) -> list[CheckResult]:
@@ -168,8 +171,13 @@ class NumericQualityChecker(DataQualityChecker):
                     threshold=self.config.min_stress_coverage,
                     level=level,
                     message=f"{coverage:.1%} coverage in stress period '{period_name}' ({start} – {end}).",
-                    details={"period": period_name, "start": start, "end": end,
-                             "expected_days": len(expected), "covered_days": covered},
+                    details={
+                        "period": period_name,
+                        "start": start,
+                        "end": end,
+                        "expected_days": len(expected),
+                        "covered_days": covered,
+                    },
                 )
             )
 
@@ -179,8 +187,8 @@ class NumericQualityChecker(DataQualityChecker):
         """All three splits (train/val/test) must contain data."""
         splits = {
             "train": (self.config.train_start, self.config.train_end),
-            "val":   (self.config.val_start,   self.config.val_end),
-            "test":  (self.config.test_start,  self.config.test_end),
+            "val": (self.config.val_start, self.config.val_end),
+            "test": (self.config.test_start, self.config.test_end),
         }
         missing = []
         details = {}
@@ -207,7 +215,9 @@ class NumericQualityChecker(DataQualityChecker):
             details=details,
         )
 
-    def _check_missing_gap(self, df: pd.DataFrame, numeric_cols: list[str]) -> CheckResult:
+    def _check_missing_gap(
+        self, df: pd.DataFrame, numeric_cols: list[str]
+    ) -> CheckResult:
         """Longest consecutive NaN run across all numeric columns."""
         max_gap = 0
         worst_col = ""
@@ -233,7 +243,9 @@ class NumericQualityChecker(DataQualityChecker):
         if max_gap == 0:
             message = "No consecutive missing value gaps detected."
         else:
-            message = f"Longest consecutive NaN gap: {max_gap} rows (column: '{worst_col}')."
+            message = (
+                f"Longest consecutive NaN gap: {max_gap} rows (column: '{worst_col}')."
+            )
 
         return self._make_check(
             "missing_gap_length",

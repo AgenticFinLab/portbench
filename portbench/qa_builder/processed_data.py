@@ -29,7 +29,6 @@ from pathlib import Path
 from typing import Optional
 import re
 
-import numpy as np
 import pandas as pd
 
 from .base import DataProvider, MarketRegime
@@ -47,20 +46,20 @@ _RETURN_SUFFIX = "_return"
 # Each entry: indicator_name -> (csv_frame_key, column_name)
 _MACRO_COLUMNS: dict[str, tuple[str, str]] = {
     # Money / rates (from cash.csv)
-    "fed_funds_rate":   ("cash",     "fred_DFF"),
-    "cpi_yoy":          ("cash",     "fred_CPIAUCSL"),
-    "unemployment":     ("cash",     "fred_UNRATE"),
-    "gdp_growth_qoq":   ("cash",     "fred_GDPC1"),
+    "fed_funds_rate": ("cash", "fred_DFF"),
+    "cpi_yoy": ("cash", "fred_CPIAUCSL"),
+    "unemployment": ("cash", "fred_UNRATE"),
+    "gdp_growth_qoq": ("cash", "fred_GDPC1"),
     # Yield curve / credit (from bonds.csv)
-    "t10y2y_spread":    ("bonds",    "fred_T10Y2Y"),
-    "t10y3m_spread":    ("bonds",    "fred_T10Y3M"),
-    "breakeven_10y":    ("bonds",    "fred_T10YIE"),
-    "hy_oas":           ("bonds",    "fred_BAMLH0A0HYM2"),
-    "ig_oas":           ("bonds",    "fred_BAMLC0A0CM"),
-    "ted_spread":       ("bonds",    "fred_TEDRATE"),
-    "mortgage_30y":     ("bonds",    "fred_MORTGAGE30US"),
+    "t10y2y_spread": ("bonds", "fred_T10Y2Y"),
+    "t10y3m_spread": ("bonds", "fred_T10Y3M"),
+    "breakeven_10y": ("bonds", "fred_T10YIE"),
+    "hy_oas": ("bonds", "fred_BAMLH0A0HYM2"),
+    "ig_oas": ("bonds", "fred_BAMLC0A0CM"),
+    "ted_spread": ("bonds", "fred_TEDRATE"),
+    "mortgage_30y": ("bonds", "fred_MORTGAGE30US"),
     # Equity volatility (from equities.csv — VIX lives here)
-    "vix":              ("equities", "^VIX_close"),
+    "vix": ("equities", "^VIX_close"),
 }
 
 # Map from short ticker name → possible column prefixes in the processed CSV
@@ -87,56 +86,110 @@ class ProcessedDataProvider(DataProvider):
 
     # Asset class → CSV filename mapping
     _CLASS_TO_FILE = {
-        "equities":     "equities.csv",
-        "bonds":        "bonds.csv",
-        "commodities":  "commodities.csv",
-        "real_estate":  "real_estate.csv",
+        "equities": "equities.csv",
+        "bonds": "bonds.csv",
+        "commodities": "commodities.csv",
+        "real_estate": "real_estate.csv",
         "cryptocurrency": "cryptocurrency.csv",
-        "cash":         "cash.csv",
+        "cash": "cash.csv",
     }
 
     # Hard-coded asset class membership for the standard ticker universe
     _ASSET_CLASS_MAP = {
         # Equities
-        "SPY": "equities", "QQQ": "equities", "IWM": "equities",
-        "VTI": "equities", "IVV": "equities", "EEM": "equities",
-        "EFA": "equities", "VEA": "equities", "FXI": "equities",
-        "EWJ": "equities", "ACWI": "equities",
-        "XLK": "equities", "XLF": "equities", "XLE": "equities",
-        "XLV": "equities", "XLI": "equities", "XLY": "equities",
-        "XLP": "equities", "XLU": "equities", "XLB": "equities",
-        "XLRE": "equities", "MTUM": "equities", "VLUE": "equities",
-        "QUAL": "equities", "USMV": "equities", "^VIX": "equities",
+        "SPY": "equities",
+        "QQQ": "equities",
+        "IWM": "equities",
+        "VTI": "equities",
+        "IVV": "equities",
+        "EEM": "equities",
+        "EFA": "equities",
+        "VEA": "equities",
+        "FXI": "equities",
+        "EWJ": "equities",
+        "ACWI": "equities",
+        "XLK": "equities",
+        "XLF": "equities",
+        "XLE": "equities",
+        "XLV": "equities",
+        "XLI": "equities",
+        "XLY": "equities",
+        "XLP": "equities",
+        "XLU": "equities",
+        "XLB": "equities",
+        "XLRE": "equities",
+        "MTUM": "equities",
+        "VLUE": "equities",
+        "QUAL": "equities",
+        "USMV": "equities",
+        "^VIX": "equities",
         # Bonds
-        "SHV": "bonds", "SHY": "bonds", "IEF": "bonds", "TLT": "bonds",
-        "TLH": "bonds", "TIP": "bonds", "SCHP": "bonds", "STIP": "bonds",
-        "LQD": "bonds", "HYG": "bonds", "JNK": "bonds", "VCIT": "bonds",
-        "BNDX": "bonds", "EMB": "bonds", "IGOV": "bonds",
+        "SHV": "bonds",
+        "SHY": "bonds",
+        "IEF": "bonds",
+        "TLT": "bonds",
+        "TLH": "bonds",
+        "TIP": "bonds",
+        "SCHP": "bonds",
+        "STIP": "bonds",
+        "LQD": "bonds",
+        "HYG": "bonds",
+        "JNK": "bonds",
+        "VCIT": "bonds",
+        "BNDX": "bonds",
+        "EMB": "bonds",
+        "IGOV": "bonds",
         # Commodities
-        "GLD": "commodities", "IAU": "commodities", "SLV": "commodities",
-        "PPLT": "commodities", "PALL": "commodities", "USO": "commodities",
-        "UNG": "commodities", "BNO": "commodities", "DBA": "commodities",
-        "CORN": "commodities", "WEAT": "commodities", "SOYB": "commodities",
-        "DBC": "commodities", "PDBC": "commodities", "DBB": "commodities",
+        "GLD": "commodities",
+        "IAU": "commodities",
+        "SLV": "commodities",
+        "PPLT": "commodities",
+        "PALL": "commodities",
+        "USO": "commodities",
+        "UNG": "commodities",
+        "BNO": "commodities",
+        "DBA": "commodities",
+        "CORN": "commodities",
+        "WEAT": "commodities",
+        "SOYB": "commodities",
+        "DBC": "commodities",
+        "PDBC": "commodities",
+        "DBB": "commodities",
         "CPER": "commodities",
         # Real Estate
-        "VNQ": "real_estate", "IYR": "real_estate", "SCHH": "real_estate",
-        "REZ": "real_estate", "MORT": "real_estate", "INDS": "real_estate",
-        "VNQI": "real_estate", "HAUZ": "real_estate",
-        "XHB": "real_estate", "ITB": "real_estate",
+        "VNQ": "real_estate",
+        "IYR": "real_estate",
+        "SCHH": "real_estate",
+        "REZ": "real_estate",
+        "MORT": "real_estate",
+        "INDS": "real_estate",
+        "VNQI": "real_estate",
+        "HAUZ": "real_estate",
+        "XHB": "real_estate",
+        "ITB": "real_estate",
         # Crypto
-        "BTC-USD": "cryptocurrency", "ETH-USD": "cryptocurrency",
-        "BNB-USD": "cryptocurrency", "SOL-USD": "cryptocurrency",
-        "XRP-USD": "cryptocurrency", "ADA-USD": "cryptocurrency",
-        "AVAX-USD": "cryptocurrency", "DOT-USD": "cryptocurrency",
-        "LINK-USD": "cryptocurrency", "MATIC-USD": "cryptocurrency",
+        "BTC-USD": "cryptocurrency",
+        "ETH-USD": "cryptocurrency",
+        "BNB-USD": "cryptocurrency",
+        "SOL-USD": "cryptocurrency",
+        "XRP-USD": "cryptocurrency",
+        "ADA-USD": "cryptocurrency",
+        "AVAX-USD": "cryptocurrency",
+        "DOT-USD": "cryptocurrency",
+        "LINK-USD": "cryptocurrency",
+        "MATIC-USD": "cryptocurrency",
         # Cash
-        "BIL": "cash", "SGOV": "cash", "CSHI": "cash", "ICSH": "cash",
+        "BIL": "cash",
+        "SGOV": "cash",
+        "CSHI": "cash",
+        "ICSH": "cash",
     }
 
     # Paths to Kaggle text datasets (relative to repo root, same level as datasets/)
     _KAGGLE_STOCK_NEWS_DIR = Path("datasets/kaggle/equities/stock-data-with-news")
-    _KAGGLE_CRYPTO_NEWS_CSV = Path("datasets/kaggle/cryptocurrency/crypto-news/cryptonews.csv")
+    _KAGGLE_CRYPTO_NEWS_CSV = Path(
+        "datasets/kaggle/cryptocurrency/crypto-news/cryptonews.csv"
+    )
 
     def __init__(
         self,
@@ -229,7 +282,9 @@ class ProcessedDataProvider(DataProvider):
                 result[macro_key] = 0.0
                 continue
             candidates = df.loc[df.index.date <= d, col_name].dropna()
-            result[macro_key] = float(candidates.iloc[-1]) if not candidates.empty else 0.0
+            result[macro_key] = (
+                float(candidates.iloc[-1]) if not candidates.empty else 0.0
+            )
 
         return result
 
@@ -323,8 +378,12 @@ class ProcessedDataProvider(DataProvider):
                 return meta
             # Crypto metadata columns written by CryptocurrencyPreprocessor
             meta_suffixes = (
-                "launch_year", "market_cap", "circulating_supply",
-                "platform", "cmc_rank", "tvl",
+                "launch_year",
+                "market_cap",
+                "circulating_supply",
+                "platform",
+                "cmc_rank",
+                "tvl",
             )
             # Column names vary by Kaggle dataset name prefix; search by suffix
             for sfx in meta_suffixes:
@@ -368,7 +427,9 @@ class ProcessedDataProvider(DataProvider):
         asset_class = self._ASSET_CLASS_MAP.get(asset)
 
         # 1. Preprocessed text_json from loaded frames (fastest, most complete)
-        frame_key = asset_class if asset_class in ("equities", "cryptocurrency") else None
+        frame_key = (
+            asset_class if asset_class in ("equities", "cryptocurrency") else None
+        )
         if frame_key:
             text = self._get_text_from_frame(frame_key, before_date)
             if text:
@@ -420,7 +481,10 @@ class ProcessedDataProvider(DataProvider):
             return ""
 
         # Pick the most informative record: prefer SEC over kaggle, longer text
-        records.sort(key=lambda r: (r.get("source") == "sec", len(r.get("text", ""))), reverse=True)
+        records.sort(
+            key=lambda r: (r.get("source") == "sec", len(r.get("text", ""))),
+            reverse=True,
+        )
         best = records[0]
         source = best.get("source", "news")
         ticker = best.get("ticker", "")
@@ -477,7 +541,9 @@ class ProcessedDataProvider(DataProvider):
 
         if ticker not in self._kaggle_stock_cache:
             try:
-                df = pd.read_csv(csv_path, usecols=["date", "news"], parse_dates=["date"])
+                df = pd.read_csv(
+                    csv_path, usecols=["date", "news"], parse_dates=["date"]
+                )
                 df = df.dropna(subset=["news"])
                 df["date"] = pd.to_datetime(df["date"]).dt.date
                 self._kaggle_stock_cache[ticker] = df.sort_values("date")
@@ -502,8 +568,14 @@ class ProcessedDataProvider(DataProvider):
 
         if self._kaggle_crypto_df is None:
             try:
-                df = pd.read_csv(self._KAGGLE_CRYPTO_NEWS_CSV, usecols=["date", "title", "text"])
-                df["date"] = pd.to_datetime(df["date"], format="mixed", utc=True).dt.tz_localize(None).dt.date
+                df = pd.read_csv(
+                    self._KAGGLE_CRYPTO_NEWS_CSV, usecols=["date", "title", "text"]
+                )
+                df["date"] = (
+                    pd.to_datetime(df["date"], format="mixed", utc=True)
+                    .dt.tz_localize(None)
+                    .dt.date
+                )
                 self._kaggle_crypto_df = df.sort_values("date")
             except Exception:
                 return ""
@@ -519,7 +591,9 @@ class ProcessedDataProvider(DataProvider):
         return f"[Crypto news {row['date']}] {title}. {text}"
 
     @staticmethod
-    def _read_htm_text(path: Path, max_chars: int = 2000, filing_date: Optional[date] = None) -> str:
+    def _read_htm_text(
+        path: Path, max_chars: int = 2000, filing_date: Optional[date] = None
+    ) -> str:
         """Read an HTM file, strip tags, and return a plain-text excerpt."""
         try:
             raw = path.read_text(encoding="utf-8", errors="replace")
@@ -544,6 +618,7 @@ class ProcessedDataProvider(DataProvider):
                 self._frames[cls] = df
             else:
                 import warnings
+
                 warnings.warn(
                     f"Processed file not found for {cls} in {self.data_dir} "
                     f"— {cls} data will be unavailable.",

@@ -36,7 +36,7 @@ class BacktestResult:
     initial_nav: float
 
     # Time series
-    nav_curve: pd.Series          # index=date, values=NAV in dollars
+    nav_curve: pd.Series  # index=date, values=NAV in dollars
     weight_history: pd.DataFrame  # index=date, columns=assets, values=weights
     trade_history: list[dict] = field(default_factory=list)
 
@@ -57,7 +57,9 @@ class BacktestResult:
     mean_ceps: float = 0.0
     per_step_alignment: list[float] = field(default_factory=list)
     mean_profile_score: float = 0.0
-    stress_passed: Optional[bool] = None  # set externally by run_backtest after drawdown check
+    stress_passed: Optional[bool] = (
+        None  # set externally by run_backtest after drawdown check
+    )
 
     def __post_init__(self):
         self._compute_metrics()
@@ -87,7 +89,9 @@ class BacktestResult:
             "start_date": str(self.start_date),
             "end_date": str(self.end_date),
             "initial_nav": self.initial_nav,
-            "final_nav": round(float(self.nav_curve.iloc[-1]), 2) if len(self.nav_curve) else 0.0,
+            "final_nav": (
+                round(float(self.nav_curve.iloc[-1]), 2) if len(self.nav_curve) else 0.0
+            ),
             "total_return": round(self.total_return, 6),
             "cagr": round(self.cagr, 6),
             "sharpe_ratio": round(self.sharpe_ratio, 4),
@@ -136,5 +140,7 @@ class BacktestResult:
                 f"Mean Profile Score:{self.mean_profile_score:.4f}",
             ]
         if self.stress_passed is not None:
-            lines.append(f"Stress Gate:       {'PASSED' if self.stress_passed else 'FAILED'}")
+            lines.append(
+                f"Stress Gate:       {'PASSED' if self.stress_passed else 'FAILED'}"
+            )
         return "\n".join(lines)

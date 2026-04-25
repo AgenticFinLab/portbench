@@ -20,7 +20,6 @@ import dataclasses
 from datetime import date
 from typing import Optional
 
-import numpy as np
 import pandas as pd
 
 from ..agent_eval.base import AgentAdapter, EvalPipeline, StageID
@@ -35,8 +34,8 @@ from .snapshot_builder import SnapshotBuilder
 
 _REBALANCE_FREQS = {
     "weekly": "W-FRI",
-    "monthly": "BMS",      # Business Month Start
-    "quarterly": "QS-JAN", # Quarter Start
+    "monthly": "BMS",  # Business Month Start
+    "quarterly": "QS-JAN",  # Quarter Start
 }
 
 
@@ -152,7 +151,9 @@ class BacktestEngine:
 
             if d in rebalance_dates:
                 # --- Rebalance step ---
-                snapshot = self._snapshot_builder.build(d, portfolio.weights, portfolio.nav)
+                snapshot = self._snapshot_builder.build(
+                    d, portfolio.weights, portfolio.nav
+                )
 
                 if not snapshot.return_data:
                     weight_rows.append({"date": d, **portfolio.weights})
@@ -225,7 +226,7 @@ class BacktestEngine:
             vals = [s.score for s in ssl]
             if vals:
                 avg = sum(vals) / len(vals)
-                drops = sum(max(vals[i] - vals[i+1], 0) for i in range(len(vals)-1))
+                drops = sum(max(vals[i] - vals[i + 1], 0) for i in range(len(vals) - 1))
                 self._per_step_ceps.append(max(0.0, min(1.0, avg - 0.1 * drops)))
 
             # Collect per-step profile alignment
@@ -255,6 +256,7 @@ class BacktestEngine:
         Returns empty dict if data is unavailable.
         """
         from datetime import timedelta
+
         returns = {}
         prev = d - timedelta(days=7)  # wide window to ensure we get prev business day
         for asset in self.assets:

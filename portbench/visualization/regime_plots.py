@@ -11,17 +11,22 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
-from typing import Optional
 
 from .style import apply_paper_style, REGIME_COLORS
 
 
 _ASSET_CLASS_MAP = {
-    "SPY": "Equities", "QQQ": "Equities", "EEM": "Equities",
-    "TLT": "Bonds",    "IEF": "Bonds",    "LQD": "Bonds",
-    "GLD": "Commodities", "USO": "Commodities",
+    "SPY": "Equities",
+    "QQQ": "Equities",
+    "EEM": "Equities",
+    "TLT": "Bonds",
+    "IEF": "Bonds",
+    "LQD": "Bonds",
+    "GLD": "Commodities",
+    "USO": "Commodities",
     "VNQ": "Real Estate",
-    "BTC": "Crypto",   "ETH": "Crypto",
+    "BTC": "Crypto",
+    "ETH": "Crypto",
     "BIL": "Cash",
 }
 
@@ -80,20 +85,33 @@ def plot_regime_distributions(
             pooled = np.array(pooled)
             # Clip extreme outliers for display
             p1, p99 = np.percentile(pooled, 1), np.percentile(pooled, 99)
-            pooled  = pooled[(pooled >= p1) & (pooled <= p99)]
+            pooled = pooled[(pooled >= p1) & (pooled <= p99)]
 
             # KDE via scipy if available, else histogram
             try:
                 from scipy.stats import gaussian_kde
+
                 kde = gaussian_kde(pooled, bw_method=bandwidth * pooled.std())
                 x = np.linspace(pooled.min(), pooled.max(), 200)
-                ax.plot(x, kde(x), color=REGIME_COLORS.get(regime, "gray"),
-                        linewidth=2, label=regime.capitalize())
-                ax.fill_between(x, kde(x), alpha=0.15,
-                                color=REGIME_COLORS.get(regime, "gray"))
+                ax.plot(
+                    x,
+                    kde(x),
+                    color=REGIME_COLORS.get(regime, "gray"),
+                    linewidth=2,
+                    label=regime.capitalize(),
+                )
+                ax.fill_between(
+                    x, kde(x), alpha=0.15, color=REGIME_COLORS.get(regime, "gray")
+                )
             except ImportError:
-                ax.hist(pooled, bins=40, density=True, alpha=0.4,
-                        color=REGIME_COLORS.get(regime, "gray"), label=regime.capitalize())
+                ax.hist(
+                    pooled,
+                    bins=40,
+                    density=True,
+                    alpha=0.4,
+                    color=REGIME_COLORS.get(regime, "gray"),
+                    label=regime.capitalize(),
+                )
             plotted = True
 
         ax.set_title(cls, fontsize=10, fontweight="bold")
@@ -120,14 +138,15 @@ def build_regime_data_from_mock(
     """
     import sys
     from pathlib import Path
+
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
     from portbench.qa_builder.mock_data import MockDataProvider
     from datetime import date, timedelta
 
     provider = MockDataProvider(seed=seed)
-    assets   = provider.list_assets()
-    start    = date(2020, 1, 1)
+    assets = provider.list_assets()
+    start = date(2020, 1, 1)
 
     regime_data: dict[str, dict[str, pd.Series]] = {
         r: {} for r in ["bull", "bear", "crisis", "sideways"]

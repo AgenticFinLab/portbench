@@ -21,12 +21,17 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .base import EpisodeResult, EvalPipeline, MarketSnapshot, S3Output, S5Output, StageID
+    from .base import (
+        EpisodeResult,
+        EvalPipeline,
+        MarketSnapshot,
+    )
 
 
 # ---------------------------------------------------------------------------
 # Profile definitions
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class InvestorProfile:
@@ -99,6 +104,7 @@ _BOND_CLASSES = {"bonds", "cash"}
 # Profile alignment scorer
 # ---------------------------------------------------------------------------
 
+
 class ProfileAlignmentScorer:
     """
     Scores how well an EpisodeResult's S3 weights satisfy an InvestorProfile.
@@ -128,12 +134,12 @@ class ProfileAlignmentScorer:
             weights = s3_out.weights or {}
 
         equity_w = sum(
-            w for a, w in weights.items()
+            w
+            for a, w in weights.items()
             if self._class_map.get(a, "") in _EQUITY_CLASSES
         )
         bond_w = sum(
-            w for a, w in weights.items()
-            if self._class_map.get(a, "") in _BOND_CLASSES
+            w for a, w in weights.items() if self._class_map.get(a, "") in _BOND_CLASSES
         )
 
         # Equity constraint: penalise proportionally if over limit
@@ -166,6 +172,7 @@ class ProfileAlignmentScorer:
 # Profiled pipeline wrapper
 # ---------------------------------------------------------------------------
 
+
 class ProfiledPipeline:
     """
     Thin wrapper around EvalPipeline that injects investor profile context.
@@ -179,7 +186,9 @@ class ProfiledPipeline:
         asset_class_map: Dict mapping ticker → asset class string.
     """
 
-    def __init__(self, pipeline: "EvalPipeline", asset_class_map: dict[str, str]) -> None:
+    def __init__(
+        self, pipeline: "EvalPipeline", asset_class_map: dict[str, str]
+    ) -> None:
         self._pipeline = pipeline
         self._scorer = ProfileAlignmentScorer(asset_class_map)
 

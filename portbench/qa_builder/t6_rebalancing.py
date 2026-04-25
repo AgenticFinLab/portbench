@@ -5,14 +5,18 @@ transaction costs, and a threshold rule.
 Complexity level 3.
 """
 
-import random
-from datetime import date, timedelta
+from datetime import date
 
 import numpy as np
 
 from .base import (
-    ComplexityLevel, ContextWindow, MarketRegime,
-    QABuilder, QAConfig, QAPair, Split,
+    ComplexityLevel,
+    ContextWindow,
+    MarketRegime,
+    QABuilder,
+    QAConfig,
+    QAPair,
+    Split,
 )
 
 
@@ -60,6 +64,7 @@ class T6RebalancingDecision(QABuilder):
 
     def _select_assets(self, decision_date: date) -> list[str]:
         import random
+
         # Always include equities + crypto for text coverage; add 2 more from others.
         text_classes = ["equities", "cryptocurrency"]
         other_classes = ["bonds", "commodities", "real_estate", "cash"]
@@ -85,7 +90,7 @@ class T6RebalancingDecision(QABuilder):
         target_weights = np.ones(n) / n  # Equal-weight target
 
         # Drift: apply random recent returns to distort weights
-        drifts = rng.normal(0, 0.08, n)   # Simulate asset-level drift
+        drifts = rng.normal(0, 0.08, n)  # Simulate asset-level drift
         drifted = target_weights * (1 + drifts)
         current_weights = np.clip(drifted / drifted.sum(), 0, 1)
 
@@ -97,9 +102,16 @@ class T6RebalancingDecision(QABuilder):
         should_rebalance = max_deviation > self.rebal_threshold
         answer = "yes" if should_rebalance else "no"
 
-        current_str = ", ".join(f"w_{a}={current_weights[i]:.4f}" for i, a in enumerate(assets))
-        target_str = ", ".join(f"w_{a}={target_weights[i]:.4f}" for i, a in enumerate(assets))
-        dev_str = ", ".join(f"Δ{a}={current_weights[i]-target_weights[i]:+.4f}" for i, a in enumerate(assets))
+        current_str = ", ".join(
+            f"w_{a}={current_weights[i]:.4f}" for i, a in enumerate(assets)
+        )
+        target_str = ", ".join(
+            f"w_{a}={target_weights[i]:.4f}" for i, a in enumerate(assets)
+        )
+        dev_str = ", ".join(
+            f"Δ{a}={current_weights[i]-target_weights[i]:+.4f}"
+            for i, a in enumerate(assets)
+        )
 
         context_summary = (
             f"Max weight deviation: {max_deviation:.4f}, threshold: {self.rebal_threshold}. "
@@ -145,8 +157,12 @@ class T6RebalancingDecision(QABuilder):
             answer_numeric=float(should_rebalance),
             explanation=explanation,
             metadata={
-                "current_weights": {a: round(float(current_weights[i]), 4) for i, a in enumerate(assets)},
-                "target_weights": {a: round(float(target_weights[i]), 4) for i, a in enumerate(assets)},
+                "current_weights": {
+                    a: round(float(current_weights[i]), 4) for i, a in enumerate(assets)
+                },
+                "target_weights": {
+                    a: round(float(target_weights[i]), 4) for i, a in enumerate(assets)
+                },
                 "max_deviation": round(max_deviation, 6),
                 "total_turnover": round(total_turnover, 6),
                 "transaction_cost": round(total_cost, 6),

@@ -49,11 +49,19 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from portbench.agent_eval.llm_adapters import AnthropicAdapter, OpenAIAdapter, LiteLLMAdapter
+from portbench.agent_eval.llm_adapters import (
+    AnthropicAdapter,
+    OpenAIAdapter,
+    LiteLLMAdapter,
+)
 from portbench.agent_eval.mock_agent import MockAgentAdapter
 from portbench.agent_eval.investor_profiles import PROFILES
 from portbench.agent_eval.stress_scenarios import STRESS_SCENARIOS
-from portbench.baselines import EqualWeightBaseline, SixtyFortyBaseline, RiskParityBaseline
+from portbench.baselines import (
+    EqualWeightBaseline,
+    SixtyFortyBaseline,
+    RiskParityBaseline,
+)
 from portbench.qa_builder.mock_data import MockDataProvider
 from portbench.qa_builder.processed_data import ProcessedDataProvider
 from portbench.sandbox import BacktestEngine
@@ -63,28 +71,54 @@ from portbench.sandbox import BacktestEngine
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def parse_args():
-    parser = argparse.ArgumentParser(description="PortBench Sandbox backtest (Profile × Stress + Normal)")
-    parser.add_argument("--model", type=str, default=None,
-                        help="Cloud/API model: '<provider>:<model_id>', e.g. 'qwen:qwen-plus'")
-    parser.add_argument("--baseline", type=str, default=None,
-                        choices=["equal_weight", "sixty_forty", "risk_parity"])
-    parser.add_argument("--no-pipeline", action="store_true",
-                        help="Skip S1-S5 pipeline; call allocate() directly (baselines)")
-    parser.add_argument("--profiles", nargs="+",
-                        choices=["conservative", "balanced", "aggressive"],
-                        default=["conservative", "balanced", "aggressive"])
-    parser.add_argument("--rebalance", type=str, default="monthly",
-                        choices=["weekly", "monthly", "quarterly"])
+    parser = argparse.ArgumentParser(
+        description="PortBench Sandbox backtest (Profile × Stress + Normal)"
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Cloud/API model: '<provider>:<model_id>', e.g. 'qwen:qwen-plus'",
+    )
+    parser.add_argument(
+        "--baseline",
+        type=str,
+        default=None,
+        choices=["equal_weight", "sixty_forty", "risk_parity"],
+    )
+    parser.add_argument(
+        "--no-pipeline",
+        action="store_true",
+        help="Skip S1-S5 pipeline; call allocate() directly (baselines)",
+    )
+    parser.add_argument(
+        "--profiles",
+        nargs="+",
+        choices=["conservative", "balanced", "aggressive"],
+        default=["conservative", "balanced", "aggressive"],
+    )
+    parser.add_argument(
+        "--rebalance",
+        type=str,
+        default="monthly",
+        choices=["weekly", "monthly", "quarterly"],
+    )
     parser.add_argument("--initial-nav", type=float, default=1_000_000.0)
     parser.add_argument("--noise", type=float, default=0.2)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--data-provider", type=str, default="processed",
-                        choices=["mock", "processed"])
+    parser.add_argument(
+        "--data-provider", type=str, default="processed", choices=["mock", "processed"]
+    )
     parser.add_argument("--data-dir", type=str, default="datasets/processed")
     parser.add_argument("--sec-dir", type=str, default="datasets/sec")
-    parser.add_argument("--workers", type=int, default=3,
-                        help="Parallel threads across profiles and stress scenarios (default: 3)")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=3,
+        help="Parallel threads across profiles and stress scenarios (default: 3)",
+    )
     return parser.parse_args()
 
 
@@ -93,9 +127,10 @@ def parse_args():
 # ---------------------------------------------------------------------------
 
 _OPENAI_COMPAT = {
-    "qwen":     ("DASHSCOPE_API_KEY",  "https://dashscope.aliyuncs.com/compatible-mode/v1"),
-    "kimi":     ("MOONSHOT_API_KEY",   "https://api.moonshot.cn/v1"),
-    "deepseek": ("DEEPSEEK_API_KEY",   "https://api.deepseek.com/v1"),
+    "qwen": ("DASHSCOPE_API_KEY", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+    "kimi": ("MOONSHOT_API_KEY", "https://api.moonshot.cn/v1"),
+    "deepseek": ("DEEPSEEK_API_KEY", "https://api.deepseek.com/v1"),
+    "tencent": ("TENCENT_API_KEY", "https://tokenhub.tencentmaas.com/v1"),
 }
 
 
@@ -108,7 +143,9 @@ def _build_adapter(args):
         return RiskParityBaseline()
     elif args.model:
         if ":" not in args.model:
-            raise ValueError(f"--model must be '<provider>:<model_id>', got: {args.model!r}")
+            raise ValueError(
+                f"--model must be '<provider>:<model_id>', got: {args.model!r}"
+            )
         provider, model = args.model.split(":", 1)
         provider = provider.lower()
         if provider == "anthropic":
@@ -122,13 +159,21 @@ def _build_adapter(args):
             return OpenAIAdapter(model=model, base_url=base_url, api_key_env=key_env)
         else:
             from portbench.agent_eval.llm_adapters import LiteLLMAdapter
+
             return LiteLLMAdapter(model=f"{provider}/{model}")
     else:
         return MockAgentAdapter(noise_level=args.noise, seed=args.seed)
 
 
 def _build_asset_class_map(provider) -> dict[str, str]:
-    all_classes = ["equities", "bonds", "commodities", "real_estate", "cryptocurrency", "cash"]
+    all_classes = [
+        "equities",
+        "bonds",
+        "commodities",
+        "real_estate",
+        "cryptocurrency",
+        "cash",
+    ]
     result = {}
     for cls in all_classes:
         try:
@@ -146,7 +191,11 @@ def _save_result(result, out_dir: Path):
         json.dump(result_dict, f, indent=2, default=str)
     with open(out_dir / "summary.txt", "w") as f:
         f.write(result.summary() + "\n")
-    if hasattr(result, "nav_curve") and result.nav_curve is not None and len(result.nav_curve):
+    if (
+        hasattr(result, "nav_curve")
+        and result.nav_curve is not None
+        and len(result.nav_curve)
+    ):
         nav_df = result.nav_curve.reset_index()
         nav_df.columns = ["date", "nav"]
         nav_df.to_csv(out_dir / "nav_curve.csv", index=False)
@@ -161,6 +210,7 @@ def _save_result(result, out_dir: Path):
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def run_backtest(args):
     adapter = _build_adapter(args)
@@ -179,7 +229,9 @@ def run_backtest(args):
         print(f"Data provider: ProcessedDataProvider({args.data_dir})")
     else:
         if args.data_provider == "processed":
-            print(f"  WARNING: Processed data not found. Falling back to MockDataProvider.")
+            print(
+                f"  WARNING: Processed data not found. Falling back to MockDataProvider."
+            )
         provider = MockDataProvider(seed=args.seed)
         print(f"Data provider: MockDataProvider(seed={args.seed})")
 
@@ -217,16 +269,20 @@ def run_backtest(args):
         profile = PROFILES[profile_name]
         profile_out = output_dir / profile_name
         print(f"\n[Profile: {profile_name.upper()}]")
-        print(f"  Constraints: max_equity={profile.max_equity_weight}, "
-              f"min_bond_cash={profile.min_bond_cash_weight}, "
-              f"max_drawdown={profile.max_drawdown_tolerance}")
+        print(
+            f"  Constraints: max_equity={profile.max_equity_weight}, "
+            f"min_bond_cash={profile.min_bond_cash_weight}, "
+            f"max_drawdown={profile.max_drawdown_tolerance}"
+        )
         print(f"  Phase A: Stress gate ({len(STRESS_SCENARIOS)} scenarios, parallel)")
 
         # Stress scenarios in parallel
         stress_summaries = []
         all_stress_passed = True
         with ThreadPoolExecutor(max_workers=len(STRESS_SCENARIOS)) as ex:
-            futures = {ex.submit(_run_stress, profile_name, sc): sc for sc in STRESS_SCENARIOS}
+            futures = {
+                ex.submit(_run_stress, profile_name, sc): sc for sc in STRESS_SCENARIOS
+            }
             stress_results = {}
             for fut in as_completed(futures):
                 sc_name, result, passed = fut.result()
@@ -235,17 +291,21 @@ def run_backtest(args):
         for scenario in STRESS_SCENARIOS:  # print in deterministic order
             result, passed = stress_results[scenario.name]
             status = "PASSED" if passed else "FAILED"
-            print(f"    {scenario.name}: {status} "
-                  f"(drawdown={result.max_drawdown:.1%}, "
-                  f"tolerance={profile.max_drawdown_tolerance:.0%})")
+            print(
+                f"    {scenario.name}: {status} "
+                f"(drawdown={result.max_drawdown:.1%}, "
+                f"tolerance={profile.max_drawdown_tolerance:.0%})"
+            )
             _save_result(result, profile_out / f"stress_{scenario.name}")
-            stress_summaries.append({
-                "scenario": scenario.name,
-                "passed": passed,
-                "max_drawdown": round(result.max_drawdown, 4),
-                "tolerance": profile.max_drawdown_tolerance,
-                "total_return": round(result.total_return, 4),
-            })
+            stress_summaries.append(
+                {
+                    "scenario": scenario.name,
+                    "passed": passed,
+                    "max_drawdown": round(result.max_drawdown, 4),
+                    "tolerance": profile.max_drawdown_tolerance,
+                    "total_return": round(result.total_return, 4),
+                }
+            )
             if not passed:
                 all_stress_passed = False
 
@@ -266,10 +326,12 @@ def run_backtest(args):
             )
             normal_result = engine.run()
             _save_result(normal_result, profile_out / "normal")
-            print(f"    Return={normal_result.total_return:+.2%}  "
-                  f"Sharpe={normal_result.sharpe_ratio:.3f}  "
-                  f"CEPS={normal_result.mean_ceps:.4f}  "
-                  f"Alignment={normal_result.mean_profile_score:.4f}")
+            print(
+                f"    Return={normal_result.total_return:+.2%}  "
+                f"Sharpe={normal_result.sharpe_ratio:.3f}  "
+                f"CEPS={normal_result.mean_ceps:.4f}  "
+                f"Alignment={normal_result.mean_profile_score:.4f}"
+            )
         else:
             print(f"  Phase B: Skipped (stress gate FAILED)")
 

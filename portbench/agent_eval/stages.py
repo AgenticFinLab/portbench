@@ -245,15 +245,10 @@ Respond with ONLY a JSON object in this exact format:
                 macro_summary=str(parsed.get("macro_summary", "")),
                 raw_llm_output=raw,
             )
-        except (json.JSONDecodeError, KeyError, ValueError):
-            # Parsing failed — fall back to ground truth to keep pipeline alive
-            return S1Output(
-                asset_views=gt.asset_views,
-                detected_regime=gt.detected_regime,
-                confidence=0.0,
-                macro_summary="[parse error — fell back to ground truth]",
-                raw_llm_output=raw,
-            )
+        except (json.JSONDecodeError, KeyError, ValueError) as exc:
+            raise RuntimeError(
+                f"S1 LLM response parse failed: {exc}. Raw output: {raw!r}"
+            ) from exc
 
     def score(self, actual: S1Output, ground_truth: S1Output) -> float:
         """Score = 1 - mean absolute error of asset views (views in [-1, 1] range)."""
@@ -379,14 +374,10 @@ Respond with ONLY a JSON object:
                 reasoning=str(parsed.get("reasoning", "")),
                 raw_llm_output=raw,
             )
-        except (json.JSONDecodeError, KeyError, ValueError):
-            gt = self._views_to_signals(S1MarketInterpretation().compute_ground_truth(snapshot))
-            return S2Output(
-                signals=gt.signals,
-                strengths=gt.strengths,
-                reasoning="[parse error — fell back to ground truth]",
-                raw_llm_output=raw,
-            )
+        except (json.JSONDecodeError, KeyError, ValueError) as exc:
+            raise RuntimeError(
+                f"S2 LLM response parse failed: {exc}. Raw output: {raw!r}"
+            ) from exc
 
     def score(self, actual: S2Output, ground_truth: S2Output) -> float:
         """Score = fraction of assets with correct signal."""
@@ -515,14 +506,10 @@ The weights MUST sum to 1.0."""
                 sharpe_estimate=float(parsed.get("sharpe_estimate", 0.0)),
                 raw_llm_output=raw,
             )
-        except (json.JSONDecodeError, KeyError, ValueError):
-            gt = self._signals_to_weights(
-                S2SignalGeneration().compute_ground_truth(snapshot), snapshot
-            )
-            return S3Output(
-                weights=gt.weights,
-                raw_llm_output=raw,
-            )
+        except (json.JSONDecodeError, KeyError, ValueError) as exc:
+            raise RuntimeError(
+                f"S3 LLM response parse failed: {exc}. Raw output: {raw!r}"
+            ) from exc
 
     def score(self, actual: S3Output, ground_truth: S3Output) -> float:
         """

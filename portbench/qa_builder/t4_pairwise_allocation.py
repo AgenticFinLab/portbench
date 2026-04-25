@@ -10,8 +10,12 @@ from datetime import date
 import numpy as np
 
 from .base import (
-    ComplexityLevel, ContextWindow, MarketRegime,
-    QABuilder, QAConfig, QAPair, Split,
+    ComplexityLevel,
+    ContextWindow,
+    MarketRegime,
+    QABuilder,
+    QAPair,
+    Split,
 )
 
 
@@ -78,11 +82,11 @@ class T4PairwiseAllocation(QABuilder):
         corr = cov_12 / (s1 * s2) if s1 * s2 > 0 else 0.0
 
         # Minimum-variance weights (unconstrained)
-        denom = s1 ** 2 + s2 ** 2 - 2 * cov_12
+        denom = s1**2 + s2**2 - 2 * cov_12
         if abs(denom) < 1e-12:
             w1, w2 = 0.5, 0.5  # Degenerate: equal weights
         else:
-            w1 = (s2 ** 2 - cov_12) / denom
+            w1 = (s2**2 - cov_12) / denom
             w2 = 1.0 - w1
 
         # Long-only constraint: clamp and renormalize

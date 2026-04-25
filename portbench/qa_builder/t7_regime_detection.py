@@ -10,8 +10,12 @@ from datetime import date
 import numpy as np
 
 from .base import (
-    ComplexityLevel, ContextWindow, MarketRegime,
-    QABuilder, QAConfig, QAPair, Split,
+    ComplexityLevel,
+    ContextWindow,
+    MarketRegime,
+    QABuilder,
+    QAPair,
+    Split,
 )
 
 
@@ -46,7 +50,7 @@ _REGIME_ALLOCATION: dict[MarketRegime, dict[str, str]] = {
     MarketRegime.CRISIS: {
         "equities": "decrease",
         "bonds": "increase",
-        "commodities": "increase",   # Gold as safe haven
+        "commodities": "increase",  # Gold as safe haven
         "real_estate": "decrease",
         "cryptocurrency": "decrease",
         "cash": "increase",
@@ -93,12 +97,16 @@ class T7RegimeDetection(QABuilder):
         # Compute trailing return statistics for context
         prices = context.price_history[asset]
         returns = context.returns_history[asset].dropna()
-        trailing_return = float(prices.iloc[-1] / prices.iloc[0] - 1) if len(prices) > 1 else 0.0
+        trailing_return = (
+            float(prices.iloc[-1] / prices.iloc[0] - 1) if len(prices) > 1 else 0.0
+        )
         vol = float(returns.std() * np.sqrt(252)) if len(returns) > 1 else 0.0
 
         # Allocation recommendations from expert rules
         allocation = _REGIME_ALLOCATION[regime]
-        alloc_str = ", ".join(f"{cls}: {direction}" for cls, direction in allocation.items())
+        alloc_str = ", ".join(
+            f"{cls}: {direction}" for cls, direction in allocation.items()
+        )
 
         # Format macro context
         macro_str = ", ".join(f"{k}={v:.4f}" for k, v in context.macro_context.items())

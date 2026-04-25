@@ -18,12 +18,13 @@ from matplotlib.figure import Figure
 from .style import apply_paper_style, PAPER_COLORS, MODEL_PALETTE
 
 _PROFILE_LABELS = ["Conservative", "Balanced", "Aggressive"]
-_PROFILE_KEYS   = ["conservative", "balanced", "aggressive"]
+_PROFILE_KEYS = ["conservative", "balanced", "aggressive"]
 
 
 # ---------------------------------------------------------------------------
 # Figure 11 — Profile Alignment Bar Chart
 # ---------------------------------------------------------------------------
+
 
 def plot_profile_alignment(
     profile_data: dict[str, dict[str, float]],
@@ -48,15 +49,15 @@ def plot_profile_alignment(
     apply_paper_style()
 
     model_names = list(profile_data.keys())
-    n_models    = len(model_names)
-    n_profiles  = len(_PROFILE_KEYS)
+    n_models = len(model_names)
+    n_profiles = len(_PROFILE_KEYS)
 
     score_matrix = np.zeros((n_models, n_profiles))
-    std_matrix   = np.zeros((n_models, n_profiles))
+    std_matrix = np.zeros((n_models, n_profiles))
     for i, model in enumerate(model_names):
         for j, key in enumerate(_PROFILE_KEYS):
             score_matrix[i, j] = profile_data[model].get(key, 0.0)
-            std_matrix[i, j]   = profile_data[model].get(f"{key}_std", 0.0)
+            std_matrix[i, j] = profile_data[model].get(f"{key}_std", 0.0)
 
     fig, ax = plt.subplots(figsize=figsize)
 
@@ -66,7 +67,7 @@ def plot_profile_alignment(
     legend_handles = []
     for i, model in enumerate(model_names):
         offsets = profile_positions + (i - n_models / 2 + 0.5) * bar_width
-        color   = MODEL_PALETTE[i % len(MODEL_PALETTE)]
+        color = MODEL_PALETTE[i % len(MODEL_PALETTE)]
         bars = ax.bar(
             offsets,
             score_matrix[i],
@@ -83,11 +84,26 @@ def plot_profile_alignment(
     ax.set_xticklabels(_PROFILE_LABELS, fontsize=10)
     ax.set_ylabel("Profile Alignment Score", fontsize=10)
     ax.set_ylim(0, 1.05)
-    ax.axhline(0.5, color=PAPER_COLORS["failed"], linestyle="--",
-               linewidth=1, alpha=0.6, label="Threshold (0.5)")
+    ax.axhline(
+        0.5,
+        color=PAPER_COLORS["failed"],
+        linestyle="--",
+        linewidth=1,
+        alpha=0.6,
+        label="Threshold (0.5)",
+    )
     from matplotlib.lines import Line2D
-    legend_handles.append(Line2D([0], [0], color=PAPER_COLORS["failed"],
-                                 linestyle="--", linewidth=1, label="Threshold (0.5)"))
+
+    legend_handles.append(
+        Line2D(
+            [0],
+            [0],
+            color=PAPER_COLORS["failed"],
+            linestyle="--",
+            linewidth=1,
+            label="Threshold (0.5)",
+        )
+    )
     ax.legend(handles=legend_handles, fontsize=8, loc="lower right")
     ax.set_title(title, fontsize=11, fontweight="bold")
 
@@ -98,6 +114,7 @@ def plot_profile_alignment(
 # ---------------------------------------------------------------------------
 # Figure 12 — Profile Radar Chart
 # ---------------------------------------------------------------------------
+
 
 def plot_profile_radar(
     profile_data: dict[str, dict[str, float]],
@@ -132,14 +149,20 @@ def plot_profile_radar(
 
     legend_handles = []
     for i, (model, scores) in enumerate(profile_data.items()):
-        values = [scores.get(k, 0.0) for k in _PROFILE_KEYS] + [scores.get(_PROFILE_KEYS[0], 0.0)]
-        color  = MODEL_PALETTE[i % len(MODEL_PALETTE)]
+        values = [scores.get(k, 0.0) for k in _PROFILE_KEYS] + [
+            scores.get(_PROFILE_KEYS[0], 0.0)
+        ]
+        color = MODEL_PALETTE[i % len(MODEL_PALETTE)]
         ax.plot(angles, values, color=color, linewidth=2)
         ax.fill(angles, values, color=color, alpha=0.12)
         legend_handles.append(mpatches.Patch(color=color, label=model))
 
     ax.set_title(title, fontsize=11, fontweight="bold", pad=18)
-    ax.legend(handles=legend_handles, loc="upper right",
-              bbox_to_anchor=(1.25, 1.1), fontsize=8)
+    ax.legend(
+        handles=legend_handles,
+        loc="upper right",
+        bbox_to_anchor=(1.25, 1.1),
+        fontsize=8,
+    )
 
     return fig

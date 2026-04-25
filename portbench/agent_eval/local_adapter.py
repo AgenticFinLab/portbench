@@ -27,10 +27,7 @@ Usage:
     result = pipeline.run_episode(snapshot)
 """
 
-import os
-import json
 import time
-from typing import Optional
 
 from .base import AgentAdapter
 
@@ -38,6 +35,7 @@ from .base import AgentAdapter
 # ---------------------------------------------------------------------------
 # Shared retry helper (same interface as llm_adapters.py)
 # ---------------------------------------------------------------------------
+
 
 def _retry(fn, max_retries: int = 3, base_delay: float = 1.0):
     """Retry fn() with exponential backoff. Skips non-retryable connection errors."""
@@ -47,8 +45,10 @@ def _retry(fn, max_retries: int = 3, base_delay: float = 1.0):
             return fn()
         except Exception as e:
             if attempt < max_retries - 1:
-                print(f"  Local model error (attempt {attempt + 1}/{max_retries}): {e}. "
-                      f"Retrying in {delay:.0f}s…")
+                print(
+                    f"  Local model error (attempt {attempt + 1}/{max_retries}): {e}. "
+                    f"Retrying in {delay:.0f}s…"
+                )
                 time.sleep(delay)
                 delay *= 2
             else:
@@ -58,6 +58,7 @@ def _retry(fn, max_retries: int = 3, base_delay: float = 1.0):
 # ---------------------------------------------------------------------------
 # vLLM Adapter
 # ---------------------------------------------------------------------------
+
 
 class VLLMAdapter(AgentAdapter):
     """
@@ -89,20 +90,22 @@ class VLLMAdapter(AgentAdapter):
         max_tokens: int = 2048,
         temperature: float = 0.0,
         system_prompt: str = "You are a professional portfolio manager. "
-                             "Respond with structured JSON as instructed.",
+        "Respond with structured JSON as instructed.",
         max_retries: int = 3,
         timeout: float = 120.0,
     ):
         try:
             from openai import OpenAI
         except ImportError:
-            raise ImportError("openai package required. Install with: pip install openai")
+            raise ImportError(
+                "openai package required. Install with: pip install openai"
+            )
 
         self._model = model
         self._base_url = base_url.rstrip("/")
         self._client = OpenAI(
             base_url=self._base_url,
-            api_key="EMPTY",   # vLLM does not require a real API key
+            api_key="EMPTY",  # vLLM does not require a real API key
             timeout=timeout,
         )
         self._max_tokens = max_tokens
@@ -116,6 +119,7 @@ class VLLMAdapter(AgentAdapter):
 
     def complete(self, prompt: str) -> str:
         """Send prompt to vLLM and return the response text."""
+
         def _call():
             response = self._client.chat.completions.create(
                 model=self._model,
@@ -134,6 +138,7 @@ class VLLMAdapter(AgentAdapter):
 # ---------------------------------------------------------------------------
 # Ollama Adapter
 # ---------------------------------------------------------------------------
+
 
 class OllamaAdapter(AgentAdapter):
     """
@@ -168,7 +173,7 @@ class OllamaAdapter(AgentAdapter):
         max_tokens: int = 2048,
         temperature: float = 0.0,
         system_prompt: str = "You are a professional portfolio manager. "
-                             "Respond with structured JSON as instructed.",
+        "Respond with structured JSON as instructed.",
         max_retries: int = 3,
         timeout: float = 120.0,
     ):
@@ -189,7 +194,9 @@ class OllamaAdapter(AgentAdapter):
         try:
             import requests
         except ImportError:
-            raise ImportError("requests package required. Install with: pip install requests")
+            raise ImportError(
+                "requests package required. Install with: pip install requests"
+            )
 
         payload = {
             "model": self._model,
@@ -220,6 +227,7 @@ class OllamaAdapter(AgentAdapter):
 # ---------------------------------------------------------------------------
 # HuggingFace Adapter
 # ---------------------------------------------------------------------------
+
 
 class HuggingFaceAdapter(AgentAdapter):
     """
@@ -261,7 +269,7 @@ class HuggingFaceAdapter(AgentAdapter):
         temperature: float = 0.0,
         do_sample: bool = False,
         system_prompt: str = "You are a professional portfolio manager. "
-                             "Respond with structured JSON as instructed.",
+        "Respond with structured JSON as instructed.",
         torch_dtype: str = "auto",
         load_in_4bit: bool = False,
         trust_remote_code: bool = False,
@@ -284,6 +292,7 @@ class HuggingFaceAdapter(AgentAdapter):
         print(f"Loading {model_name} (device={device}, 4bit={load_in_4bit})…")
 
         import torch
+
         dtype_map = {
             "auto": "auto",
             "float16": torch.float16,
@@ -302,6 +311,7 @@ class HuggingFaceAdapter(AgentAdapter):
         if load_in_4bit:
             try:
                 from transformers import BitsAndBytesConfig
+
                 load_kwargs["quantization_config"] = BitsAndBytesConfig(
                     load_in_4bit=True,
                     bnb_4bit_compute_dtype=torch.bfloat16,

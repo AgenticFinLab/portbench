@@ -40,7 +40,14 @@ def plot_sandbox_nav(
         nav_norm = nav / nav.iloc[0] * 100
         ax.plot(nav_norm.index, nav_norm.values, label=name, color=color, linewidth=1.5)
 
-    ax.axhline(100, color="black", linestyle="--", linewidth=0.8, alpha=0.4, label="Start (100)")
+    ax.axhline(
+        100,
+        color="black",
+        linestyle="--",
+        linewidth=0.8,
+        alpha=0.4,
+        label="Start (100)",
+    )
     ax.set_xlabel("Date")
     ax.set_ylabel("Normalized NAV (base=100)")
     ax.set_title(title, fontsize=11, fontweight="bold")
@@ -71,14 +78,14 @@ def plot_sandbox_metrics(
         metric_keys = ["total_return", "sharpe_ratio", "max_drawdown", "volatility"]
 
     metric_labels = {
-        "total_return":  "Total Return",
-        "cagr":          "CAGR",
-        "sharpe_ratio":  "Sharpe Ratio",
+        "total_return": "Total Return",
+        "cagr": "CAGR",
+        "sharpe_ratio": "Sharpe Ratio",
         "sortino_ratio": "Sortino Ratio",
-        "max_drawdown":  "Max Drawdown",
-        "calmar_ratio":  "Calmar Ratio",
-        "volatility":    "Annualized Vol",
-        "mean_ceps":     "Mean CEPS",
+        "max_drawdown": "Max Drawdown",
+        "calmar_ratio": "Calmar Ratio",
+        "volatility": "Annualized Vol",
+        "mean_ceps": "Mean CEPS",
         "mean_profile_score": "Profile Score",
     }
 
@@ -93,17 +100,31 @@ def plot_sandbox_metrics(
     for ax, key in zip(axes, metric_keys):
         values = [metrics_data[m].get(key, 0.0) for m in models]
         colors = [
-            PAPER_COLORS["failed"] if (key == "max_drawdown" and v < -0.20)
-            else MODEL_PALETTE[i % len(MODEL_PALETTE)]
+            (
+                PAPER_COLORS["failed"]
+                if (key == "max_drawdown" and v < -0.20)
+                else MODEL_PALETTE[i % len(MODEL_PALETTE)]
+            )
             for i, v in enumerate(values)
         ]
-        bars = ax.bar(range(n_models), values, color=colors, alpha=0.85, edgecolor="white")
+        bars = ax.bar(
+            range(n_models), values, color=colors, alpha=0.85, edgecolor="white"
+        )
 
         for bar, v in zip(bars, values):
-            fmt = (f"{v:+.1%}" if key in ("total_return", "cagr", "max_drawdown", "volatility")
-                   else f"{v:.2f}")
-            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
-                    fmt, ha="center", va="bottom", fontsize=7)
+            fmt = (
+                f"{v:+.1%}"
+                if key in ("total_return", "cagr", "max_drawdown", "volatility")
+                else f"{v:.2f}"
+            )
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height(),
+                fmt,
+                ha="center",
+                va="bottom",
+                fontsize=7,
+            )
 
         ax.set_xticks(range(n_models))
         ax.set_xticklabels(models, rotation=30, ha="right", fontsize=8)
@@ -136,11 +157,19 @@ def plot_ceps_vs_pnl(
         name = entry.get("model_name", f"model_{i}")
         passed = entry.get("stress_gate_passed", entry.get("risk_gate_passed", True))
 
-        color = MODEL_PALETTE[i % len(MODEL_PALETTE)] if passed else PAPER_COLORS["neutral"]
+        color = (
+            MODEL_PALETTE[i % len(MODEL_PALETTE)] if passed else PAPER_COLORS["neutral"]
+        )
         marker = "o" if passed else "x"
         ax.scatter(ceps, ret, color=color, marker=marker, s=80, zorder=3)
-        ax.annotate(name, (ceps, ret), textcoords="offset points",
-                    xytext=(6, 4), fontsize=7, color=color)
+        ax.annotate(
+            name,
+            (ceps, ret),
+            textcoords="offset points",
+            xytext=(6, 4),
+            fontsize=7,
+            color=color,
+        )
 
     if len(model_data) >= 3:
         xs = np.array([e.get("mean_ceps", 0.0) for e in model_data])
@@ -148,8 +177,15 @@ def plot_ceps_vs_pnl(
         if xs.std() > 0:
             m, b = np.polyfit(xs, ys, 1)
             x_line = np.linspace(xs.min(), xs.max(), 50)
-            ax.plot(x_line, m * x_line + b, "--", color="gray",
-                    linewidth=1.0, alpha=0.6, label=f"trend (slope={m:.2f})")
+            ax.plot(
+                x_line,
+                m * x_line + b,
+                "--",
+                color="gray",
+                linewidth=1.0,
+                alpha=0.6,
+                label=f"trend (slope={m:.2f})",
+            )
             ax.legend(fontsize=8)
 
     ax.axhline(0, color="black", linestyle="--", linewidth=0.8, alpha=0.4)
@@ -184,6 +220,7 @@ def plot_stress_drawdown(
         figsize:     Figure dimensions.
     """
     from matplotlib.colors import LinearSegmentedColormap
+
     apply_paper_style()
 
     # Expect a single model (call once per model, or pass one model's data)
@@ -217,10 +254,13 @@ def plot_stress_drawdown(
     ax.set_xticks(range(n_profiles))
     ax.set_xticklabels([p.capitalize() for p in profiles], fontsize=10)
     ax.set_yticks(range(n_scenarios))
-    scenario_labels = [s.replace("_", " ").replace("2015 china shock", "2015 China Shock")
-                        .replace("2020 covid flash crash", "2020 COVID Crash")
-                        .replace("2022 crypto collapse", "2022 Crypto Collapse")
-                       for s in scenarios]
+    scenario_labels = [
+        s.replace("_", " ")
+        .replace("2015 china shock", "2015 China Shock")
+        .replace("2020 covid flash crash", "2020 COVID Crash")
+        .replace("2022 crypto collapse", "2022 Crypto Collapse")
+        for s in scenarios
+    ]
     ax.set_yticklabels(scenario_labels, fontsize=9)
 
     for i in range(n_scenarios):
@@ -258,8 +298,8 @@ def plot_profile_nav(
 
     profile_colors = {
         "conservative": PAPER_COLORS.get("passed", MODEL_PALETTE[0]),
-        "balanced":     MODEL_PALETTE[1] if len(MODEL_PALETTE) > 1 else "#e67e22",
-        "aggressive":   PAPER_COLORS.get("failed", "#c0392b"),
+        "balanced": MODEL_PALETTE[1] if len(MODEL_PALETTE) > 1 else "#e67e22",
+        "aggressive": PAPER_COLORS.get("failed", "#c0392b"),
     }
 
     fig, ax = plt.subplots(figsize=figsize)
@@ -269,13 +309,20 @@ def plot_profile_nav(
             continue
         color = profile_colors.get(profile, MODEL_PALETTE[0])
         nav_norm = nav / nav.iloc[0] * 100
-        ax.plot(nav_norm.index, nav_norm.values,
-                label=profile.capitalize(), color=color, linewidth=1.8)
+        ax.plot(
+            nav_norm.index,
+            nav_norm.values,
+            label=profile.capitalize(),
+            color=color,
+            linewidth=1.8,
+        )
 
     ax.axhline(100, color="black", linestyle="--", linewidth=0.8, alpha=0.4)
     ax.set_xlabel("Date")
     ax.set_ylabel("Normalized NAV (base=100)")
-    default_title = f"Profile NAV Curves — {model_name}" if model_name else "Profile NAV Curves"
+    default_title = (
+        f"Profile NAV Curves — {model_name}" if model_name else "Profile NAV Curves"
+    )
     ax.set_title(title or default_title, fontsize=11, fontweight="bold")
     ax.legend(fontsize=9)
     fig.autofmt_xdate()
@@ -286,6 +333,7 @@ def plot_profile_nav(
 # ---------------------------------------------------------------------------
 # Data loaders (new structure: {model}/{ts}/{profile}/[stress_*|normal]/)
 # ---------------------------------------------------------------------------
+
 
 def load_sandbox_results(sandbox_dir: str) -> dict[str, dict]:
     """
@@ -321,7 +369,9 @@ def load_sandbox_results(sandbox_dir: str) -> dict[str, dict]:
             if result_file.exists():
                 data = json.loads(result_file.read_text())
                 if nav_file.exists():
-                    nav_df = pd.read_csv(nav_file, parse_dates=["date"], index_col="date")
+                    nav_df = pd.read_csv(
+                        nav_file, parse_dates=["date"], index_col="date"
+                    )
                     data["_nav_series"] = nav_df["nav"]
                 results[model_dir.name] = data
             continue
@@ -330,8 +380,11 @@ def load_sandbox_results(sandbox_dir: str) -> dict[str, dict]:
         latest_ts = max(ts_dirs, key=lambda d: d.name)
 
         # Detect new 3-level: {profile}/normal/backtest_result.json
-        profile_dirs = [d for d in sorted(latest_ts.iterdir())
-                        if d.is_dir() and d.name in ("conservative", "balanced", "aggressive")]
+        profile_dirs = [
+            d
+            for d in sorted(latest_ts.iterdir())
+            if d.is_dir() and d.name in ("conservative", "balanced", "aggressive")
+        ]
 
         if profile_dirs:
             # New structure
@@ -343,7 +396,9 @@ def load_sandbox_results(sandbox_dir: str) -> dict[str, dict]:
                     continue
                 data = json.loads(result_file.read_text())
                 if nav_file.exists():
-                    nav_df = pd.read_csv(nav_file, parse_dates=["date"], index_col="date")
+                    nav_df = pd.read_csv(
+                        nav_file, parse_dates=["date"], index_col="date"
+                    )
                     data["_nav_series"] = nav_df["nav"]
                 key = f"{model_dir.name}/{profile_dir.name}"
                 results[key] = data
@@ -354,7 +409,9 @@ def load_sandbox_results(sandbox_dir: str) -> dict[str, dict]:
             if result_file.exists():
                 data = json.loads(result_file.read_text())
                 if nav_file.exists():
-                    nav_df = pd.read_csv(nav_file, parse_dates=["date"], index_col="date")
+                    nav_df = pd.read_csv(
+                        nav_file, parse_dates=["date"], index_col="date"
+                    )
                     data["_nav_series"] = nav_df["nav"]
                 results[model_dir.name] = data
 
@@ -412,16 +469,20 @@ def load_sandbox_results_full(sandbox_dir: str) -> dict[str, dict]:
                 profile_entry["normal"] = json.loads(normal_file.read_text())
                 nav_file = profile_dir / "normal" / "nav_curve.csv"
                 if nav_file.exists():
-                    nav_df = pd.read_csv(nav_file, parse_dates=["date"], index_col="date")
+                    nav_df = pd.read_csv(
+                        nav_file, parse_dates=["date"], index_col="date"
+                    )
                     profile_entry["normal"]["_nav_series"] = nav_df["nav"]
 
             # Stress
             for child in sorted(profile_dir.iterdir()):
                 if child.is_dir() and child.name.startswith("stress_"):
-                    scenario = child.name[len("stress_"):]
+                    scenario = child.name[len("stress_") :]
                     res_file = child / "backtest_result.json"
                     if res_file.exists():
-                        profile_entry["stress"][scenario] = json.loads(res_file.read_text())
+                        profile_entry["stress"][scenario] = json.loads(
+                            res_file.read_text()
+                        )
 
             model_entry["profiles"][pname] = profile_entry
 

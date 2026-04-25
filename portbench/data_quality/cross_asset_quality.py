@@ -3,14 +3,12 @@
 from pathlib import Path
 from typing import Optional
 
-import numpy as np
 import pandas as pd
 
 from .base import (
     BenchmarkQualityReport,
     DataQualityChecker,
     DatasetQualityReport,
-    QualityConfig,
     QualityLevel,
 )
 from .numeric_quality import NumericQualityChecker
@@ -20,6 +18,7 @@ from .text_quality import TextQualityChecker
 # ---------------------------------------------------------------------------
 # Market regime detection
 # ---------------------------------------------------------------------------
+
 
 def label_market_regimes(
     price_series: pd.Series,
@@ -64,6 +63,7 @@ def label_market_regimes(
 # Cross-asset checker
 # ---------------------------------------------------------------------------
 
+
 class CrossAssetQualityChecker(DataQualityChecker):
     """
     Cross-asset quality checks using the processed output files.
@@ -94,8 +94,8 @@ class CrossAssetQualityChecker(DataQualityChecker):
         Returns:
             DatasetQualityReport summarising cross-asset health.
         """
-        base = Path(processed_dir) if processed_dir else (
-            self.datasets_dir / "processed"
+        base = (
+            Path(processed_dir) if processed_dir else (self.datasets_dir / "processed")
         )
 
         report = DatasetQualityReport(
@@ -134,8 +134,8 @@ class CrossAssetQualityChecker(DataQualityChecker):
         """
         benchmark_report = BenchmarkQualityReport()
 
-        base = Path(processed_dir) if processed_dir else (
-            self.datasets_dir / "processed"
+        base = (
+            Path(processed_dir) if processed_dir else (self.datasets_dir / "processed")
         )
 
         numeric_checker = NumericQualityChecker(self.config)
@@ -143,15 +143,20 @@ class CrossAssetQualityChecker(DataQualityChecker):
 
         # --- Numeric: check every processed CSV
         asset_classes = [
-            "equities", "bonds", "commodities",
-            "real_estate", "cryptocurrency", "cash",
+            "equities",
+            "bonds",
+            "commodities",
+            "real_estate",
+            "cryptocurrency",
+            "cash",
         ]
         for asset_class in asset_classes:
             csv_path = base / f"{asset_class}.csv"
             df = self._load_csv(csv_path)
             if df is not None:
                 price_cols = [
-                    c for c in df.columns
+                    c
+                    for c in df.columns
                     if any(k in c.lower() for k in ("close", "price", "value", "adj"))
                 ]
                 rep = numeric_checker.check(
@@ -209,8 +214,12 @@ class CrossAssetQualityChecker(DataQualityChecker):
     def _check_asset_coverage(self, base: Path) -> object:
         """All six asset class CSVs should exist in processed/."""
         expected = [
-            "equities", "bonds", "commodities",
-            "real_estate", "cryptocurrency", "cash",
+            "equities",
+            "bonds",
+            "commodities",
+            "real_estate",
+            "cryptocurrency",
+            "cash",
         ]
         missing = [a for a in expected if not (base / f"{a}.csv").exists()]
         coverage = (len(expected) - len(missing)) / len(expected)
@@ -227,7 +236,10 @@ class CrossAssetQualityChecker(DataQualityChecker):
             threshold=1.0,
             level=level,
             message=message,
-            details={"missing": missing, "found": [a for a in expected if a not in missing]},
+            details={
+                "missing": missing,
+                "found": [a for a in expected if a not in missing],
+            },
         )
 
     def _check_joint_coverage(self, dfs: dict[str, pd.DataFrame]) -> object:
@@ -265,13 +277,14 @@ class CrossAssetQualityChecker(DataQualityChecker):
                 f"{joint_rate:.1%} of dates have data for all {n_assets} asset classes "
                 f"simultaneously ({joint_dates}/{total_dates} dates)."
             ),
-            details={"joint_dates": joint_dates, "total_dates": total_dates,
-                     "n_assets": n_assets},
+            details={
+                "joint_dates": joint_dates,
+                "total_dates": total_dates,
+                "n_assets": n_assets,
+            },
         )
 
-    def _check_regime_label_balance(
-        self, dfs: dict[str, pd.DataFrame]
-    ) -> list[object]:
+    def _check_regime_label_balance(self, dfs: dict[str, pd.DataFrame]) -> list[object]:
         """
         Apply regime detection on equity close prices in the test set and
         check that at least two distinct regimes are present.
@@ -283,14 +296,18 @@ class CrossAssetQualityChecker(DataQualityChecker):
         if equity_df is None:
             return results
 
-        close_cols = [c for c in equity_df.columns if "close" in c.lower() or "spy" in c.lower()]
+        close_cols = [
+            c for c in equity_df.columns if "close" in c.lower() or "spy" in c.lower()
+        ]
         if not close_cols:
             close_cols = equity_df.select_dtypes(include=[float, int]).columns.tolist()
         if not close_cols:
             return results
 
         price_col = close_cols[0]
-        equity_df = equity_df.set_index("date") if "date" in equity_df.columns else equity_df
+        equity_df = (
+            equity_df.set_index("date") if "date" in equity_df.columns else equity_df
+        )
         prices = equity_df[price_col].dropna()
 
         if len(prices) < 200:
@@ -301,7 +318,9 @@ class CrossAssetQualityChecker(DataQualityChecker):
         # Check test period regime distribution
         test_start = pd.Timestamp(self.config.test_start)
         test_end = pd.Timestamp(self.config.test_end)
-        test_regimes = regimes[(regimes.index >= test_start) & (regimes.index <= test_end)]
+        test_regimes = regimes[
+            (regimes.index >= test_start) & (regimes.index <= test_end)
+        ]
 
         if test_regimes.empty:
             results.append(
@@ -357,8 +376,12 @@ class CrossAssetQualityChecker(DataQualityChecker):
 
     def _load_processed_frames(self, base: Path) -> dict[str, pd.DataFrame]:
         asset_classes = [
-            "equities", "bonds", "commodities",
-            "real_estate", "cryptocurrency", "cash",
+            "equities",
+            "bonds",
+            "commodities",
+            "real_estate",
+            "cryptocurrency",
+            "cash",
         ]
         dfs = {}
         for ac in asset_classes:

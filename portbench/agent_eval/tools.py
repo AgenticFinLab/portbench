@@ -23,15 +23,17 @@ from typing import Any, Callable
 @dataclass
 class ToolSpec:
     """Specification for a single quantitative tool."""
+
     name: str
     description: str
     input_schema: dict  # JSON Schema for the tool's input
-    fn: Callable        # Python implementation
+    fn: Callable  # Python implementation
 
 
 # ---------------------------------------------------------------------------
 # Tool implementations
 # ---------------------------------------------------------------------------
+
 
 def _calc(expression: str) -> float:
     """Safely evaluate a math expression using a restricted namespace."""
@@ -42,7 +44,9 @@ def _calc(expression: str) -> float:
         result = eval(expression, {"__builtins__": {}}, allowed)  # noqa: S307
         return float(result)
     except Exception as exc:
-        raise ValueError(f"Could not evaluate expression {expression!r}: {exc}") from exc
+        raise ValueError(
+            f"Could not evaluate expression {expression!r}: {exc}"
+        ) from exc
 
 
 def _pearson_correlation(a: list[float], b: list[float]) -> float:
@@ -105,7 +109,10 @@ def _web_search(query: str, n_results: int = 3) -> str:
     results = data.get("organic", [])[:n_results]
     if not results:
         return "No search results found."
-    lines = [f"{i+1}. {r.get('title', '')}: {r.get('snippet', '')}" for i, r in enumerate(results)]
+    lines = [
+        f"{i+1}. {r.get('title', '')}: {r.get('snippet', '')}"
+        for i, r in enumerate(results)
+    ]
     return "\n".join(lines)
 
 

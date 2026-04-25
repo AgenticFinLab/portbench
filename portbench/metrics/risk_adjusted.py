@@ -5,7 +5,7 @@ import pandas as pd
 
 from .base import MetricsConfig
 from .return_metrics import cagr
-from .risk_metrics import volatility, max_drawdown
+from .risk_metrics import max_drawdown
 
 
 def sharpe_ratio(returns: pd.Series, config: MetricsConfig = None) -> float:

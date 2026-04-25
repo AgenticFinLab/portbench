@@ -133,9 +133,13 @@ def _run_kaggle_cli(dataset_id: str, target_dir: Path) -> None:
         env["KAGGLE_KEY"] = key
 
     cmd = [
-        kaggle_cmd, "datasets", "download",
-        "-d", dataset_id,
-        "-p", str(target_dir),
+        kaggle_cmd,
+        "datasets",
+        "download",
+        "-d",
+        dataset_id,
+        "-p",
+        str(target_dir),
         "--unzip",
     ]
     print(f"  Running: {' '.join(cmd)}")
@@ -213,6 +217,7 @@ class KaggleCollector(DataCollector):
             if data_type == DataType.NUMERIC and suffix == ".csv":
                 try:
                     import pandas as pd
+
                     df = pd.read_csv(item, nrows=0)
                     total_cols = max(total_cols, len(df.columns))
                     with open(item, "r", encoding="utf-8", errors="ignore") as f:
@@ -223,10 +228,14 @@ class KaggleCollector(DataCollector):
                 try:
                     if suffix == ".csv":
                         import pandas as pd
+
                         df = pd.read_csv(item)
                         document_count += len(df)
-                        text_cols = [c for c in df.columns
-                                     if "text" in c.lower() or "content" in c.lower()]
+                        text_cols = [
+                            c
+                            for c in df.columns
+                            if "text" in c.lower() or "content" in c.lower()
+                        ]
                         if text_cols:
                             total_text_length += int(df[text_cols[0]].str.len().sum())
                     elif suffix == ".json":
@@ -277,6 +286,7 @@ class KaggleCollector(DataCollector):
                 result.setdefault(dataset.asset_class, []).append(path)
             except Exception as e:
                 import traceback
+
                 print(f"[ERROR] Failed {dataset.dataset_id}: {e}")
                 traceback.print_exc()
         return result

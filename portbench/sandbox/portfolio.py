@@ -28,7 +28,7 @@ class PortfolioState:
     nav_history: list[tuple[date, float]] = field(default_factory=list)
     trade_history: list[dict] = field(default_factory=list)
 
-    SLIPPAGE_RATE: float = 0.0010   # 10 bps linear market impact
+    SLIPPAGE_RATE: float = 0.0010  # 10 bps linear market impact
     COMMISSION_RATE: float = 0.0005  # 5 bps commission per trade value
 
     def rebalance(
@@ -69,15 +69,17 @@ class PortfolioState:
             cost = commission + trade_value * abs(slippage)
             total_cost += cost
             total_turnover += abs(delta)
-            orders.append({
-                "asset": asset,
-                "direction": direction,
-                "delta_weight": round(delta, 6),
-                "trade_value": round(trade_value, 2),
-                "slippage_bps": round(slippage * 10000, 2),
-                "commission": round(commission, 4),
-                "cost": round(cost, 4),
-            })
+            orders.append(
+                {
+                    "asset": asset,
+                    "direction": direction,
+                    "delta_weight": round(delta, 6),
+                    "trade_value": round(trade_value, 2),
+                    "slippage_bps": round(slippage * 10000, 2),
+                    "commission": round(commission, 4),
+                    "cost": round(cost, 4),
+                }
+            )
 
         cost_drag = total_cost / self.nav
         self.nav = self.nav * (1 - cost_drag)
@@ -110,8 +112,7 @@ class PortfolioState:
         """
         # Compute weighted portfolio return
         port_return = sum(
-            self.weights.get(asset, 0.0) * r
-            for asset, r in returns.items()
+            self.weights.get(asset, 0.0) * r for asset, r in returns.items()
         )
         self.nav = self.nav * (1 + port_return)
 

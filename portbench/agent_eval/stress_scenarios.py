@@ -6,11 +6,9 @@ into the evaluation pipeline as dedicated test episodes. Models must achieve
 minimum scores on all stress scenarios before entering the main performance ranking.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
 from typing import Optional
-
-import pandas as pd
 
 from .base import MarketSnapshot
 
@@ -105,7 +103,7 @@ class ScenarioInjector:
     def generate_snapshots(
         self,
         scenario: StressScenario,
-        step_days: int = 5,   # Generate one snapshot every 5 trading days
+        step_days: int = 5,  # Generate one snapshot every 5 trading days
     ) -> list[MarketSnapshot]:
         """
         Generate a list of MarketSnapshot objects for the stress scenario window.
@@ -121,7 +119,9 @@ class ScenarioInjector:
         from datetime import timedelta
 
         snapshots = []
-        dates = pd.bdate_range(start=scenario.start, end=scenario.end, freq=f"{step_days}B")
+        dates = pd.bdate_range(
+            start=scenario.start, end=scenario.end, freq=f"{step_days}B"
+        )
 
         for d in dates:
             decision_date = d.date()
@@ -131,13 +131,14 @@ class ScenarioInjector:
                 end = decision_date
                 # Approximate start for lookback
                 from datetime import timedelta as td
+
                 start = end - td(days=int(self.lookback_days * 1.5))
 
                 for asset in self.assets:
                     prices = self.provider.get_price_series(asset, start, end)
-                    prices = prices.iloc[-self.lookback_days:]
+                    prices = prices.iloc[-self.lookback_days :]
                     returns = self.provider.get_return_series(asset, start, end)
-                    returns = returns.iloc[-self.lookback_days:]
+                    returns = returns.iloc[-self.lookback_days :]
                     # Skip assets with no data in this window — otherwise an
                     # empty snapshot looks valid and the pipeline scores it as
                     # actual=gt=0 (false pass).
@@ -168,24 +169,26 @@ class ScenarioInjector:
                     except Exception:
                         continue
 
-                snapshots.append(MarketSnapshot(
-                    decision_date=decision_date,
-                    price_data=price_data,
-                    return_data=return_data,
-                    macro_data=macro,
-                    current_weights=current_weights,
-                    market_regime=regime,
-                    news_text=news_text,
-                ))
+                snapshots.append(
+                    MarketSnapshot(
+                        decision_date=decision_date,
+                        price_data=price_data,
+                        return_data=return_data,
+                        macro_data=macro,
+                        current_weights=current_weights,
+                        market_regime=regime,
+                        news_text=news_text,
+                    )
+                )
             except Exception:
-                continue   # Skip dates where data is unavailable
+                continue  # Skip dates where data is unavailable
 
         return snapshots
 
     def run_stress_test(
         self,
         scenario: StressScenario,
-        pipeline,           # EvalPipeline instance
+        pipeline,  # EvalPipeline instance
         step_days: int = 5,
     ) -> dict:
         """

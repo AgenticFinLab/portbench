@@ -72,13 +72,13 @@ class RiskParityBaseline(BaselineStrategy):
         for asset in assets:
             r = snapshot.return_data.get(asset)
             if r is None or r.dropna().shape[0] < self.min_periods:
-                vols[asset] = np.nan   # Mark for backfill
+                vols[asset] = np.nan  # Mark for backfill
             else:
                 r_clean = r.dropna()
                 vol = float(r_clean.std())
                 if self.annualize:
                     vol *= np.sqrt(252)
-                vols[asset] = max(vol, 1e-8)   # Guard against zero volatility
+                vols[asset] = max(vol, 1e-8)  # Guard against zero volatility
 
         # Fill missing vols with cross-sectional median
         valid_vols = [v for v in vols.values() if not np.isnan(v)]

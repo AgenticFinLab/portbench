@@ -45,12 +45,12 @@ def plot_stress_gate(
 
     # Build data matrix: shape (n_models, n_scenarios)
     ceps_matrix = np.zeros((n_models, n_scenarios))
-    pass_matrix  = np.ones((n_models, n_scenarios), dtype=bool)
-    threshold     = 0.5  # default; read from first result if available
+    pass_matrix = np.ones((n_models, n_scenarios), dtype=bool)
+    threshold = 0.5  # default; read from first result if available
     for i, model in enumerate(model_names):
         for j, sr in enumerate(stress_data[model]):
             ceps_matrix[i, j] = sr.get("mean_ceps", 0.0)
-            pass_matrix[i, j]  = sr.get("passed", True)
+            pass_matrix[i, j] = sr.get("passed", True)
             threshold = sr.get("min_pass_score", threshold)
 
     fig, ax = plt.subplots(figsize=figsize)
@@ -61,16 +61,33 @@ def plot_stress_gate(
     for i, model in enumerate(model_names):
         offsets = scenario_positions + (i - n_models / 2 + 0.5) * bar_width
         for j in range(n_scenarios):
-            score  = ceps_matrix[i, j]
+            score = ceps_matrix[i, j]
             passed = pass_matrix[i, j]
-            color  = MODEL_PALETTE[i % len(MODEL_PALETTE)] if passed else PAPER_COLORS["failed"]
-            hatch  = None if passed else "//"
-            bar = ax.bar(offsets[j], score, width=bar_width * 0.9,
-                         color=color, hatch=hatch, alpha=0.85, edgecolor="white")
+            color = (
+                MODEL_PALETTE[i % len(MODEL_PALETTE)]
+                if passed
+                else PAPER_COLORS["failed"]
+            )
+            hatch = None if passed else "//"
+            bar = ax.bar(
+                offsets[j],
+                score,
+                width=bar_width * 0.9,
+                color=color,
+                hatch=hatch,
+                alpha=0.85,
+                edgecolor="white",
+            )
 
     # Pass threshold line
-    ax.axhline(threshold, color="red", linestyle="--", linewidth=1.5,
-               label=f"Pass threshold ({threshold:.2f})", zorder=5)
+    ax.axhline(
+        threshold,
+        color="red",
+        linestyle="--",
+        linewidth=1.5,
+        label=f"Pass threshold ({threshold:.2f})",
+        zorder=5,
+    )
 
     ax.set_xticks(scenario_positions)
     ax.set_xticklabels(scenario_names, fontsize=10)
@@ -79,11 +96,23 @@ def plot_stress_gate(
     ax.set_title(title, fontsize=11, fontweight="bold")
 
     # Legend: model colors + failed pattern
-    handles = [mpatches.Patch(color=MODEL_PALETTE[i % len(MODEL_PALETTE)], label=m)
-               for i, m in enumerate(model_names)]
-    handles.append(mpatches.Patch(facecolor=PAPER_COLORS["failed"], hatch="//",
-                                  edgecolor="white", label="Failed"))
-    handles.append(plt.Line2D([0], [0], color="red", linestyle="--", label=f"Threshold ({threshold:.2f})"))
+    handles = [
+        mpatches.Patch(color=MODEL_PALETTE[i % len(MODEL_PALETTE)], label=m)
+        for i, m in enumerate(model_names)
+    ]
+    handles.append(
+        mpatches.Patch(
+            facecolor=PAPER_COLORS["failed"],
+            hatch="//",
+            edgecolor="white",
+            label="Failed",
+        )
+    )
+    handles.append(
+        plt.Line2D(
+            [0], [0], color="red", linestyle="--", label=f"Threshold ({threshold:.2f})"
+        )
+    )
     ax.legend(handles=handles, fontsize=8, loc="lower right")
 
     fig.tight_layout()

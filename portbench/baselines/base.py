@@ -15,7 +15,6 @@ rule-based ground-truth (same as MockAgentAdapter).
 import json
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import Optional
 
 from ..agent_eval.base import AgentAdapter, MarketSnapshot
 
@@ -23,6 +22,7 @@ from ..agent_eval.base import AgentAdapter, MarketSnapshot
 # ---------------------------------------------------------------------------
 # Result container
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class BaselineResult:
@@ -34,6 +34,7 @@ class BaselineResult:
         model_name:  Identifier of the baseline that produced this result.
         notes:       Optional free-text rationale (useful for debugging).
     """
+
     weights: dict[str, float] = field(default_factory=dict)
     model_name: str = "unknown_baseline"
     notes: str = ""
@@ -42,6 +43,7 @@ class BaselineResult:
 # ---------------------------------------------------------------------------
 # Abstract base
 # ---------------------------------------------------------------------------
+
 
 class BaselineStrategy(AgentAdapter):
     """

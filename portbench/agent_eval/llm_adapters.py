@@ -42,6 +42,7 @@ load_dotenv()
 # Shared retry helper
 # ---------------------------------------------------------------------------
 
+
 def _retry(fn, max_retries: int = 3, base_delay: float = 2.0):
     """
     Retry fn() with exponential backoff on transient API errors.
@@ -59,8 +60,10 @@ def _retry(fn, max_retries: int = 3, base_delay: float = 2.0):
             if any(k in err_str for k in ("auth", "invalid", "permission", "notfound")):
                 raise
             if attempt < max_retries - 1:
-                print(f"  API error (attempt {attempt + 1}/{max_retries}): {e}. "
-                      f"Retrying in {delay:.0f}s…")
+                print(
+                    f"  API error (attempt {attempt + 1}/{max_retries}): {e}. "
+                    f"Retrying in {delay:.0f}s…"
+                )
                 time.sleep(delay)
                 delay *= 2
             else:
@@ -70,6 +73,7 @@ def _retry(fn, max_retries: int = 3, base_delay: float = 2.0):
 # ---------------------------------------------------------------------------
 # Anthropic (Claude) Adapter
 # ---------------------------------------------------------------------------
+
 
 class AnthropicAdapter(AgentAdapter):
     """
@@ -93,7 +97,7 @@ class AnthropicAdapter(AgentAdapter):
         max_tokens: int = 2048,
         temperature: float = 0.0,
         system_prompt: str = "You are a professional portfolio manager. "
-                             "Respond with structured JSON as instructed.",
+        "Respond with structured JSON as instructed.",
         max_retries: int = 3,
     ):
         try:
@@ -103,9 +107,7 @@ class AnthropicAdapter(AgentAdapter):
                 "anthropic package required. Install with: pip install anthropic"
             )
 
-        self._client = anthropic.Anthropic(
-            api_key=os.environ.get("ANTHROPIC_API_KEY")
-        )
+        self._client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
         self._model = model
         self._max_tokens = max_tokens
         self._temperature = temperature
@@ -126,6 +128,7 @@ class AnthropicAdapter(AgentAdapter):
         Returns:
             Model's response as a plain string.
         """
+
         def _call():
             message = self._client.messages.create(
                 model=self._model,
@@ -156,6 +159,7 @@ class AnthropicAdapter(AgentAdapter):
         messages = [{"role": "user", "content": prompt}]
 
         for _ in range(10):  # max 10 tool rounds
+
             def _call(msgs=messages):
                 return self._client.messages.create(
                     model=self._model,
@@ -188,18 +192,22 @@ class AnthropicAdapter(AgentAdapter):
                 if block.type == "tool_use":
                     try:
                         result = dispatch_tool(block.name, block.input, tools)
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": str(result),
-                        })
+                        tool_results.append(
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": block.id,
+                                "content": str(result),
+                            }
+                        )
                     except Exception as exc:
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": f"Error: {exc}",
-                            "is_error": True,
-                        })
+                        tool_results.append(
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": block.id,
+                                "content": f"Error: {exc}",
+                                "is_error": True,
+                            }
+                        )
 
             # Append assistant turn + tool results to messages
             messages = messages + [
@@ -214,6 +222,7 @@ class AnthropicAdapter(AgentAdapter):
 # ---------------------------------------------------------------------------
 # OpenAI (GPT) Adapter
 # ---------------------------------------------------------------------------
+
 
 class OpenAIAdapter(AgentAdapter):
     """
@@ -246,7 +255,7 @@ class OpenAIAdapter(AgentAdapter):
         max_tokens: int = 2048,
         temperature: float = 0.0,
         system_prompt: str = "You are a professional portfolio manager. "
-                             "Respond with structured JSON as instructed.",
+        "Respond with structured JSON as instructed.",
         max_retries: int = 3,
         base_url: Optional[str] = None,
         api_key_env: str = "OPENAI_API_KEY",
@@ -274,6 +283,7 @@ class OpenAIAdapter(AgentAdapter):
 
     def complete(self, prompt: str) -> str:
         """Call the OpenAI Chat Completions API and return the response text."""
+
         def _call():
             response = self._client.chat.completions.create(
                 model=self._model,
@@ -312,6 +322,7 @@ class OpenAIAdapter(AgentAdapter):
         ]
 
         for _ in range(10):  # max 10 tool rounds
+
             def _call(msgs=messages):
                 return self._client.chat.completions.create(
                     model=self._model,
@@ -339,11 +350,13 @@ class OpenAIAdapter(AgentAdapter):
                     content = str(result)
                 except Exception as exc:
                     content = f"Error: {exc}"
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": content,
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": content,
+                    }
+                )
 
         return self.complete(prompt)
 
@@ -351,6 +364,7 @@ class OpenAIAdapter(AgentAdapter):
 # ---------------------------------------------------------------------------
 # LiteLLM Adapter (unified interface for 100+ models)
 # ---------------------------------------------------------------------------
+
 
 class LiteLLMAdapter(AgentAdapter):
     """
@@ -383,13 +397,14 @@ class LiteLLMAdapter(AgentAdapter):
         max_tokens: int = 2048,
         temperature: float = 0.0,
         system_prompt: str = "You are a professional portfolio manager. "
-                             "Respond with structured JSON as instructed.",
+        "Respond with structured JSON as instructed.",
         max_retries: int = 3,
         api_base: Optional[str] = None,
         extra_params: Optional[dict] = None,
     ):
         try:
             import litellm
+
             self._litellm = litellm
         except ImportError:
             raise ImportError(
@@ -476,19 +491,28 @@ class LiteLLMAdapter(AgentAdapter):
             if choice.finish_reason != "tool_calls":
                 return choice.message.content or ""
 
-            messages.append({"role": "assistant", "content": choice.message.content,
-                             "tool_calls": [tc.model_dump() for tc in (choice.message.tool_calls or [])]})
-            for tc in (choice.message.tool_calls or []):
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": choice.message.content,
+                    "tool_calls": [
+                        tc.model_dump() for tc in (choice.message.tool_calls or [])
+                    ],
+                }
+            )
+            for tc in choice.message.tool_calls or []:
                 try:
                     args = json.loads(tc.function.arguments)
                     result = dispatch_tool(tc.function.name, args, tools)
                     content = str(result)
                 except Exception as exc:
                     content = f"Error: {exc}"
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": content,
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": content,
+                    }
+                )
 
         return self.complete(prompt)

@@ -6,7 +6,7 @@ consistency across asset classes with different price scales. The canonical inpu
 is a pd.Series of daily simple or log returns with a DatetimeIndex.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 
@@ -22,8 +22,8 @@ class MetricsConfig:
         benchmark_returns: Optional benchmark return series for Information Ratio.
     """
 
-    risk_free_rate: float = 0.04          # 4% annualized
-    annualization_factor: int = 252       # Trading days per year
+    risk_free_rate: float = 0.04  # 4% annualized
+    annualization_factor: int = 252  # Trading days per year
     var_confidence: float = 0.95
     benchmark_returns: Optional[object] = None  # pd.Series when provided
 
@@ -38,23 +38,23 @@ class PortfolioMetrics:
     """
 
     # --- Return metrics ---
-    total_return: Optional[float] = None        # Cumulative return over period
-    cagr: Optional[float] = None                # Compound Annual Growth Rate
+    total_return: Optional[float] = None  # Cumulative return over period
+    cagr: Optional[float] = None  # Compound Annual Growth Rate
 
     # --- Risk metrics ---
-    volatility: Optional[float] = None          # Annualized standard deviation of returns
-    max_drawdown: Optional[float] = None        # Maximum peak-to-trough decline (negative)
-    var_95: Optional[float] = None              # Value-at-Risk at 95% confidence (negative)
-    cvar_95: Optional[float] = None             # Conditional VaR / Expected Shortfall (negative)
+    volatility: Optional[float] = None  # Annualized standard deviation of returns
+    max_drawdown: Optional[float] = None  # Maximum peak-to-trough decline (negative)
+    var_95: Optional[float] = None  # Value-at-Risk at 95% confidence (negative)
+    cvar_95: Optional[float] = None  # Conditional VaR / Expected Shortfall (negative)
 
     # --- Risk-adjusted metrics ---
     sharpe_ratio: Optional[float] = None
     sortino_ratio: Optional[float] = None
     calmar_ratio: Optional[float] = None
-    information_ratio: Optional[float] = None   # Requires benchmark
+    information_ratio: Optional[float] = None  # Requires benchmark
 
     # --- Allocation accuracy (QA evaluation) ---
-    weight_mae: Optional[float] = None          # Mean Absolute Error of predicted weights
+    weight_mae: Optional[float] = None  # Mean Absolute Error of predicted weights
     portfolio_return_gap: Optional[float] = None  # R_pred - R_optimal
 
     def to_dict(self) -> dict:
