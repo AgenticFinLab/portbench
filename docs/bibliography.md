@@ -32,7 +32,6 @@
 | 15 | **AMA** (When Agents Trade): Live Multi-Market Trading Benchmark for LLM Agents | arXiv 2024 | [arxiv:2510.11695](https://arxiv.org/abs/2510.11695) |
 | 16 | **FinRL Contests**: Benchmarking Data-driven Financial RL Agents (2023–2025) | arXiv 2025 | [arxiv:2504.02281](https://arxiv.org/abs/2504.02281) |
 
-> **Direct relevance to PortBench**: [13] motivates the risk-first paradigm; [14] justifies the PiT constraint and alpha-decay auditing; [12] demonstrates the necessity of end-to-end pipeline evaluation (90%→40% accuracy drop); [15] reveals that agent framework architecture dominates model backbone in performance.
 
 ---
 
@@ -95,4 +94,3 @@
 | 46 | **Qlib**: An AI-oriented Quantitative Investment Platform | IJCAI 2021 Workshop | [arxiv:2009.11189](https://arxiv.org/abs/2009.11189) |
 | 47 | **mbt-gym**: RL for Model-Based Limit Order Book Trading | ICAIF 2023 | [arxiv:2209.15162](https://arxiv.org/abs/2209.15162) |
 
-> **MarS** is the target integration for PortBench's future generative sandbox, enabling multi-asset joint simulation with exogenous shock injection.
