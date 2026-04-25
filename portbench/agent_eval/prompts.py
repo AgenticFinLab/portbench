@@ -42,6 +42,11 @@ def _schema_block(schema_lines: Iterable[str]) -> str:
     return "JSON SCHEMA:\n{\n" + "\n".join(schema_lines) + "\n}"
 
 
+def _quote(s: str) -> str:
+    """Wrap a string in double quotes — keeps backslashes out of f-strings."""
+    return '"' + s + '"'
+
+
 # ---------------------------------------------------------------------------
 # S1 — Market Interpretation
 # ---------------------------------------------------------------------------
@@ -61,8 +66,7 @@ def build_s1_prompt(
         if snapshot.news_text
         else ""
     )
-    q = '"'
-    asset_view_fields = ", ".join(f"{q}{a}{q}: <float in [-1, 1]>" for a in assets)
+    asset_view_fields = ", ".join(f"{_quote(a)}: <float in [-1, 1]>" for a in assets)
     schema = _schema_block(
         [
             f'  "asset_views": {{ {asset_view_fields} }},',
@@ -109,11 +113,12 @@ def build_s2_prompt(
     """Prompt for Stage 2: discrete buy/hold/sell signals + strengths."""
     views_str = "\n".join(f"  {a}: view={v:+.3f}" for a, v in s1.asset_views.items())
     news_block = (
-        f"\nRecent news / filings:\n{snapshot.news_text}\n" if snapshot.news_text else ""
+        f"\nRecent news / filings:\n{snapshot.news_text}\n"
+        if snapshot.news_text
+        else ""
     )
-    q = '"'
-    sig_fields = ", ".join(f'{q}{a}{q}: "<buy|hold|sell>"' for a in assets)
-    str_fields = ", ".join(f"{q}{a}{q}: <float in [0, 1]>" for a in assets)
+    sig_fields = ", ".join(f'{_quote(a)}: "<buy|hold|sell>"' for a in assets)
+    str_fields = ", ".join(f"{_quote(a)}: <float in [0, 1]>" for a in assets)
     schema = _schema_block(
         [
             f'  "signals": {{ {sig_fields} }},',
@@ -164,8 +169,7 @@ def build_s3_prompt(
         f"{a}={w:.3f}" for a, w in snapshot.current_weights.items()
     )
     corr_section = f"\n{corr_block}\n" if corr_block else ""
-    q = '"'
-    weight_fields = ", ".join(f"{q}{a}{q}: <float in [0, 1]>" for a in assets)
+    weight_fields = ", ".join(f"{_quote(a)}: <float in [0, 1]>" for a in assets)
     schema = _schema_block(
         [
             f'  "weights": {{ {weight_fields} }},',

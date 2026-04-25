@@ -399,9 +399,7 @@ class ProcessedDataProvider(DataProvider):
 
     def has_text(self, asset: str, before_date: date) -> bool:
         """
-        Fast check: does any text_json record exist for this asset class strictly
-        before before_date? Used to rank candidate dates without invoking the
-        full get_news() pipeline (which sorts records and formats output).
+        Fast check: does any text_json record exist for this asset class strictly before before_date? Used to rank candidate dates without invoking the full get_news() pipeline (which sorts records and formats output).
         """
         cls = self._ASSET_CLASS_MAP.get(asset)
         if cls not in ("equities", "cryptocurrency"):

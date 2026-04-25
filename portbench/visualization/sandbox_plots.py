@@ -466,13 +466,14 @@ def load_sandbox_results_full(sandbox_dir: str) -> dict[str, dict]:
             # Normal
             normal_file = profile_dir / "normal" / "backtest_result.json"
             if normal_file.exists():
-                profile_entry["normal"] = json.loads(normal_file.read_text())
+                normal_data: dict = json.loads(normal_file.read_text())
                 nav_file = profile_dir / "normal" / "nav_curve.csv"
                 if nav_file.exists():
                     nav_df = pd.read_csv(
                         nav_file, parse_dates=["date"], index_col="date"
                     )
-                    profile_entry["normal"]["_nav_series"] = nav_df["nav"]
+                    normal_data["_nav_series"] = nav_df["nav"]
+                profile_entry["normal"] = normal_data
 
             # Stress
             for child in sorted(profile_dir.iterdir()):

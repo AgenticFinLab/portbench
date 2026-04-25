@@ -134,12 +134,13 @@ class BacktestEngine:
 
         # Generate rebalance dates
         freq_key = _REBALANCE_FREQS.get(self.rebalance_freq, "BMS")
-        rebalance_dates = set(
-            pd.bdate_range(self.start_date, self.end_date, freq=freq_key).date.tolist()
-        )
+        rebalance_dates = {
+            ts.date()
+            for ts in pd.bdate_range(self.start_date, self.end_date, freq=freq_key)
+        }
 
         # All business days for mark-to-market
-        all_bdays = pd.bdate_range(self.start_date, self.end_date).date.tolist()
+        all_bdays = [ts.date() for ts in pd.bdate_range(self.start_date, self.end_date)]
 
         weight_rows: list[dict] = []
         total_cost = 0.0
