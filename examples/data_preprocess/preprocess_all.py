@@ -197,6 +197,61 @@ def _build_portbench_csv(processed_dir: Path) -> None:
     merged.to_csv(out, index=False)
     print(f"  Saved: {out}  ({merged.shape[0]} rows × {merged.shape[1]} cols)")
 
+    _write_correlation_artifacts(processed_dir, frames)
+
+
+def _write_correlation_artifacts(
+    processed_dir: Path,
+    frames: dict[str, pd.DataFrame],
+) -> None:
+    """
+    Persist correlation_matrix.csv, covariance_matrix.csv, and asset_class_map.json
+    alongside the per-asset files.
+
+    For each asset class, every column whose name contains "close"/"price"/"value"/
+    "adj" is treated as a ticker price series and converted to daily returns. The
+    full asset-level correlation and (annualized) covariance matrices are then
+    written out so downstream consumers (QA builder, baselines, sandbox) can read
+    a frozen, PiT-correct snapshot rather than recomputing on the fly.
+    """
+    import numpy as np
+
+    asset_class_map: dict[str, str] = {}
+    return_cols: dict[str, pd.Series] = {}
+
+    for ac, df in frames.items():
+        d = df.set_index("date")
+        price_cols = [
+            c for c in d.columns
+            if any(k in c.lower() for k in ("close", "price", "value", "adj"))
+        ]
+        for col in price_cols:
+            ticker = col.replace(f"{ac}_", "", 1)
+            prices = pd.to_numeric(d[col], errors="coerce").dropna()
+            if len(prices) < 30:
+                continue
+            return_cols[ticker] = prices.pct_change()
+            asset_class_map[ticker] = ac
+
+    if len(return_cols) < 2:
+        print("  [SKIP] correlation/covariance artifacts: <2 usable price columns")
+        return
+
+    ret_df = pd.DataFrame(return_cols).dropna(how="all")
+    corr = ret_df.corr()
+    cov = ret_df.cov() * 252  # annualized
+
+    corr_path = processed_dir / "correlation_matrix.csv"
+    cov_path = processed_dir / "covariance_matrix.csv"
+    map_path = processed_dir / "asset_class_map.json"
+    corr.to_csv(corr_path)
+    cov.to_csv(cov_path)
+    map_path.write_text(json.dumps(asset_class_map, indent=2), encoding="utf-8")
+    print(
+        f"  Saved correlation artifacts: {corr_path.name}, {cov_path.name}, "
+        f"{map_path.name}  ({corr.shape[0]} assets, {len(set(asset_class_map.values()))} classes)"
+    )
+
 
 if __name__ == "__main__":
     import sys

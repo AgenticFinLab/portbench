@@ -40,6 +40,11 @@ from portbench.visualization.sandbox_plots import (
     plot_stress_drawdown,
     plot_profile_nav,
 )
+from portbench.visualization.correlation_graph import (
+    plot_correlation_mst,
+    plot_correlation_threshold,
+)
+from portbench.visualization.correlation_plots import load_processed_correlation
 
 
 # ---------------------------------------------------------------------------
@@ -458,6 +463,32 @@ def gen_fig15(qa_dir: str, out: Path, fmt: tuple) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Figure generators — correlation graph (Fig 16–17, dataset-level)
+# ---------------------------------------------------------------------------
+
+def gen_fig16(processed_dir: str, out: Path, fmt: tuple) -> bool:
+    """MST skeleton of cross-asset correlation, colored by asset class."""
+    corr, amap = load_processed_correlation(Path(processed_dir))
+    if corr is None or corr.empty:
+        print(f"  [Fig 16] Skipped — correlation_matrix.csv not in {processed_dir}")
+        return False
+    fig = plot_correlation_mst(corr, asset_class_map=amap)
+    save_figure(fig, str(out / "static" / "fig16_correlation_mst"), formats=fmt)
+    return True
+
+
+def gen_fig17(processed_dir: str, out: Path, fmt: tuple) -> bool:
+    """Threshold-filtered correlation network (|rho| >= 0.5)."""
+    corr, amap = load_processed_correlation(Path(processed_dir))
+    if corr is None or corr.empty:
+        print(f"  [Fig 17] Skipped — correlation_matrix.csv not in {processed_dir}")
+        return False
+    fig = plot_correlation_threshold(corr, asset_class_map=amap, threshold=0.5)
+    save_figure(fig, str(out / "static" / "fig17_correlation_network"), formats=fmt)
+    return True
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -477,6 +508,8 @@ FIGURE_MAP = {
     13: ("Stress Drawdown Heatmap",           gen_fig13),
     14: ("Profile NAV Curves",                gen_fig14),
     15: ("QA Accuracy by Template",           gen_fig15),
+    16: ("Correlation MST Skeleton",          gen_fig16),
+    17: ("Correlation Network (|ρ|≥0.5)",     gen_fig17),
 }
 
 
@@ -490,6 +523,8 @@ def parse_args():
                         help="QA eval results dir (for Fig 15)")
     parser.add_argument("--qa-stats", default="datasets/qa_dataset/stats.json",
                         help="QA dataset stats.json (for Fig 6)")
+    parser.add_argument("--processed-dir", default="datasets/processed",
+                        help="Processed dataset dir (for Figs 16–17)")
     parser.add_argument("--output-dir", default="figures")
     parser.add_argument("--format", default="both", choices=["pdf", "png", "both"])
     parser.add_argument("--figures", default="all",
@@ -544,6 +579,8 @@ def main():
                 ok = fn(args.sandbox_dir, out, fmt)
             elif fig_id == 15:
                 ok = fn(args.qa_dir, out, fmt)
+            elif fig_id in (16, 17):
+                ok = fn(args.processed_dir, out, fmt)
             else:
                 ok = fn(ceps_data, out, fmt)
             if ok:

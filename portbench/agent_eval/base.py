@@ -74,6 +74,12 @@ class MarketSnapshot:
                             (e.g., equity–bond flight-to-quality dynamics) and intra-class
                             correlations (e.g., sector concentration within equities).
                             Used in S3 CorrelationAwarenessScore and T4/T5/T7 templates.
+        asset_class_map:    Optional dict mapping asset id -> asset class string
+                            (e.g. {"SPY": "equities", "TLT": "bonds"}). When set,
+                            enables get_intra_class_correlation() / get_inter_class_correlation()
+                            so downstream code can reason about *intra-class* (e.g. sector
+                            concentration within equities) vs *inter-class* (e.g. stock-bond
+                            hedging) correlation structure separately.
     """
 
     decision_date: date
@@ -85,6 +91,7 @@ class MarketSnapshot:
     portfolio_value: float = 100_000.0
     market_regime: Optional[str] = None
     correlation_matrix: Optional[pd.DataFrame] = None
+    asset_class_map: Optional[dict[str, str]] = None
 
     def get_correlation(self) -> pd.DataFrame:
         """
@@ -100,6 +107,61 @@ class MarketSnapshot:
             return pd.DataFrame()
         self.correlation_matrix = df.corr(method="pearson")
         return self.correlation_matrix
+
+    def get_intra_class_correlation(self) -> dict[str, pd.DataFrame]:
+        """
+        Return per-asset-class correlation sub-matrices.
+
+        Requires self.asset_class_map. Each key is an asset class with at least
+        two member assets present in the correlation matrix; the value is the
+        sub-matrix restricted to that class's tickers. Empty dict if the map is
+        missing or no class has >= 2 members with data.
+        """
+        if not self.asset_class_map:
+            return {}
+        cm = self.get_correlation()
+        if cm.empty:
+            return {}
+        groups: dict[str, list[str]] = {}
+        for a in cm.columns:
+            ac = self.asset_class_map.get(a)
+            if ac:
+                groups.setdefault(ac, []).append(a)
+        return {ac: cm.loc[members, members] for ac, members in groups.items() if len(members) >= 2}
+
+    def get_inter_class_correlation(self) -> pd.DataFrame:
+        """
+        Return the asset-class × asset-class correlation matrix obtained by
+        averaging cross-class pairwise correlations. Diagonal entries are
+        the within-class average correlation (excluding self-pairs).
+
+        Empty DataFrame if asset_class_map is missing or fewer than 2 classes
+        are represented.
+        """
+        if not self.asset_class_map:
+            return pd.DataFrame()
+        cm = self.get_correlation()
+        if cm.empty:
+            return pd.DataFrame()
+        groups: dict[str, list[str]] = {}
+        for a in cm.columns:
+            ac = self.asset_class_map.get(a)
+            if ac:
+                groups.setdefault(ac, []).append(a)
+        if len(groups) < 2:
+            return pd.DataFrame()
+        classes = sorted(groups)
+        out = pd.DataFrame(index=classes, columns=classes, dtype=float)
+        for ci in classes:
+            for cj in classes:
+                vals = []
+                for a in groups[ci]:
+                    for b in groups[cj]:
+                        if a == b:
+                            continue
+                        vals.append(float(cm.loc[a, b]))
+                out.loc[ci, cj] = sum(vals) / len(vals) if vals else float("nan")
+        return out
 
 
 @dataclass

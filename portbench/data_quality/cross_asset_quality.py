@@ -110,6 +110,9 @@ class CrossAssetQualityChecker(DataQualityChecker):
         if dfs:
             report.checks.append(self._check_joint_coverage(dfs))
             report.checks.extend(self._check_regime_label_balance(dfs))
+            corr_check = self._check_correlation_structure(dfs)
+            if corr_check is not None:
+                report.checks.append(corr_check)
 
         return report
 
@@ -373,6 +376,69 @@ class CrossAssetQualityChecker(DataQualityChecker):
         return results
 
     # ------------------------------------------------------------------ helpers
+
+    def _check_correlation_structure(self, dfs: dict[str, pd.DataFrame]):
+        """
+        Build one daily-return series per asset class (median of numeric cols)
+        and assess the cross-class correlation matrix:
+          - NaN ratio: fraction of off-diagonal entries that are NaN
+          - rank: passes if matrix has >= 2 classes with finite correlations
+        FAIL if all off-diagonal entries are NaN; WARN if > 50% NaN.
+        """
+        import numpy as np
+
+        ret_by_class: dict[str, pd.Series] = {}
+        for ac, df in dfs.items():
+            d = df.copy()
+            if "date" in d.columns:
+                d = d.set_index("date")
+            num = d.select_dtypes(include=[float, int])
+            price_cols = [c for c in num.columns if any(k in c.lower() for k in ("close", "price", "value", "adj"))]
+            if not price_cols:
+                continue
+            prices = num[price_cols].median(axis=1).dropna()
+            if len(prices) < 30:
+                continue
+            ret_by_class[ac] = prices.pct_change().dropna()
+
+        if len(ret_by_class) < 2:
+            return None
+
+        ret_df = pd.DataFrame(ret_by_class).dropna(how="all")
+        if ret_df.shape[1] < 2 or len(ret_df) < 30:
+            return None
+
+        corr = ret_df.corr()
+        n = corr.shape[0]
+        off_diag = corr.values[~np.eye(n, dtype=bool)]
+        nan_ratio = float(np.mean(np.isnan(off_diag)))
+
+        if nan_ratio >= 1.0:
+            level = QualityLevel.FAIL
+        elif nan_ratio > 0.5:
+            level = QualityLevel.WARN
+        else:
+            level = QualityLevel.PASS
+
+        finite = off_diag[~np.isnan(off_diag)]
+        return self._make_check(
+            "cross_class_correlation_structure",
+            value=round(1.0 - nan_ratio, 4),
+            threshold=0.5,
+            level=level,
+            message=(
+                f"{n} asset classes available; "
+                f"{(1.0 - nan_ratio):.0%} of cross-class correlations are finite "
+                f"(mean={float(np.mean(finite)) if len(finite) else float('nan'):+.2f})."
+            ),
+            details={
+                "n_classes": n,
+                "nan_ratio": round(nan_ratio, 4),
+                "mean_off_diag": (float(np.mean(finite)) if len(finite) else None),
+                "min_off_diag": (float(np.min(finite)) if len(finite) else None),
+                "max_off_diag": (float(np.max(finite)) if len(finite) else None),
+            },
+        )
 
     def _load_processed_frames(self, base: Path) -> dict[str, pd.DataFrame]:
         asset_classes = [

@@ -201,20 +201,47 @@ def _format_macro_context(snapshot: MarketSnapshot) -> str:
 
 
 def _format_correlation(snapshot: MarketSnapshot, max_assets: int = 6) -> str:
-    """Format the pairwise return correlation matrix as a compact table string."""
+    """Format the pairwise return correlation matrix as a compact table string.
+
+    When snapshot.asset_class_map is set, the table is augmented with two extra
+    blocks that surface the *intra-class* (within e.g. equities) and *inter-class*
+    (e.g. equities vs bonds) correlation structure separately, since those two
+    layers have different portfolio implications (concentration vs hedging).
+    """
     if snapshot.correlation_matrix is None or snapshot.correlation_matrix.empty:
         return ""
     cm = snapshot.correlation_matrix
     assets = list(cm.columns[:max_assets])
-    cm = cm.loc[assets, assets]
+    cm_view = cm.loc[assets, assets]
     lines = ["PAIRWISE RETURN CORRELATIONS (trailing window):"]
     header = "         " + "".join(f"{a:>10}" for a in assets)
     lines.append(header)
     for row_asset in assets:
         row = f"{row_asset:<9}" + "".join(
-            f"{cm.loc[row_asset, col]:>10.2f}" for col in assets
+            f"{cm_view.loc[row_asset, col]:>10.2f}" for col in assets
         )
         lines.append(row)
+
+    if snapshot.asset_class_map:
+        intra = snapshot.get_intra_class_correlation()
+        if intra:
+            lines.append("")
+            lines.append("INTRA-CLASS AVERAGE CORRELATION (concentration risk per class):")
+            for ac, sub in sorted(intra.items()):
+                vals = sub.values[~np.eye(len(sub), dtype=bool)]
+                if len(vals):
+                    lines.append(f"  {ac:<14}: mean={float(np.mean(vals)):+.2f}  n={len(sub)}")
+        inter = snapshot.get_inter_class_correlation()
+        if not inter.empty:
+            lines.append("")
+            lines.append("INTER-CLASS CORRELATION (hedging/diversification across classes):")
+            classes = list(inter.columns)
+            lines.append("         " + "".join(f"{c[:8]:>10}" for c in classes))
+            for ci in classes:
+                row = f"{ci[:8]:<9}" + "".join(
+                    f"{inter.loc[ci, cj]:>10.2f}" for cj in classes
+                )
+                lines.append(row)
     return "\n".join(lines)
 
 
@@ -507,13 +534,16 @@ class S3WeightOptimization(PipelineStage):
 
         Weight accuracy: 1 - weight_mae / 2 (normalized, max error = 2.0)
 
-        Correlation awareness: measures whether the proposed weights reduce
-        portfolio variance relative to the ground-truth weights, given the
-        empirical correlation structure. Specifically:
-            score = 1 - |port_var(actual) - port_var(gt)| / port_var(gt)
-        clamped to [0, 1]. This penalizes allocations that ignore correlation
-        by concentrating in highly correlated assets (e.g., all equities) when
-        the correlation structure would support diversification.
+        Correlation awareness (30%) is split into two components when an
+        asset_class_map is available on the snapshot:
+          - 15%: intra-class concentration penalty — high weight on tickers
+                 inside a class with high mutual correlation is penalized
+                 (concentration in correlated names is not real diversification).
+          - 15%: inter-class hedging credit — distributing weight across asset
+                 classes whose returns are weakly / negatively correlated is
+                 rewarded (cross-class diversification).
+        When no asset_class_map is available, the full 30% falls back to the
+        original variance-ratio score.
 
         Falls back to 100% weight accuracy if the snapshot is not available
         or fewer than 2 assets have sufficient return data.
@@ -522,14 +552,94 @@ class S3WeightOptimization(PipelineStage):
         mae = weight_mae(actual.weights, ground_truth.weights)
         accuracy_score = float(np.clip(1.0 - mae / 2.0, 0.0, 1.0))
 
-        # Attempt correlation-awareness scoring via the snapshot stored during run()
-        if hasattr(self, "_last_snapshot") and self._last_snapshot is not None:
-            corr_score = self._correlation_awareness_score(
-                actual.weights, ground_truth.weights, self._last_snapshot
-            )
-            return float(0.70 * accuracy_score + 0.30 * corr_score)
+        snap = getattr(self, "_last_snapshot", None)
+        if snap is None:
+            return accuracy_score
 
-        return accuracy_score
+        if snap.asset_class_map:
+            intra = self._intra_class_diversification_score(actual.weights, snap)
+            inter = self._inter_class_hedging_score(actual.weights, snap)
+            return float(0.70 * accuracy_score + 0.15 * intra + 0.15 * inter)
+
+        corr_score = self._correlation_awareness_score(
+            actual.weights, ground_truth.weights, snap
+        )
+        return float(0.70 * accuracy_score + 0.30 * corr_score)
+
+    def _intra_class_diversification_score(
+        self,
+        actual_weights: dict,
+        snapshot: "MarketSnapshot",
+    ) -> float:
+        """
+        Penalize concentrating weight inside a single asset class with high
+        internal correlation.
+
+        For each class with >= 2 represented assets:
+            class_weight = sum of actual weights on that class
+            avg_intra_corr = average off-diagonal correlation inside the class
+            penalty_c = class_weight * max(avg_intra_corr, 0)
+        Score = 1 - sum(penalty_c), clipped to [0, 1].
+        Returns 1.0 when the asset_class_map yields no usable groups.
+        """
+        intra = snapshot.get_intra_class_correlation()
+        if not intra:
+            return 1.0
+        penalty = 0.0
+        for sub in intra.values():
+            members = list(sub.columns)
+            class_w = sum(float(actual_weights.get(a, 0.0)) for a in members)
+            if class_w <= 0:
+                continue
+            vals = sub.values[~np.eye(len(sub), dtype=bool)]
+            if not len(vals):
+                continue
+            avg_corr = float(np.mean(vals))
+            penalty += class_w * max(avg_corr, 0.0)
+        return float(np.clip(1.0 - penalty, 0.0, 1.0))
+
+    def _inter_class_hedging_score(
+        self,
+        actual_weights: dict,
+        snapshot: "MarketSnapshot",
+    ) -> float:
+        """
+        Reward spreading weight across asset classes that are weakly / negatively
+        correlated with each other.
+
+        Aggregate weights per class, then compute the weighted average of the
+        off-diagonal entries of the inter-class correlation matrix:
+            avg_xclass_corr = sum_{i!=j} w_i * w_j * corr(class_i, class_j)
+                              / sum_{i!=j} w_i * w_j
+        Score = clip((1 - avg_xclass_corr) / 2, 0, 1)
+        (correlation +1 → 0, 0 → 0.5, -1 → 1.0).
+        Returns 1.0 when fewer than two classes carry weight.
+        """
+        inter = snapshot.get_inter_class_correlation()
+        if inter.empty:
+            return 1.0
+        class_weights: dict[str, float] = {}
+        for a, w in actual_weights.items():
+            ac = snapshot.asset_class_map.get(a) if snapshot.asset_class_map else None
+            if ac is None or ac not in inter.columns:
+                continue
+            class_weights[ac] = class_weights.get(ac, 0.0) + float(w)
+        active = [c for c, w in class_weights.items() if w > 0]
+        if len(active) < 2:
+            return 1.0
+        num = 0.0
+        den = 0.0
+        for ci in active:
+            for cj in active:
+                if ci == cj:
+                    continue
+                w_pair = class_weights[ci] * class_weights[cj]
+                num += w_pair * float(inter.loc[ci, cj])
+                den += w_pair
+        if den <= 0:
+            return 1.0
+        avg_corr = num / den
+        return float(np.clip((1.0 - avg_corr) / 2.0, 0.0, 1.0))
 
     def _correlation_awareness_score(
         self,

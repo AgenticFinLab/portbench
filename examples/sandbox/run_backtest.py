@@ -58,6 +58,7 @@ from portbench.agent_eval.mock_agent import MockAgentAdapter
 from portbench.agent_eval.investor_profiles import PROFILES
 from portbench.agent_eval.stress_scenarios import STRESS_SCENARIOS
 from portbench.baselines import (
+    CovarianceRiskParityBaseline,
     EqualWeightBaseline,
     SixtyFortyBaseline,
     RiskParityBaseline,
@@ -86,7 +87,7 @@ def parse_args():
         "--baseline",
         type=str,
         default=None,
-        choices=["equal_weight", "sixty_forty", "risk_parity"],
+        choices=["equal_weight", "sixty_forty", "risk_parity", "cov_risk_parity"],
     )
     parser.add_argument(
         "--no-pipeline",
@@ -141,6 +142,8 @@ def _build_adapter(args):
         return SixtyFortyBaseline()
     elif args.baseline == "risk_parity":
         return RiskParityBaseline()
+    elif args.baseline == "cov_risk_parity":
+        return CovarianceRiskParityBaseline()
     elif args.model:
         if ":" not in args.model:
             raise ValueError(
