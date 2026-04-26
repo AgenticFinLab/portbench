@@ -28,7 +28,6 @@ Usage:
 """
 
 import time
-import torch
 
 from .base import AgentAdapter
 
@@ -291,6 +290,8 @@ class HuggingFaceAdapter(AgentAdapter):
         self._max_retries = max_retries
 
         print(f"Loading {model_name} (device={device}, 4bit={load_in_4bit})…")
+
+        import torch
 
         dtype_map = {
             "auto": "auto",

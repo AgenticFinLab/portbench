@@ -9,6 +9,7 @@ but uses live portfolio state instead of equal-weight assumptions.
 from __future__ import annotations
 
 from datetime import date, timedelta
+from typing import Optional
 
 import pandas as pd
 
@@ -31,10 +32,12 @@ class SnapshotBuilder:
         provider: DataProvider,
         assets: list[str],
         lookback_days: int = 60,
+        asset_class_map: Optional[dict[str, str]] = None,
     ):
         self.provider = provider
         self.assets = assets
         self.lookback_days = lookback_days
+        self.asset_class_map = asset_class_map
 
     def build(
         self,
@@ -102,4 +105,5 @@ class SnapshotBuilder:
             market_regime=regime,
             news_text=news_text,
             correlation_matrix=corr,
+            asset_class_map=self.asset_class_map,
         )

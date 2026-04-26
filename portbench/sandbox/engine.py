@@ -21,6 +21,7 @@ from datetime import date
 from typing import Optional
 
 import pandas as pd
+from tqdm.auto import tqdm
 
 from ..agent_eval.base import AgentAdapter, EvalPipeline, StageID
 from ..agent_eval import build_default_pipeline
@@ -74,8 +75,10 @@ class BacktestEngine:
         use_pipeline: bool = True,
         profile: Optional[InvestorProfile] = None,
         asset_class_map: Optional[dict[str, str]] = None,
+        snapshot_dump_dir: Optional[str] = None,
     ):
         self.strategy = strategy
+        self._snapshot_dump_dir: Optional[str] = snapshot_dump_dir
         self.provider = provider
         self.assets = assets or provider.list_assets()
         self.start_date = start_date
@@ -91,7 +94,9 @@ class BacktestEngine:
             else None
         )
 
-        self._snapshot_builder = SnapshotBuilder(provider, self.assets, lookback_days)
+        self._snapshot_builder = SnapshotBuilder(
+            provider, self.assets, lookback_days, asset_class_map=asset_class_map
+        )
         self._pipeline_log_dir: Optional[str] = None
 
         # Build pipeline once (reused across all rebalance steps)
@@ -145,6 +150,14 @@ class BacktestEngine:
         weight_rows: list[dict] = []
         total_cost = 0.0
 
+        n_rebalances_total = sum(1 for d in all_bdays if d in rebalance_dates)
+        pbar = tqdm(
+            total=n_rebalances_total,
+            desc=f"backtest {self.strategy.model_name} {self.start_date}→{self.end_date}",
+            unit="reb",
+            leave=False,
+        )
+
         for d in all_bdays:
             if d == self.start_date:
                 weight_rows.append({"date": d, **portfolio.weights})
@@ -158,6 +171,7 @@ class BacktestEngine:
 
                 if not snapshot.return_data:
                     weight_rows.append({"date": d, **portfolio.weights})
+                    pbar.update(1)
                     continue
 
                 target_weights = self._get_target_weights(snapshot)
@@ -170,6 +184,7 @@ class BacktestEngine:
 
                 trade_record = portfolio.rebalance(target_weights, prices, d)
                 total_cost += trade_record["total_cost"]
+                pbar.update(1)
             else:
                 # --- Daily mark-to-market ---
                 daily_returns = self._get_daily_returns(d)
@@ -179,6 +194,8 @@ class BacktestEngine:
                     portfolio.nav_history.append((d, portfolio.nav))
 
             weight_rows.append({"date": d, **portfolio.weights})
+
+        pbar.close()
 
         # Build result time series
         nav_series = pd.Series(
@@ -211,6 +228,7 @@ class BacktestEngine:
 
     def _get_target_weights(self, snapshot) -> dict[str, float]:
         """Get target weights; inject profile, collect CEPS + alignment when configured."""
+        self._dump_snapshot(snapshot)
         if self.use_pipeline and self._pipeline is not None:
             # Inject investor profile description into prompt context
             if self._profile is not None:
@@ -249,6 +267,33 @@ class BacktestEngine:
         raise RuntimeError(
             "Pipeline produced no usable target weights and strategy is not a "
             "BaselineStrategy — refusing to fall back to equal-weight."
+        )
+
+    def _dump_snapshot(self, snapshot) -> None:
+        """Persist MarketSnapshot for the current rebalance date if dumping is enabled."""
+        if not self._snapshot_dump_dir:
+            return
+        import json
+        from pathlib import Path
+
+        out = Path(self._snapshot_dump_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "decision_date": str(snapshot.decision_date),
+            "portfolio_value": float(snapshot.portfolio_value),
+            "current_weights": dict(snapshot.current_weights),
+            "market_regime": snapshot.market_regime,
+            "macro_data": {k: float(v) for k, v in (snapshot.macro_data or {}).items()},
+            "assets": list(snapshot.return_data.keys()),
+            "trailing_returns": {
+                a: float((1 + s.dropna()).prod() - 1)
+                for a, s in snapshot.return_data.items()
+                if not s.empty
+            },
+            "news_text_preview": (snapshot.news_text or "")[:500],
+        }
+        (out / f"{snapshot.decision_date}.json").write_text(
+            json.dumps(payload, indent=2, default=str), encoding="utf-8"
         )
 
     def _get_daily_returns(self, d: date) -> dict[str, float]:
