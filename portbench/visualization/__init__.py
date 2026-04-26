@@ -16,6 +16,16 @@ from .sandbox_plots import (
     load_sandbox_results_full,
 )
 from .profile_plots import plot_profile_alignment, plot_profile_radar
+from .correlation_plots import (
+    plot_correlation_heatmap,
+    plot_inter_class_correlation,
+    plot_correlation_evolution,
+    load_processed_correlation,
+)
+from .correlation_graph import (
+    plot_correlation_mst,
+    plot_correlation_threshold,
+)
 from .style import apply_paper_style, save_figure
 
 __all__ = [
@@ -41,6 +51,13 @@ __all__ = [
     # Investor profiles
     "plot_profile_alignment",
     "plot_profile_radar",
+    # Cross-asset correlation
+    "plot_correlation_heatmap",
+    "plot_inter_class_correlation",
+    "plot_correlation_evolution",
+    "load_processed_correlation",
+    "plot_correlation_mst",
+    "plot_correlation_threshold",
     # Shared
     "apply_paper_style",
     "save_figure",
