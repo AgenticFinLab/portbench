@@ -31,6 +31,13 @@ KAGGLE_KEY=...
 FRED_API_KEY=...
 SEC_API_KEY=...
 ANTHROPIC_API_KEY=...   # for LLM evaluation
+
+# Batch-experiment providers (each provider needs all three)
+DASHSCOPE_API_KEY=...   ; DASHSCOPE_BASE_URL=...   ; DASHSCOPE_MODEL=qwen-plus
+TENCENT_API_KEY=...     ; TENCENT_BASE_URL=...     ; TENCENT_MODEL=hunyuan-pro
+ARK_API_KEY=...         ; ARK_BASE_URL=...         ; ARK_MODEL=doubao-pro-32k
+# Add new providers by adding {PREFIX}_API_KEY/_BASE_URL/_MODEL here
+# AND one line to PROVIDER_REGISTRY in portbench/experiments/providers.py.
 ```
 
 ## Quick Start
@@ -51,6 +58,10 @@ python examples/sandbox/run_backtest.py --model anthropic:claude-opus-4-7
 
 # Mock-only mode (no API keys, no data)
 python examples/sandbox/run_backtest.py --data-provider mock
+
+# 5. Batch sweep across providers / profiles / stress scenarios
+python -m portbench.experiments --config configs/experiments/default.yaml --dry-run
+python -m portbench.experiments --config configs/experiments/default.yaml
 ```
 
 ## Module Documentation
@@ -67,6 +78,7 @@ Detailed module docs live in [`docs/modules/`](docs/modules/):
 | Agent Evaluation | `portbench/agent_eval/` | [agent_eval.md](docs/modules/agent_eval.md) |
 | Sandbox Backtest | `portbench/sandbox/` | [sandbox.md](docs/modules/sandbox.md) |
 | Baselines | `portbench/baselines/` | [baselines.md](docs/modules/baselines.md) |
+| Batch Experiments | `portbench/experiments/` | [experiments.md](docs/modules/experiments.md) |
 
 ## Module Overview
 
@@ -80,9 +92,11 @@ Detailed module docs live in [`docs/modules/`](docs/modules/):
 
 **`portbench/qa_builder/`** — Seven question templates (T1–T7) generating QA pairs from a `DataProvider` (`MockDataProvider` for synthetic GBM, `ProcessedDataProvider` for real data). Splits are computed dynamically from the data range. `ContextWindow` carries cross-asset correlations and SEC/Kaggle text. Build pipeline ranks dates text-first to maximize text coverage (~81% on the current dataset).
 
-**`portbench/baselines/`** — `EqualWeightBaseline`, `SixtyFortyBaseline`, `RiskParityBaseline`, `SmartFolioBaseline` — all implement the same `AgentAdapter` interface as LLM agents and pass through the identical evaluation pipeline.
+**`portbench/baselines/`** — `EqualWeightBaseline`, `SixtyFortyBaseline`, `RiskParityBaseline` (naive inverse-vol), `CovarianceRiskParityBaseline` (Equal-Risk-Contribution using full covariance), `SmartFolioBaseline` — all implement the same `AgentAdapter` interface as LLM agents and pass through the identical evaluation pipeline.
 
 **`portbench/visualization/`** — Matplotlib helpers for generating dataset, regime, ranking, CEPS, stress, and QA-sample figures.
+
+**`portbench/experiments/`** — Batch experiment framework: YAML-driven sweeps over `(provider × model × profile × stress scenario)`, provider registry that reads `{PREFIX}_API_KEY/_BASE_URL/_MODEL` from `.env` (one line to add a new provider), per-`(model, profile)` failure isolation, full intermediate-artifact capture (per-stage prompt/response, per-rebalance snapshots, NAV/weight/trade CSVs, figures). See [docs/modules/experiments.md](docs/modules/experiments.md).
 
 ---
 
@@ -112,7 +126,7 @@ MarketSnapshot (price/return data, macro context, news_text, correlation_matrix)
 |-------|---------------|-------------------------------------------------------------------------------------------|
 | S1    | LLM           | `1 − MAE(views, gt) / 2`                                                                  |
 | S2    | LLM           | Fraction of assets with correct signal direction                                          |
-| S3    | LLM           | **70% weight accuracy + 30% correlation awareness** (variance-reduction vs. ground truth) |
+| S3    | LLM           | **70% weight accuracy + 30% correlation awareness** (split into 15% intra-class concentration penalty + 15% inter-class hedging credit when an `asset_class_map` is available; otherwise the full 30% uses the variance-ratio fallback) |
 | S4    | Deterministic | not LLM-scored                                                                            |
 | S5    | Deterministic | 50% rebalance decision + 50% VaR/drawdown accuracy                                        |
 
@@ -239,6 +253,62 @@ outputs/sandbox/{model}/{timestamp}/
 
 ---
 
+## Batch Experiments
+
+For large-scale sweeps across multiple providers, profiles, and stress scenarios, use the `portbench/experiments/` framework. It is a thin orchestrator over the same `BacktestEngine` used by `examples/sandbox/run_backtest.py`, with three additions:
+
+1. **YAML-driven sweeps** — declare every `(provider, model, profile, scenario)` combination once.
+2. **Provider registry from `.env`** — each provider's `{PREFIX}_API_KEY/_BASE_URL/_MODEL` is read from environment. Adding a new provider = one line in `PROVIDER_REGISTRY` plus three env vars.
+3. **Per-`(model, profile)` failure isolation** — one combination crashing does not abort the batch; failures are recorded in `errors.jsonl` with full tracebacks.
+
+Built-in providers: `dashscope`, `tencent`, `deepseek`, `glm`, `kimi`, `minimax`, `ark`, `openai`, `google`, `anthropic`. Built-in baselines: `equal_weight`, `sixty_forty`, `risk_parity`, `cov_risk_parity`. Plus `mock: true` for harness smoke testing.
+
+```bash
+python -m portbench.experiments --config configs/experiments/default.yaml --dry-run
+python -m portbench.experiments --config configs/experiments/default.yaml
+python -m portbench.experiments --config configs/experiments/smoke.yaml      # no API keys
+```
+
+Output layout per batch:
+
+```
+EXPERIMENTS/{batch_id}/
+├── batch_config.yaml / batch_summary.json / errors.jsonl
+└── {provider-model}/
+    ├── profile_comparison.json
+    └── {profile}/
+        ├── experiment.log / figures/
+        ├── stress_{scenario}/
+        │   ├── backtest_result.json + summary.txt + nav_curve.csv + weight_history.csv
+        │   ├── trade_history.json
+        │   ├── snapshots/{date}.json           # per-rebalance MarketSnapshot
+        │   └── pipeline_logs/{run_id}/episodes/{date}_{n}.json
+        │       # ← per-stage prompt + raw_response + parsed_output + ground_truth + score
+        └── normal/                              # only if stress gate passes
+```
+
+See [docs/modules/experiments.md](docs/modules/experiments.md) for the full YAML schema, registry details, and reused-component map.
+
+---
+
+## Cross-Asset Correlation Modeling
+
+Multi-asset portfolios face two distinct correlation layers and PortBench surfaces both:
+
+- **Intra-class** (e.g. several tickers inside `equities`) — high mutual correlation means concentration risk is hidden by naive position counts.
+- **Inter-class** (e.g. `equities` vs `bonds` vs `commodities`) — low / negative cross-class correlation is what drives real diversification.
+
+Where this shows up in code:
+
+- `MarketSnapshot` carries `correlation_matrix` plus an optional `asset_class_map` and exposes `get_intra_class_correlation()` (per-class sub-matrices) and `get_inter_class_correlation()` (asset-class × asset-class matrix from averaged cross-class pairwise correlations).
+- The S1/S3 prompt builder (`portbench/agent_eval/stages.py::_format_correlation`) emits three blocks when the map is available: the pairwise table, an intra-class average-correlation summary (concentration risk per class), and the inter-class matrix (hedging structure).
+- The S3 score replaces the single 30% variance-ratio term with **15% intra-class concentration penalty + 15% inter-class hedging credit** when `asset_class_map` is present (variance-ratio fallback otherwise).
+- `CrossAssetQualityChecker` adds a `cross_class_correlation_structure` check: builds one daily-return series per class and reports the off-diagonal NaN ratio + min/mean/max so a degenerate cross-class matrix is flagged early.
+- `examples/data_preprocess/preprocess_all.py` writes `datasets/processed/correlation_matrix.csv`, `covariance_matrix.csv` (annualized), and `asset_class_map.json` after the per-asset CSVs are built — frozen, PiT-correct artifacts that downstream consumers can read instead of recomputing.
+- A new covariance-aware baseline `CovarianceRiskParityBaseline` (`portbench/baselines/covariance_risk_parity.py`) solves Spinu's Equal-Risk-Contribution objective via cyclical coordinate descent, providing a strong baseline that actually uses the covariance matrix (the original `RiskParityBaseline` is naive inverse-volatility). CLI: `--baseline cov_risk_parity`. Experiments registry key: `cov_risk_parity`.
+
+---
+
 ## Data Layout
 
 ```
@@ -247,7 +317,9 @@ datasets/                 # Raw + preprocessed data (gitignored)
 ├── fred/                 # Raw macro/yield CSVs
 ├── kaggle/               # Raw Kaggle datasets
 ├── sec/                  # SEC filing HTMLs
-├── processed/            # Per-asset-class preprocessed CSVs
+├── processed/            # Per-asset-class preprocessed CSVs +
+│                         #   correlation_matrix.csv, covariance_matrix.csv,
+│                         #   asset_class_map.json (cross-asset artifacts)
 └── qa_dataset/           # Built QA dataset (all_pairs.jsonl, train/val/test, stats.json)
 
 outputs/                  # All generated artifacts (gitignored)

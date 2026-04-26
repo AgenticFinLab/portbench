@@ -3,6 +3,7 @@ pandas
 scipy
 requests
 python-dotenv
+pyyaml
 
 # Data collection
 yfinance
@@ -15,7 +16,7 @@ litellm
 openai
 
 # LLM evaluation
-# Uncomment when needed (large downloads, not required for mock/baseline evaluation)
+# Uncomment when needed
 # torch
 # transformers
 # einops
@@ -31,6 +32,10 @@ openai
 
 # Visualization
 matplotlib
+networkx
+
+# Progress bars
+tqdm
 
 # Optional: web scraping (SEC dynamic pages)
 # selenium
