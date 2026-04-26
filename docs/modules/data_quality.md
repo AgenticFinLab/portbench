@@ -49,6 +49,12 @@ Orchestrates the full assessment across all six asset classes plus cross-asset c
 - Checks that all asset classes have overlapping date coverage
 - Verifies stress period coverage across all assets simultaneously
 - Calls `label_market_regimes()` and checks regime label distribution
+- `cross_class_correlation_structure` — builds one daily-return series per
+  asset class (median across price columns), computes the cross-class
+  correlation matrix, and reports the off-diagonal NaN ratio + min/mean/max.
+  FAIL when all off-diagonals are NaN, WARN when > 50% are NaN.
+  Catches the failure mode where the correlation channel is dead but
+  per-asset numeric checks still pass.
 
 ### `label_market_regimes()`
 

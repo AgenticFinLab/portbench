@@ -89,14 +89,21 @@ class MarketSnapshot:
     portfolio_value: float
     market_regime: Optional[str]
     correlation_matrix: Optional[pd.DataFrame]   # assets × assets, lazy-computed
+    asset_class_map: Optional[dict[str, str]] = None  # ticker -> asset class
 
     def get_correlation(self) -> pd.DataFrame:
         """Compute (and cache) Pearson correlation matrix from return_data."""
+
+    def get_intra_class_correlation(self) -> dict[str, pd.DataFrame]:
+        """Per-asset-class sub-matrices (concentration risk inside each class)."""
+
+    def get_inter_class_correlation(self) -> pd.DataFrame:
+        """Asset-class × asset-class matrix from averaged cross-class pairs."""
 ```
 
 `news_text` is populated by the snapshot builders (`build_snapshots()` in the example, and `ScenarioInjector.generate_snapshots()`) by walking the asset list and calling `provider.get_news(asset, decision_date)` until a non-empty result is found. Empty when no asset in the snapshot has text data (e.g., MockDataProvider, or a snapshot containing only bonds/commodities/cash).
 
-The `correlation_matrix` captures both cross-class correlations (e.g., equity–bond flight-to-quality during crises) and intra-class correlations (e.g., sector concentration). It is used in S3 scoring and may be included in LLM prompts for weight optimization.
+The `correlation_matrix` captures the flat asset × asset structure. When `asset_class_map` is supplied (the `BacktestEngine` forwards the same map it uses for profile alignment), `get_intra_class_correlation()` and `get_inter_class_correlation()` expose the *intra-class* layer (concentration risk inside e.g. equities) and the *inter-class* layer (hedging dynamics across e.g. equities vs bonds) separately. Both layers feed the S1/S3 prompt blocks and the S3 score.
 
 ## Pipeline Stages
 
@@ -134,7 +141,10 @@ LLM prompt receives signals and must output a weight allocation with sum=1, all 
 **Scoring**: Composite score — **70% weight accuracy + 30% correlation awareness**:
 
 - *Weight accuracy*: `1 - weight_MAE / 2`
-- *Correlation awareness*: measures whether the proposed weights achieve lower portfolio variance than the ground-truth weights, given the empirical covariance matrix. Computed as `clip(2 - var(actual) / var(gt), 0, 1)`. This penalizes allocations that ignore the correlation structure (e.g., concentrating in highly correlated assets when diversification is available).
+- *Correlation awareness* (30%): when `snapshot.asset_class_map` is set, the 30% is split into:
+  - *15% intra-class concentration penalty* — for each class, `class_weight × max(avg_intra_corr, 0)` is summed and subtracted from 1; piling weight inside a class with high mutual correlation is penalized.
+  - *15% inter-class hedging credit* — weighted average of off-diagonal inter-class correlations (`Σ w_i w_j corr(class_i, class_j)`), mapped via `(1 − avg)/2`; spreading weight across weakly / negatively correlated classes is rewarded.
+  - When no `asset_class_map` is available, the full 30% falls back to the variance-ratio score `clip(2 − var(actual)/var(gt), 0, 1)`.
 
 ### S4 — Execution Simulation (`S4ExecutionSimulation`)
 

@@ -13,6 +13,12 @@ Each preprocessor writes `datasets/processed/<asset_class>.csv` with:
 - Computed daily returns: `<source>_<ticker>_return`
 - Text data merged as JSON string in `text_json` column (where applicable)
 
+After all per-asset CSVs are written, `examples/data_preprocess/preprocess_all.py` also emits three cross-asset artifacts in the same directory:
+
+- `correlation_matrix.csv` — asset × asset Pearson correlation of daily returns across the common window
+- `covariance_matrix.csv` — asset × asset annualized covariance (`daily_cov × 252`)
+- `asset_class_map.json` — `{ ticker: asset_class }` mapping derived from the per-asset prefixes; consumed by `MarketSnapshot.asset_class_map` so downstream code can reason about intra-class vs inter-class correlation separately
+
 ## Preprocessing Steps
 
 All numeric preprocessors apply these steps in order:

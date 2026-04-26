@@ -58,6 +58,26 @@ Uses trailing `vol_window`-day return standard deviation from `snapshot.return_d
 
 Reference: Maillard, Roncalli & Teïletche (2010), *Journal of Portfolio Management*.
 
+### `CovarianceRiskParityBaseline` — Equal Risk Contribution (ERC)
+
+```python
+from portbench.baselines import CovarianceRiskParityBaseline
+baseline = CovarianceRiskParityBaseline(min_periods=20, max_iter=500, tol=1e-8)
+```
+
+Solves the Equal-Risk-Contribution problem using the **full empirical covariance matrix** (not just diagonal volatilities). Each asset's marginal contribution to portfolio variance is driven to `1/N`:
+
+```
+RC_i = w_i * (Σ w)_i / (w' Σ w)   →   target RC_i = 1/N
+```
+
+Optimized via cyclical coordinate descent on Spinu (2013)'s log-loss
+`L(w) = 0.5 w'Σw - (1/N) Σ log(w_i)`, which has a unique long-only minimizer. Weights of assets without enough return history fall back to zero (then re-normalized over the rest).
+
+This is the strong correlation-aware counterpart to `RiskParityBaseline`. Use it whenever `correlation_matrix.csv` / `covariance_matrix.csv` exist in `datasets/processed/` to get a baseline that actually exploits the cross-asset structure the LLM agents are scored on.
+
+Reference: Spinu, F. (2013). *An Algorithm for Computing Risk Parity Weights*.
+
 ### `SmartFolioBaseline` — IJCAI 2025 SOTA
 
 ```python
@@ -89,6 +109,7 @@ result = pipeline.run_episode(snapshot)
 Or via the evaluation script:
 ```bash
 python examples/agent_eval/run_evaluation.py --baseline risk_parity
+python examples/agent_eval/run_evaluation.py --baseline cov_risk_parity
 python examples/agent_eval/run_evaluation.py --baseline equal_weight
 python examples/agent_eval/run_evaluation.py --baseline sixty_forty
 ```
@@ -99,6 +120,6 @@ Baselines are subject to the same stress gate as LLM agents: they must achieve m
 
 Expected baseline ordering in normal markets:
 ```
-SmartFolio ≥ RiskParity ≥ 60/40 ≥ EqualWeight  (CEPS score)
+SmartFolio ≥ CovarianceRiskParity ≥ RiskParity ≥ 60/40 ≥ EqualWeight  (CEPS score)
 ```
 (This is a hypothesis to be validated by the benchmark results.)
