@@ -247,6 +247,9 @@ class OpenAIAdapter(AgentAdapter):
                              "https://api.deepseek.com/v1"                        (DeepSeek)
         api_key_env:    Name of the environment variable holding the API key.
                         Defaults to "OPENAI_API_KEY".
+        timeout:        Per-request timeout in seconds. Prevents hangs when an
+                        upstream provider accepts the connection but never
+                        returns. Default 60s.
     """
 
     def __init__(
@@ -259,6 +262,7 @@ class OpenAIAdapter(AgentAdapter):
         max_retries: int = 3,
         base_url: Optional[str] = None,
         api_key_env: str = "OPENAI_API_KEY",
+        timeout: float = 60.0,
     ):
         try:
             from openai import OpenAI
@@ -267,7 +271,7 @@ class OpenAIAdapter(AgentAdapter):
                 "openai package required. Install with: pip install openai"
             )
 
-        kwargs = {"api_key": os.environ.get(api_key_env)}
+        kwargs = {"api_key": os.environ.get(api_key_env), "timeout": timeout}
         if base_url:
             kwargs["base_url"] = base_url
         self._client = OpenAI(**kwargs)

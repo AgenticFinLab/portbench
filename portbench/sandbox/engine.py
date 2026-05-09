@@ -73,9 +73,11 @@ class BacktestEngine:
         initial_nav: float = 1_000_000.0,
         lookback_days: int = 60,
         use_pipeline: bool = True,
+        use_tools: bool = False,
         profile: Optional[InvestorProfile] = None,
         asset_class_map: Optional[dict[str, str]] = None,
         snapshot_dump_dir: Optional[str] = None,
+        propagation_weight: float = 0.1,
     ):
         self.strategy = strategy
         self._snapshot_dump_dir: Optional[str] = snapshot_dump_dir
@@ -87,6 +89,7 @@ class BacktestEngine:
         self.initial_nav = initial_nav
         self.lookback_days = lookback_days
         self.use_pipeline = use_pipeline
+        self._propagation_weight = propagation_weight
         self._profile = profile
         self._alignment_scorer = (
             ProfileAlignmentScorer(asset_class_map)
@@ -102,7 +105,7 @@ class BacktestEngine:
         # Build pipeline once (reused across all rebalance steps)
         self._pipeline: Optional[EvalPipeline] = None
         if use_pipeline:
-            self._pipeline = build_default_pipeline(strategy)
+            self._pipeline = build_default_pipeline(strategy, use_tools=use_tools)
 
         # Per-rebalance collection (populated in _get_target_weights)
         self._episode_results = []
@@ -242,11 +245,10 @@ class BacktestEngine:
 
             # Collect per-step CEPS
             ssl = result.to_stage_score_list()
-            vals = [s.score for s in ssl]
-            if vals:
-                avg = sum(vals) / len(vals)
-                drops = sum(max(vals[i] - vals[i + 1], 0) for i in range(len(vals) - 1))
-                self._per_step_ceps.append(max(0.0, min(1.0, avg - 0.1 * drops)))
+            if ssl:
+                from ..metrics.ceps import CEPS
+                ceps_result = CEPS(self._propagation_weight).compute(ssl)
+                self._per_step_ceps.append(ceps_result.ceps_score)
 
             # Collect per-step profile alignment
             if self._alignment_scorer is not None and self._profile is not None:
