@@ -12,13 +12,13 @@ sec_dir: datasets/sec
 rebalance: monthly
 initial_nav: 1000000
 workers_per_experiment: 3
-parallel_experiments: 3
+parallel_experiments: 1
 seed: 42
 
 models:
   # - provider: deepseek        # uses DASHSCOPE_API_KEY/_BASE_URL/_MODEL
-  - provider: tencent          # uses TENCENT_API_KEY/_BASE_URL/_MODEL
-  # - provider: ark              # uses ARK_API_KEY/_BASE_URL/_MODEL
+  # - provider: tencent          # uses TENCENT_API_KEY/_BASE_URL/_MODEL
+  - provider: ark              # uses ARK_API_KEY/_BASE_URL/_MODEL
   - baseline: equal_weight     # reference baseline (no API)
 
 profiles: [conservative, balanced, aggressive]
@@ -35,8 +35,9 @@ logging:
 
 on_error: isolate
 output_root: EXPERIMENTS
+timeout: 120                   # per-request LLM timeout in seconds (default 120)
 propagation_weight: 0.1       # CEPS cascade penalty weight (sensitivity analysis)
-resume: false                  # set to true to skip already-completed (model, profile) pairs
+resume: true                  # set to true to skip already-completed (model, profile) pairs
 
 run_qa: false                  # true = run QA dataset evaluation for LLM models
 

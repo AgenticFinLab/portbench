@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import json
 import logging
+import matplotlib
+matplotlib.use("Agg")
 import sys
 import threading
 import time
@@ -41,13 +43,13 @@ from .providers import build_adapter, build_baseline, build_mock, model_label
 _STRESS_BY_NAME = {s.name: s for s in STRESS_SCENARIOS}
 
 
-def _build_strategy(spec: ModelSpec, noise: float, seed: int) -> AgentAdapter:
+def _build_strategy(spec: ModelSpec, noise: float, seed: int, timeout: float = 120.0) -> AgentAdapter:
     kind = spec.kind()
     if kind == "baseline":
         return build_baseline(spec.baseline)  # type: ignore[arg-type]
     if kind == "mock":
         return build_mock(noise=noise, seed=seed)
-    return build_adapter(spec.provider, spec.model)  # type: ignore[arg-type]
+    return build_adapter(spec.provider, spec.model, timeout=timeout)  # type: ignore[arg-type]
 
 
 def _spec_label(spec: ModelSpec) -> str:
@@ -429,7 +431,7 @@ class BatchRunner:
         for spec in cfg.models:
             label = _spec_label(spec)
             try:
-                adapter_map[label] = _build_strategy(spec, noise=cfg.noise, seed=cfg.seed)
+                adapter_map[label] = _build_strategy(spec, noise=cfg.noise, seed=cfg.seed, timeout=cfg.timeout)
                 comparison_root[label] = {}
             except Exception as exc:
                 tb = traceback.format_exc()

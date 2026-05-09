@@ -112,6 +112,7 @@ class ExperimentConfig:
     seed: int = 42
     noise: float = 0.2
     use_tools: bool = False
+    timeout: float = 120.0  # per-request timeout in seconds for LLM calls
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     on_error: str = "isolate"
     output_root: str = "EXPERIMENTS"
@@ -171,6 +172,7 @@ class ExperimentConfig:
             on_error=raw.get("on_error", "isolate"),
             output_root=raw.get("output_root", "EXPERIMENTS"),
             use_tools=bool(raw.get("use_tools", False)),
+            timeout=float(raw.get("timeout", 120.0)),
             propagation_weight=float(raw.get("propagation_weight", 0.1)),
             resume=bool(raw.get("resume", False)),
             run_qa=bool(raw.get("run_qa", False)),
