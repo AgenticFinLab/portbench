@@ -210,6 +210,56 @@ adapter = AnthropicAdapter(model="claude-opus-4-6", temperature=0.0)
 pipeline = build_default_pipeline(adapter)
 ```
 
+## Tool-Calling Support
+
+S1/S2/S3 stages optionally run in **tool-calling mode**, where the LLM can invoke quantitative tools before returning its JSON answer. Tools are defined in `portbench/agent_eval/tools.py` as `ToolSpec` objects and dispatched by Python during the multi-turn loop.
+
+### Built-in Tools
+
+| Tool | Description |
+|------|-------------|
+| `calculator` | Evaluates arithmetic/math expressions safely |
+| `correlation` | Pearson correlation between two return series |
+| `annualized_return` | Converts a holding-period return to annualized form |
+| `var_estimate` | Historical Value-at-Risk at a given confidence level |
+| `max_drawdown_calc` | Maximum drawdown of a NAV series |
+| `sharpe_ratio` | Annualized Sharpe ratio from a return series |
+
+### Enabling Tool Use
+
+**Python API:**
+```python
+from portbench.agent_eval import build_default_pipeline
+
+pipeline = build_default_pipeline(adapter, use_tools=True)
+```
+
+**Sandbox / BacktestEngine:**
+```python
+engine = BacktestEngine(
+    strategy=adapter,
+    ...,
+    use_pipeline=True,
+    use_tools=True,
+)
+```
+
+**Batch experiments (YAML):**
+```yaml
+use_tools: true
+```
+
+### How It Works
+
+When `use_tools=True`, `_call_with_json_retry()` in `stages.py` calls `adapter.complete_with_tools(prompt, get_tools())` instead of `adapter.complete(prompt)`. The three production adapters (`AnthropicAdapter`, `OpenAIAdapter`, `LiteLLMAdapter`) each implement a multi-turn loop:
+
+1. Send prompt + tool definitions to the API
+2. If `stop_reason == "tool_use"`, execute each tool call via `dispatch_tool()` and feed results back
+3. Repeat until the model returns a plain text response
+4. Parse the final response as JSON (standard retry logic applies)
+
+Baseline and mock models do **not** support tool use — `use_tools` is silently ignored for them since they override `allocate()` directly and never enter the pipeline.
+
 ## Evaluation Logging
 
 Every evaluation run can be fully persisted to disk for replay and analysis.
