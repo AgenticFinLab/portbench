@@ -12,13 +12,13 @@ sec_dir: datasets/sec
 rebalance: monthly
 initial_nav: 1000000
 workers_per_experiment: 3
-parallel_experiments: 1
+parallel_experiments: 3
 seed: 42
 
 models:
-  - provider: deepseek        # uses DASHSCOPE_API_KEY/_BASE_URL/_MODEL
+  # - provider: deepseek        # uses DASHSCOPE_API_KEY/_BASE_URL/_MODEL
   - provider: tencent          # uses TENCENT_API_KEY/_BASE_URL/_MODEL
-  - provider: ark              # uses ARK_API_KEY/_BASE_URL/_MODEL
+  # - provider: ark              # uses ARK_API_KEY/_BASE_URL/_MODEL
   - baseline: equal_weight     # reference baseline (no API)
 
 profiles: [conservative, balanced, aggressive]
@@ -37,3 +37,13 @@ on_error: isolate
 output_root: EXPERIMENTS
 propagation_weight: 0.1       # CEPS cascade penalty weight (sensitivity analysis)
 resume: false                  # set to true to skip already-completed (model, profile) pairs
+
+run_qa: false                  # true = run QA dataset evaluation for LLM models
+
+qa:
+  dataset_path: datasets/qa_dataset   # directory with train.jsonl/val.jsonl/test.jsonl
+  split: test                  # train | val | test | all
+  templates: [T1, T2, T3, T4, T5, T6, T7]
+  max_pairs_per_template: 50   # cap per template
+  parallel_questions: 4        # concurrent LLM calls per template
+  save_responses: true         # save raw LLM responses in results.jsonl
