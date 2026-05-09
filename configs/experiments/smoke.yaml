@@ -1,0 +1,28 @@
+# Smoke-test config — runs against MockDataProvider + MockAgentAdapter.
+# No API keys required. Used for verifying the framework end-to-end.
+
+batch_id: smoke_test
+data_provider: mock
+rebalance: monthly
+initial_nav: 1000000
+workers_per_experiment: 3
+seed: 42
+noise: 0.2
+
+models:
+  - mock: true
+  - baseline: equal_weight
+
+profiles: [balanced]
+stress_scenarios: [2020_covid_flash_crash]
+run_normal: true
+normal_period:
+  start: 2024-01-01
+  end: 2024-06-30
+
+logging:
+  save_pipeline_logs: true
+  save_snapshots: true
+  save_figures: true
+
+on_error: isolate

@@ -1,0 +1,39 @@
+# PortBench batch experiment — example config.
+#
+# Models: 3 production providers (read API_KEY/BASE_URL/MODEL from .env)
+# Profiles: 3 investor profiles
+# Stress scenarios: all 3 (2015 China / 2020 COVID / 2022 crypto)
+# Plus normal-market backtest in 2024 when stress gate passes.
+
+batch_id: "{models}_{date}_{time}"
+data_provider: processed
+data_dir: datasets/processed
+sec_dir: datasets/sec
+rebalance: monthly
+initial_nav: 1000000
+workers_per_experiment: 3
+parallel_experiments: 1
+seed: 42
+
+models:
+  - provider: deepseek        # uses DASHSCOPE_API_KEY/_BASE_URL/_MODEL
+  - provider: tencent          # uses TENCENT_API_KEY/_BASE_URL/_MODEL
+  - provider: ark              # uses ARK_API_KEY/_BASE_URL/_MODEL
+  - baseline: equal_weight     # reference baseline (no API)
+
+profiles: [conservative, balanced, aggressive]
+stress_scenarios: all
+run_normal: true
+normal_period:
+  start: 2024-01-01
+  end: 2024-12-31
+
+logging:
+  save_pipeline_logs: true
+  save_snapshots: true
+  save_figures: true
+
+on_error: isolate
+output_root: EXPERIMENTS
+propagation_weight: 0.1       # CEPS cascade penalty weight (sensitivity analysis)
+resume: false                  # set to true to skip already-completed (model, profile) pairs
