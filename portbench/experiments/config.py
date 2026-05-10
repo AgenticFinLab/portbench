@@ -148,7 +148,7 @@ class ExperimentConfig:
         )
 
         batch_id_raw = raw.get("batch_id") or "{models}_{date}"
-        batch_id = _expand_batch_id(batch_id_raw, models)
+        batch_id = _expand_batch_id(batch_id_raw, models, raw.get("rebalance", "monthly"))
 
         return ExperimentConfig(
             batch_id=batch_id,
@@ -200,17 +200,17 @@ def _to_date(value) -> date:
     raise ValueError(f"Cannot parse date: {value!r}")
 
 
-def _expand_batch_id(template: str, models: list[ModelSpec]) -> str:
+def _expand_batch_id(template: str, models: list[ModelSpec], rebalance: str = "monthly") -> str:
     """
     Expand batch_id template variables:
-      {models}  — abbreviated model labels joined by "_" (max 3 models shown)
-      {date}    — YYYYMMDD
-      {time}    — HHMMSS
+      {models}    — abbreviated model labels joined by "_" (max 3 models shown)
+      {rebalance} — rebalance frequency (e.g. "monthly", "weekly", "quarterly")
+      {date}      — YYYYMMDD
+      {time}      — HHMMSS
 
     Examples:
-      "{models}_{date}"          → "ark-doubao_tencent_20250509"
-      "exp_{date}_{time}"        → "exp_20250509_143022"
-      "ablation_{models}_{date}" → "ablation_ark-doubao_20250509"
+      "{models}_{rebalance}_{date}_{time}" → "ark-doubao_monthly_20250509_143022"
+      "exp_{date}_{time}"                  → "exp_20250509_143022"
     """
     if "{" not in template:
         return template
@@ -245,6 +245,7 @@ def _expand_batch_id(template: str, models: list[ModelSpec]) -> str:
     return (
         template
         .replace("{models}", models_str)
+        .replace("{rebalance}", rebalance)
         .replace("{date}", now.strftime("%Y%m%d"))
         .replace("{time}", now.strftime("%H%M%S"))
     )

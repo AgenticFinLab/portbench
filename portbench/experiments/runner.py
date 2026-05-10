@@ -36,7 +36,7 @@ from ..qa_builder.processed_data import ProcessedDataProvider
 from ..sandbox import BacktestEngine
 from . import paths
 from .config import ExperimentConfig, ModelSpec
-from .figures import render_dataset_correlation_figures, render_experiment_figures
+from .figures import render_dataset_correlation_figures, render_experiment_figures, render_batch_comparison_figures
 from .providers import build_adapter, build_baseline, build_mock, model_label
 
 
@@ -543,6 +543,14 @@ class BatchRunner:
             except Exception as exc:
                 print(f"[QA] evaluation failed: {exc}")
                 summary["qa"] = {"error": str(exc)}
+
+        # Batch-level comparison figures across all models
+        if cfg.logging.save_figures:
+            try:
+                render_batch_comparison_figures(bd)
+                print(f"[figures] comparison figures saved → {bd / 'comparison_figures'}")
+            except Exception as exc:
+                print(f"[figures] batch comparison rendering failed: {exc}")
 
         return summary
 

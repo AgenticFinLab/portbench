@@ -5,7 +5,7 @@
 # Stress scenarios: all 3 (2015 China / 2020 COVID / 2022 crypto)
 # Plus normal-market backtest in 2024 when stress gate passes.
 
-batch_id: "{models}_{date}_{time}"
+batch_id: "{models}_{rebalance}_{date}_{time}"
 data_provider: processed
 data_dir: datasets/processed
 sec_dir: datasets/sec

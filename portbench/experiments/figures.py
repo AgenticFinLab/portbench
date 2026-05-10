@@ -180,3 +180,111 @@ def render_model_summary_figures(
         fig = plot_profile_nav(profile_navs, model_name=model_label)
         save_figure(fig, str(model_dir / "profile_nav.png"), formats=("png",))
         log("figure: profile_nav.png")
+
+
+def render_batch_comparison_figures(
+    batch_dir: Path,
+    logger: Optional[logging.Logger] = None,
+) -> None:
+    """
+    Render cross-model comparison figures into batch_dir/comparison_figures/.
+
+    Figures generated:
+      nav_comparison_{profile}.png      — NAV curves: all models on one axes per profile
+      metrics_comparison_{profile}.png  — Bar chart metrics: all models per profile
+      stress_drawdown_{model}.png       — Stress heatmap per model (all profiles × scenarios)
+    """
+    log = logger.info if logger else (lambda *a, **k: None)
+    out_dir = batch_dir / "comparison_figures"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Collect data: {model_label: {profile: {normal_result, nav_series, stress_results}}}
+    model_data: dict[str, dict] = {}
+    for model_dir in sorted(batch_dir.iterdir()):
+        if not model_dir.is_dir() or model_dir.name.startswith("_"):
+            continue
+        model_label = model_dir.name
+        model_data[model_label] = {}
+        for profile_dir in sorted(model_dir.iterdir()):
+            if not profile_dir.is_dir():
+                continue
+            profile_name = profile_dir.name
+            nav = _load_normal_nav(profile_dir)
+            normal = _load_normal_result(profile_dir)
+            stress = _load_stress_results(profile_dir)
+            if nav is not None or normal is not None or stress:
+                model_data[model_label][profile_name] = {
+                    "nav": nav,
+                    "normal": normal,
+                    "stress": stress,
+                }
+
+    # Remove models with no data
+    model_data = {k: v for k, v in model_data.items() if v}
+    if not model_data:
+        log("batch comparison: no data found, skipping")
+        return
+
+    # Collect all profiles present across all models
+    all_profiles: list[str] = []
+    for profiles in model_data.values():
+        for p in profiles:
+            if p not in all_profiles:
+                all_profiles.append(p)
+
+    # Fig A: NAV comparison per profile — one line per model
+    for profile in all_profiles:
+        nav_map: dict[str, pd.Series] = {}
+        for mlabel, profiles in model_data.items():
+            entry = profiles.get(profile)
+            if entry and entry.get("nav") is not None:
+                nav_map[mlabel] = entry["nav"]
+        if len(nav_map) >= 1:
+            fig = plot_sandbox_nav(
+                nav_map,
+                title=f"NAV Comparison — {profile.capitalize()} Profile",
+            )
+            save_figure(fig, str(out_dir / f"nav_comparison_{profile}.png"), formats=("png",))
+            log(f"figure: nav_comparison_{profile}.png")
+
+    # Fig B: Metrics comparison per profile — grouped bars across models
+    for profile in all_profiles:
+        metrics_map: dict[str, dict] = {}
+        for mlabel, profiles in model_data.items():
+            entry = profiles.get(profile)
+            if entry and entry.get("normal"):
+                metrics_map[mlabel] = entry["normal"]
+        if len(metrics_map) >= 1:
+            fig = plot_sandbox_metrics(
+                metrics_map,
+                metric_keys=["total_return", "sharpe_ratio", "max_drawdown", "mean_ceps"],
+                title=f"Performance Comparison — {profile.capitalize()} Profile",
+            )
+            save_figure(fig, str(out_dir / f"metrics_comparison_{profile}.png"), formats=("png",))
+            log(f"figure: metrics_comparison_{profile}.png")
+
+    # Fig C: Stress drawdown heatmap per model — rows=scenarios, cols=profiles
+    from ..agent_eval.investor_profiles import PROFILES
+    for mlabel, profiles in model_data.items():
+        stress_data: dict[str, dict] = {}
+        for profile_name, entry in profiles.items():
+            stress = entry.get("stress")
+            if not stress:
+                continue
+            tol = PROFILES[profile_name].max_drawdown_tolerance
+            stress_data[profile_name] = {
+                sc: {
+                    "max_drawdown": payload.get("max_drawdown", 0.0),
+                    "tolerance": tol,
+                    "stress_passed": payload.get("stress_passed", False),
+                }
+                for sc, payload in stress.items()
+            }
+        if stress_data:
+            safe_name = mlabel.replace("/", "_")
+            fig = plot_stress_drawdown(
+                stress_data,
+                title=f"Stress Drawdown — {mlabel}",
+            )
+            save_figure(fig, str(out_dir / f"stress_drawdown_{safe_name}.png"), formats=("png",))
+            log(f"figure: stress_drawdown_{safe_name}.png")
