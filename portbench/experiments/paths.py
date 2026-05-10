@@ -140,6 +140,22 @@ def count_completed_profiles(ts_dir: Path, expected_profiles: list[str]) -> int:
     )
 
 
+def get_completed_profiles(ts_dir: Path, expected_profiles: list[str]) -> list[str]:
+    """
+    Return the subset of expected_profiles that are already complete in ts_dir.
+
+    Reads checkpoint.json first (authoritative); falls back to checking for
+    experiment.log when no checkpoint exists (e.g. older runs).
+    """
+    ckpt = ts_dir / "checkpoint.json"
+    if ckpt.exists():
+        data = json.loads(ckpt.read_text(encoding="utf-8"))
+        done = set(data.get("completed", []))
+        return [p for p in expected_profiles if p in done]
+    # Fallback: presence of experiment.log means the profile ran to completion
+    return [p for p in expected_profiles if (ts_dir / p / "experiment.log").exists()]
+
+
 def find_best_run(
     output_root: str,
     rebalance: str,

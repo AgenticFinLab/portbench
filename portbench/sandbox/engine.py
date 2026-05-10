@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import dataclasses
 from datetime import date
+from pathlib import Path
 from typing import Optional
 
 import pandas as pd
@@ -78,6 +79,7 @@ class BacktestEngine:
         asset_class_map: Optional[dict[str, str]] = None,
         snapshot_dump_dir: Optional[str] = None,
         propagation_weight: float = 0.1,
+        step_cache_dir: Optional[str] = None,
     ):
         self.strategy = strategy
         self._snapshot_dump_dir: Optional[str] = snapshot_dump_dir
@@ -111,6 +113,23 @@ class BacktestEngine:
         self._episode_results = []
         self._per_step_ceps: list[float] = []
         self._per_step_alignment: list[float] = []
+
+        # Step-level weight cache: {date_str → {weights, step_ceps, step_alignment}}
+        # Loaded from disk on init; written after every successful LLM rebalance.
+        self._step_cache_dir: Optional[Path] = (
+            Path(step_cache_dir) if step_cache_dir else None
+        )
+        self._step_cache: dict[str, dict] = {}
+        if self._step_cache_dir is not None:
+            cache_file = self._step_cache_dir / "step_cache.json"
+            if cache_file.exists():
+                try:
+                    import json as _json
+                    self._step_cache = _json.loads(
+                        cache_file.read_text(encoding="utf-8")
+                    )
+                except Exception:
+                    self._step_cache = {}
 
     def enable_pipeline_logging(self, output_dir: str, run_id: str) -> None:
         """Persist every S1-S5 prompt/response to disk (mirrors EvalPipeline.enable_logging)."""
@@ -233,7 +252,18 @@ class BacktestEngine:
         """Get target weights; inject profile, collect CEPS + alignment when configured."""
         self._dump_snapshot(snapshot)
         if self.use_pipeline and self._pipeline is not None:
-            # Inject investor profile description into prompt context
+            date_key = str(snapshot.decision_date)
+
+            # ── Step cache hit: skip LLM call, restore cached metrics ──────
+            if date_key in self._step_cache:
+                cached = self._step_cache[date_key]
+                if cached.get("step_ceps") is not None:
+                    self._per_step_ceps.append(float(cached["step_ceps"]))
+                if cached.get("step_alignment") is not None:
+                    self._per_step_alignment.append(float(cached["step_alignment"]))
+                return dict(cached["weights"])
+
+            # ── LLM call ────────────────────────────────────────────────────
             if self._profile is not None:
                 prefix = f"[INVESTOR PROFILE] {self._profile.description}\n\n"
                 snapshot = dataclasses.replace(
@@ -244,24 +274,33 @@ class BacktestEngine:
             self._episode_results.append(result)
 
             # Collect per-step CEPS
+            step_ceps: Optional[float] = None
             ssl = result.to_stage_score_list()
             if ssl:
                 from ..metrics.ceps import CEPS
                 ceps_result = CEPS(self._propagation_weight).compute(ssl)
                 self._per_step_ceps.append(ceps_result.ceps_score)
+                step_ceps = ceps_result.ceps_score
 
             # Collect per-step profile alignment
+            step_alignment: Optional[float] = None
             if self._alignment_scorer is not None and self._profile is not None:
-                self._per_step_alignment.append(
-                    self._alignment_scorer.score(result, self._profile)
-                )
+                step_alignment = self._alignment_scorer.score(result, self._profile)
+                self._per_step_alignment.append(step_alignment)
 
+            # Extract weights
+            weights: Optional[dict] = None
             s3_output = result.stage_outputs.get(StageID.S3_WEIGHT_OPTIMIZATION)
             if s3_output is not None and s3_output.weights:
-                return s3_output.weights
-            s4_output = result.stage_outputs.get(StageID.S4_EXECUTION_SIMULATION)
-            if s4_output is not None and s4_output.executed_weights:
-                return s4_output.executed_weights
+                weights = s3_output.weights
+            if weights is None:
+                s4_output = result.stage_outputs.get(StageID.S4_EXECUTION_SIMULATION)
+                if s4_output is not None and s4_output.executed_weights:
+                    weights = s4_output.executed_weights
+
+            if weights is not None:
+                self._write_step_cache(date_key, weights, step_ceps, step_alignment)
+                return weights
 
         if isinstance(self.strategy, BaselineStrategy):
             return self.strategy.allocate(snapshot)
@@ -270,6 +309,32 @@ class BacktestEngine:
             "Pipeline produced no usable target weights and strategy is not a "
             "BaselineStrategy — refusing to fall back to equal-weight."
         )
+
+    def _write_step_cache(
+        self,
+        date_key: str,
+        weights: dict,
+        step_ceps: Optional[float],
+        step_alignment: Optional[float],
+    ) -> None:
+        """Persist one rebalance step to step_cache.json (non-fatal on failure)."""
+        if self._step_cache_dir is None:
+            return
+        self._step_cache[date_key] = {
+            "weights": weights,
+            "step_ceps": step_ceps,
+            "step_alignment": step_alignment,
+        }
+        self._step_cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_file = self._step_cache_dir / "step_cache.json"
+        try:
+            import json as _json
+            cache_file.write_text(
+                _json.dumps(self._step_cache, indent=2, default=str),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass  # non-fatal: step is lost from cache but run continues
 
     def _dump_snapshot(self, snapshot) -> None:
         """Persist MarketSnapshot for the current rebalance date if dumping is enabled."""

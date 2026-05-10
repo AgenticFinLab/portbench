@@ -62,6 +62,7 @@ def main(argv=None) -> int:
     print(f"Batch complete [{cfg.rebalance}]")
     print(f"  Completed: {summary['n_completed']}")
     print(f"  Reused:    {summary['n_reused']}")
+    print(f"  Resumed:   {summary['n_resumed']}")
     print(f"  Failed:    {summary['n_failed']}")
     print(f"  Output:    {cfg.output_root}/{cfg.rebalance}/")
     return 0 if summary["n_failed"] == 0 else 2

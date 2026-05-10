@@ -137,7 +137,24 @@ def _run_one_scenario(
     scenario_name: str,
     out_dir: Path,
 ):
-    """Run one stress scenario; persist artifacts; return (result, passed)."""
+    """Run one stress scenario; persist artifacts; return (result, passed).
+
+    If backtest_result.json already exists in out_dir, the scenario is skipped
+    and its result is loaded from disk (scenario-level resume).
+    """
+    from ..sandbox.result import BacktestResult as _BR
+
+    # ── Scenario-level cache hit ────────────────────────────────────────────
+    cached_result_path = out_dir / "backtest_result.json"
+    if cached_result_path.exists():
+        try:
+            data = json.loads(cached_result_path.read_text(encoding="utf-8"))
+            result = _BR.from_dict(data)
+            passed = bool(data.get("stress_passed", False))
+            return result, passed
+        except Exception:
+            pass  # corrupt cache — fall through and re-run
+
     scenario = _STRESS_BY_NAME[scenario_name]
     use_pipeline = spec.kind() != "baseline"
     pipeline_log_dir = (
@@ -146,6 +163,7 @@ def _run_one_scenario(
         else None
     )
     snapshot_dir = (out_dir / "snapshots") if cfg.logging.save_snapshots else None
+    step_cache_dir = (out_dir / "step_cache") if use_pipeline else None
 
     engine = BacktestEngine(
         strategy=adapter,
@@ -160,6 +178,7 @@ def _run_one_scenario(
         asset_class_map=asset_class_map,
         snapshot_dump_dir=str(snapshot_dir) if snapshot_dir else None,
         propagation_weight=cfg.propagation_weight,
+        step_cache_dir=str(step_cache_dir) if step_cache_dir else None,
     )
     if pipeline_log_dir is not None:
         engine.enable_pipeline_logging(
@@ -183,6 +202,17 @@ def _run_normal(
     profile_obj,
     out_dir: Path,
 ):
+    from ..sandbox.result import BacktestResult as _BR
+
+    # ── Scenario-level cache hit ────────────────────────────────────────────
+    cached_result_path = out_dir / "backtest_result.json"
+    if cached_result_path.exists():
+        try:
+            data = json.loads(cached_result_path.read_text(encoding="utf-8"))
+            return _BR.from_dict(data)
+        except Exception:
+            pass  # corrupt cache — re-run
+
     use_pipeline = spec.kind() != "baseline"
     pipeline_log_dir = (
         out_dir / "pipeline_logs"
@@ -190,6 +220,7 @@ def _run_normal(
         else None
     )
     snapshot_dir = (out_dir / "snapshots") if cfg.logging.save_snapshots else None
+    step_cache_dir = (out_dir / "step_cache") if use_pipeline else None
 
     engine = BacktestEngine(
         strategy=adapter,
@@ -204,6 +235,7 @@ def _run_normal(
         asset_class_map=asset_class_map,
         snapshot_dump_dir=str(snapshot_dir) if snapshot_dir else None,
         propagation_weight=cfg.propagation_weight,
+        step_cache_dir=str(step_cache_dir) if step_cache_dir else None,
     )
     if pipeline_log_dir is not None:
         engine.enable_pipeline_logging(
@@ -324,10 +356,16 @@ def _run_one_model(
     model_name: str,
     timestamp: str,
     errors_lock: threading.Lock,
+    already_done: list[str] | None = None,
 ) -> dict:
     """
-    Run all profiles for one (provider, model_name) and persist artifacts.
-    Returns {profile_name: summary_dict}.
+    Run all pending profiles for one (provider, model_name) and persist artifacts.
+
+    already_done: profiles that completed in a previous partial run; they are
+                  skipped and their results are loaded from the existing
+                  run_summary.json so the final summary stays coherent.
+
+    Returns {profile_name: summary_dict} for ALL profiles (old + new).
     """
     r_dir = paths.run_dir(cfg.output_root, cfg.rebalance, prov_name, model_name, timestamp)
     r_dir.mkdir(parents=True, exist_ok=True)
@@ -336,15 +374,35 @@ def _run_one_model(
         f"{prov_name}/{model_name}",
         r_dir / "runner.log",
     )
-    logger.info("Model run started: provider=%s model=%s ts=%s", prov_name, model_name, timestamp)
+
+    already_done_set = set(already_done or [])
+    pending = [p for p in cfg.profiles if p not in already_done_set]
+
+    if already_done_set:
+        logger.info(
+            "Resuming run ts=%s — skipping %d already-complete profile(s): %s",
+            timestamp, len(already_done_set), ", ".join(sorted(already_done_set)),
+        )
+    else:
+        logger.info("Model run started: provider=%s model=%s ts=%s", prov_name, model_name, timestamp)
+
+    # Pre-load results for already-completed profiles from existing run_summary.json
+    profile_results: dict[str, dict] = {}
+    if already_done_set:
+        existing_summary = r_dir / "run_summary.json"
+        if existing_summary.exists():
+            try:
+                existing = json.loads(existing_summary.read_text(encoding="utf-8"))
+                profile_results = existing.get("profiles", {})
+            except Exception:
+                pass  # summary missing or corrupt — completed profiles have no in-memory results
 
     adapter = _build_strategy(spec, noise=cfg.noise, seed=cfg.seed, timeout=cfg.timeout)
 
-    profile_results: dict[str, dict] = {}
     errors_path = r_dir / "errors.jsonl"
-    completed = []
+    completed = list(already_done or [])
 
-    for profile_name in cfg.profiles:
+    for profile_name in pending:
         p_dir = r_dir / profile_name
         p_dir.mkdir(parents=True, exist_ok=True)
         log_path = p_dir / "experiment.log"
@@ -462,9 +520,10 @@ class BatchRunner:
             model_name = _resolve_model_name(spec)
             model_specs.append((spec, prov_name, model_name))
 
-        # Decide which models to run vs. reuse
-        to_run: list[tuple[ModelSpec, str, str, str]] = []   # (spec, prov, model, timestamp)
-        reused: list[tuple[str, str, str]] = []               # (prov, model, timestamp)
+        # Decide which models to run vs. resume vs. fully reuse
+        # Each entry: (spec, prov, model, timestamp, already_done_profiles)
+        to_run: list[tuple[ModelSpec, str, str, str, list[str]]] = []
+        reused: list[tuple[str, str, str]] = []  # (prov, model, timestamp)
 
         for spec, prov_name, model_name in model_specs:
             if cfg.reuse_latest:
@@ -472,18 +531,30 @@ class BatchRunner:
                     cfg.output_root, cfg.rebalance, prov_name, model_name, cfg.profiles
                 )
                 if ts:
-                    completed = paths.count_completed_profiles(
-                        paths.run_dir(cfg.output_root, cfg.rebalance, prov_name, model_name, ts),
-                        cfg.profiles,
-                    )
-                    print(
-                        f"[reuse] {prov_name}/{model_name}: "
-                        f"found run {ts} ({completed}/{len(cfg.profiles)} profiles)"
-                    )
-                    reused.append((prov_name, model_name, ts))
-                    continue
+                    r_dir = paths.run_dir(cfg.output_root, cfg.rebalance, prov_name, model_name, ts)
+                    done = paths.get_completed_profiles(r_dir, cfg.profiles)
+                    if set(done) >= set(cfg.profiles):
+                        # All profiles complete — fully reuse this run
+                        print(
+                            f"[reuse]  {prov_name}/{model_name}: "
+                            f"all {len(cfg.profiles)} profiles complete, using run {ts}"
+                        )
+                        reused.append((prov_name, model_name, ts))
+                        run_timestamps[(prov_name, model_name)] = ts
+                        continue
+                    else:
+                        # Partial run — resume from same timestamp
+                        missing = [p for p in cfg.profiles if p not in done]
+                        print(
+                            f"[resume] {prov_name}/{model_name}: "
+                            f"{len(done)}/{len(cfg.profiles)} profiles done in run {ts}, "
+                            f"continuing: {', '.join(missing)}"
+                        )
+                        to_run.append((spec, prov_name, model_name, ts, done))
+                        continue
+            # No existing run (or reuse_latest=False) — fresh timestamp
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            to_run.append((spec, prov_name, model_name, timestamp))
+            to_run.append((spec, prov_name, model_name, timestamp, []))
 
         # ── Run pending models ──────────────────────────────────────────────
         errors_lock = threading.Lock()
@@ -503,7 +574,7 @@ class BatchRunner:
             dynamic_ncols=True,
         )
 
-        def _task(spec, prov_name, model_name, timestamp):
+        def _task(spec, prov_name, model_name, timestamp, already_done):
             nonlocal n_done, n_failed
             t0 = time.time()
             r_dir = paths.run_dir(cfg.output_root, cfg.rebalance, prov_name, model_name, timestamp)
@@ -511,6 +582,7 @@ class BatchRunner:
                 profile_results = _run_one_model(
                     cfg, spec, data_provider, asset_class_map,
                     prov_name, model_name, timestamp, errors_lock,
+                    already_done=already_done,
                 )
                 _write_run_summary(
                     r_dir, prov_name, model_name, timestamp, cfg.rebalance,
@@ -538,8 +610,8 @@ class BatchRunner:
         max_workers = max(1, cfg.parallel_experiments)
         with ThreadPoolExecutor(max_workers=max_workers) as ex:
             futs = {
-                ex.submit(_task, spec, prov, model, ts): (prov, model)
-                for spec, prov, model, ts in to_run
+                ex.submit(_task, spec, prov, model, ts, done): (prov, model)
+                for spec, prov, model, ts, done in to_run
             }
             for fut in as_completed(futs):
                 try:
@@ -599,6 +671,7 @@ class BatchRunner:
             "rebalance": cfg.rebalance,
             "n_completed": n_done,
             "n_reused": len(reused),
+            "n_resumed": sum(1 for *_, done in to_run if done),
             "n_failed": n_failed,
             "run_timestamps": {f"{p}/{m}": ts for (p, m), ts in run_timestamps.items()},
         }

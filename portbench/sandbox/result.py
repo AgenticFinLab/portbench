@@ -111,6 +111,50 @@ class BacktestResult:
             d["stress_passed"] = self.stress_passed
         return d
 
+    @classmethod
+    def from_dict(cls, d: dict) -> "BacktestResult":
+        """
+        Reconstruct a BacktestResult from a saved backtest_result.json dict.
+
+        nav_curve and weight_history are left as empty placeholders — this
+        object is only suitable for reading scalar metrics (used when loading
+        a previously completed scenario result to avoid re-running it).
+        """
+        from datetime import datetime
+
+        obj = cls.__new__(cls)
+        obj.model_name = d.get("model_name", "")
+        raw_start = d.get("start_date", "2024-01-01")
+        raw_end = d.get("end_date", "2024-12-31")
+        obj.start_date = (
+            raw_start if isinstance(raw_start, date)
+            else datetime.strptime(str(raw_start), "%Y-%m-%d").date()
+        )
+        obj.end_date = (
+            raw_end if isinstance(raw_end, date)
+            else datetime.strptime(str(raw_end), "%Y-%m-%d").date()
+        )
+        obj.initial_nav = float(d.get("initial_nav", 1_000_000.0))
+        obj.nav_curve = pd.Series(dtype=float)      # placeholder
+        obj.weight_history = pd.DataFrame()         # placeholder
+        obj.trade_history = []
+        obj.total_return = float(d.get("total_return", 0.0))
+        obj.cagr = float(d.get("cagr", 0.0))
+        obj.sharpe_ratio = float(d.get("sharpe_ratio", 0.0))
+        obj.sortino_ratio = float(d.get("sortino_ratio", 0.0))
+        obj.max_drawdown = float(d.get("max_drawdown", 0.0))
+        obj.calmar_ratio = float(d.get("calmar_ratio", 0.0))
+        obj.volatility = float(d.get("volatility", 0.0))
+        obj.n_rebalances = int(d.get("n_rebalances", 0))
+        obj.total_transaction_cost = float(d.get("total_transaction_cost", 0.0))
+        obj.profile_name = d.get("profile_name")
+        obj.per_step_ceps = []
+        obj.mean_ceps = float(d.get("mean_ceps", 0.0))
+        obj.per_step_alignment = []
+        obj.mean_profile_score = float(d.get("mean_profile_score", 0.0))
+        obj.stress_passed = d.get("stress_passed")
+        return obj
+
     def summary(self) -> str:
         """Human-readable summary string."""
         final_nav = float(self.nav_curve.iloc[-1]) if len(self.nav_curve) else 0.0
