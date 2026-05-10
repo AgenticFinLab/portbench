@@ -524,6 +524,7 @@ class BatchRunner:
         # Each entry: (spec, prov, model, timestamp, already_done_profiles)
         to_run: list[tuple[ModelSpec, str, str, str, list[str]]] = []
         reused: list[tuple[str, str, str]] = []  # (prov, model, timestamp)
+        run_timestamps: dict[tuple, str] = {}  # (prov, model) → timestamp
 
         for spec, prov_name, model_name in model_specs:
             if cfg.reuse_latest:
@@ -561,7 +562,6 @@ class BatchRunner:
         n_total = len(to_run)
         n_done = 0
         n_failed = 0
-        run_timestamps: dict[tuple, str] = {}  # (prov, model) → timestamp
 
         # Pre-populate timestamps for reused runs
         for prov_name, model_name, ts in reused:
