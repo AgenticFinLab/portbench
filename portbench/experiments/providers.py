@@ -144,3 +144,25 @@ def model_label(provider: str, model: Optional[str]) -> str:
     resolved = model or _env(spec.env_prefix, "MODEL") or "default"
     safe = resolved.replace("/", "_").replace(":", "_")
     return f"{provider.lower()}-{safe}"
+
+
+def spec_provider_name(spec) -> str:
+    """Return the Level-2 directory name for a ModelSpec: provider key or 'baseline'/'mock'."""
+    if spec.baseline:
+        return "baseline"
+    if spec.mock:
+        return "mock"
+    return spec.provider.lower()
+
+
+def spec_model_name(spec, resolved_model: Optional[str] = None) -> str:
+    """Return the Level-3 directory name for a ModelSpec: model identifier string."""
+    if spec.baseline:
+        return spec.baseline
+    if spec.mock:
+        return "mock"
+    model = resolved_model or spec.model
+    if not model:
+        prov_spec = PROVIDER_REGISTRY[spec.provider.lower()]
+        model = _env(prov_spec.env_prefix, "MODEL") or "default"
+    return model.replace("/", "_").replace(":", "_")

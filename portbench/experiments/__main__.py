@@ -17,18 +17,17 @@ def main(argv=None) -> int:
     p.add_argument(
         "--dry-run",
         action="store_true",
-        help="Print the (model,profile,scenario) matrix without running",
+        help="Print the (provider, model, profile, scenario) matrix without running",
     )
-    p.add_argument("--batch-id", default=None, help="Override batch_id from YAML")
     p.add_argument(
         "--analyze",
         action="store_true",
-        help="Run post-batch analysis on an existing batch_id (requires --batch-id)",
+        help="Run post-run analysis on a rebalance directory (requires --rebalance)",
     )
     p.add_argument(
-        "--analyze-qa",
-        action="store_true",
-        help="Run QA evaluation analysis on an existing batch_id (requires --batch-id)",
+        "--rebalance",
+        default="monthly",
+        help="Rebalance frequency directory to analyze (default: monthly)",
     )
     p.add_argument(
         "--output-root",
@@ -38,29 +37,17 @@ def main(argv=None) -> int:
     args = p.parse_args(argv)
 
     if args.analyze:
-        if not args.batch_id:
-            p.error("--analyze requires --batch-id")
-        from .analysis import analyze_batch
-        report = analyze_batch(args.batch_id, output_root=args.output_root)
+        from .analysis import analyze_runs
+        report = analyze_runs(args.rebalance, output_root=args.output_root)
         print(f"Analysis report written to: {report}")
         return 0
 
-    if args.analyze_qa:
-        if not args.batch_id:
-            p.error("--analyze-qa requires --batch-id")
-        from ..qa_eval.analysis import analyze_qa_batch
-        report = analyze_qa_batch(args.batch_id, output_root=args.output_root)
-        print(f"QA analysis report written to: {report}")
-        return 0
-
     if not args.config:
-        p.error("--config is required unless --analyze or --analyze-qa is set")
+        p.error("--config is required unless --analyze is set")
 
     cfg_path = Path(args.config)
     raw_yaml = cfg_path.read_text(encoding="utf-8")
     cfg = ExperimentConfig.from_yaml(cfg_path)
-    if args.batch_id:
-        cfg.batch_id = args.batch_id
 
     runner = BatchRunner(cfg, raw_yaml=raw_yaml)
 
@@ -72,11 +59,11 @@ def main(argv=None) -> int:
 
     summary = runner.run()
     print("\n" + "=" * 60)
-    print(f"Batch '{cfg.batch_id}' complete")
+    print(f"Batch complete [{cfg.rebalance}]")
     print(f"  Completed: {summary['n_completed']}")
+    print(f"  Reused:    {summary['n_reused']}")
     print(f"  Failed:    {summary['n_failed']}")
-    print(f"  Elapsed:   {summary['elapsed_seconds']}s")
-    print(f"  Output:    {cfg.output_root}/{cfg.batch_id}/")
+    print(f"  Output:    {cfg.output_root}/{cfg.rebalance}/")
     return 0 if summary["n_failed"] == 0 else 2
 
 

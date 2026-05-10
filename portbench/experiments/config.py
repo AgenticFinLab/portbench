@@ -93,7 +93,8 @@ class QAConfig:
 
 @dataclass
 class ExperimentConfig:
-    batch_id: str
+    # batch_id is a human-readable label stored in run metadata; no longer used for directory naming
+    batch_id: str = ""
     models: list[ModelSpec] = field(default_factory=list)
     profiles: list[str] = field(
         default_factory=lambda: ["conservative", "balanced", "aggressive"]
@@ -117,7 +118,7 @@ class ExperimentConfig:
     on_error: str = "isolate"
     output_root: str = "EXPERIMENTS"
     propagation_weight: float = 0.1  # CEPS cascade penalty weight
-    resume: bool = False  # skip already-completed (model, profile) pairs
+    reuse_latest: bool = False  # reuse the most complete existing run per model
     run_qa: bool = False  # run QA dataset evaluation alongside sandbox
     qa: QAConfig = field(default_factory=QAConfig)
 
@@ -147,7 +148,7 @@ class ExperimentConfig:
             }
         )
 
-        batch_id_raw = raw.get("batch_id") or "{models}_{date}"
+        batch_id_raw = raw.get("batch_id") or ""
         batch_id = _expand_batch_id(batch_id_raw, models, raw.get("rebalance", "monthly"))
 
         return ExperimentConfig(
@@ -174,7 +175,7 @@ class ExperimentConfig:
             use_tools=bool(raw.get("use_tools", False)),
             timeout=float(raw.get("timeout", 120.0)),
             propagation_weight=float(raw.get("propagation_weight", 0.1)),
-            resume=bool(raw.get("resume", False)),
+            reuse_latest=bool(raw.get("reuse_latest", False)),
             run_qa=bool(raw.get("run_qa", False)),
             qa=_parse_qa_config(raw.get("qa") or {}),
         )

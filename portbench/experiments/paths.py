@@ -1,74 +1,179 @@
 """
 Output path conventions + shared persistence helpers for batch experiments.
 
-Layout (created lazily as experiments run):
+New layout (created lazily as experiments run):
 
-  EXPERIMENTS/{batch_id}/
-    batch_config.yaml
-    batch_summary.json
-    errors.jsonl
-    {model_label}/
-      profile_comparison.json
-      {profile}/
-        experiment.log
-        error.json
-        figures/
-        stress_{scenario}/
-          backtest_result.json
-          summary.txt
-          nav_curve.csv
-          weight_history.csv
-          trade_history.json
-          snapshots/
-          pipeline_logs/
-        normal/
-          (same structure as stress_*)
+  EXPERIMENTS/
+    _dataset_figures/              # dataset-level correlation figures (shared)
+    {rebalance}/                   # monthly | weekly | quarterly
+      comparison_figures/          # cross-model comparison figures
+      {provider}/                  # ark | tencent | baseline | mock
+        {model}/                   # doubao-seed-2-0-pro-260215 | equal_weight
+          {timestamp}/             # 20260510_042407  (one run = all profiles)
+            run_config.yaml        # config snapshot for this run
+            run_summary.json       # aggregated results across all profiles
+            env_meta.json          # git hash, python version, timestamps
+            errors.jsonl           # per-profile errors
+            checkpoint.json        # completed profile names
+            {profile}/             # conservative | balanced | aggressive
+              experiment.log
+              figures/
+              normal/
+                backtest_result.json
+                nav_curve.csv
+                weight_history.csv
+                trade_history.json
+                summary.txt
+                snapshots/
+                pipeline_logs/
+              stress_{scenario}/
+                (same structure as normal/)
 """
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Optional
 
 from ..sandbox.result import BacktestResult
 
 
-def batch_dir(output_root: str, batch_id: str) -> Path:
-    return Path(output_root) / batch_id
+# ---------------------------------------------------------------------------
+# Directory builders
+# ---------------------------------------------------------------------------
+
+def rebalance_dir(output_root: str, rebalance: str) -> Path:
+    return Path(output_root) / rebalance
 
 
-def model_dir(output_root: str, batch_id: str, model_label: str) -> Path:
-    return batch_dir(output_root, batch_id) / model_label
+def provider_dir(output_root: str, rebalance: str, provider: str) -> Path:
+    return rebalance_dir(output_root, rebalance) / provider
+
+
+def model_dir(output_root: str, rebalance: str, provider: str, model_name: str) -> Path:
+    return provider_dir(output_root, rebalance, provider) / model_name
+
+
+def run_dir(
+    output_root: str, rebalance: str, provider: str, model_name: str, timestamp: str
+) -> Path:
+    return model_dir(output_root, rebalance, provider, model_name) / timestamp
 
 
 def profile_dir(
-    output_root: str, batch_id: str, model_label: str, profile: str
+    output_root: str,
+    rebalance: str,
+    provider: str,
+    model_name: str,
+    timestamp: str,
+    profile: str,
 ) -> Path:
-    return model_dir(output_root, batch_id, model_label) / profile
+    return run_dir(output_root, rebalance, provider, model_name, timestamp) / profile
 
 
 def stress_dir(
-    output_root: str, batch_id: str, model_label: str, profile: str, scenario: str
+    output_root: str,
+    rebalance: str,
+    provider: str,
+    model_name: str,
+    timestamp: str,
+    profile: str,
+    scenario: str,
 ) -> Path:
     return (
-        profile_dir(output_root, batch_id, model_label, profile) / f"stress_{scenario}"
+        profile_dir(output_root, rebalance, provider, model_name, timestamp, profile)
+        / f"stress_{scenario}"
     )
 
 
-def normal_dir(output_root: str, batch_id: str, model_label: str, profile: str) -> Path:
-    return profile_dir(output_root, batch_id, model_label, profile) / "normal"
+def normal_dir(
+    output_root: str,
+    rebalance: str,
+    provider: str,
+    model_name: str,
+    timestamp: str,
+    profile: str,
+) -> Path:
+    return (
+        profile_dir(output_root, rebalance, provider, model_name, timestamp, profile)
+        / "normal"
+    )
 
 
 def figures_dir(
-    output_root: str, batch_id: str, model_label: str, profile: str
+    output_root: str,
+    rebalance: str,
+    provider: str,
+    model_name: str,
+    timestamp: str,
+    profile: str,
 ) -> Path:
-    return profile_dir(output_root, batch_id, model_label, profile) / "figures"
+    return (
+        profile_dir(output_root, rebalance, provider, model_name, timestamp, profile)
+        / "figures"
+    )
 
 
-def checkpoint_file(output_root: str, batch_id: str) -> Path:
-    """Path to checkpoint.json tracking completed (model, profile) pairs."""
-    return batch_dir(output_root, batch_id) / "checkpoint.json"
+def comparison_figures_dir(output_root: str, rebalance: str) -> Path:
+    return rebalance_dir(output_root, rebalance) / "comparison_figures"
 
+
+def dataset_figures_dir(output_root: str) -> Path:
+    return Path(output_root) / "_dataset_figures"
+
+
+def checkpoint_file(
+    output_root: str, rebalance: str, provider: str, model_name: str, timestamp: str
+) -> Path:
+    return run_dir(output_root, rebalance, provider, model_name, timestamp) / "checkpoint.json"
+
+
+# ---------------------------------------------------------------------------
+# Run selection: find best (most complete, then latest) existing timestamp
+# ---------------------------------------------------------------------------
+
+def count_completed_profiles(ts_dir: Path, expected_profiles: list[str]) -> int:
+    """Count how many expected profiles have at least experiment.log in ts_dir."""
+    return sum(
+        1 for p in expected_profiles if (ts_dir / p / "experiment.log").exists()
+    )
+
+
+def find_best_run(
+    output_root: str,
+    rebalance: str,
+    provider: str,
+    model_name: str,
+    expected_profiles: list[str],
+) -> Optional[str]:
+    """
+    Find the most complete (then latest) timestamp directory for a model.
+
+    Returns the timestamp string (e.g. '20260510_042407') or None if no run exists.
+    """
+    m_dir = model_dir(output_root, rebalance, provider, model_name)
+    if not m_dir.exists():
+        return None
+
+    best_ts: Optional[str] = None
+    best_score = -1
+
+    for child in m_dir.iterdir():
+        if not child.is_dir():
+            continue
+        ts = child.name
+        score = count_completed_profiles(child, expected_profiles)
+        if score > best_score or (score == best_score and (best_ts is None or ts > best_ts)):
+            best_score = score
+            best_ts = ts
+
+    return best_ts
+
+
+# ---------------------------------------------------------------------------
+# Persistence helpers
+# ---------------------------------------------------------------------------
 
 def save_backtest_result(result: BacktestResult, out_dir: Path) -> None:
     """Persist BacktestResult fully: JSON + summary + nav/weight CSV + trades."""
