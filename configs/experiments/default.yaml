@@ -25,7 +25,7 @@ models:
   - provider: kimi           # uses KIMI_API_KEY/_BASE_URL/_MODEL
   - provider: glm            # uses GLM_API_KEY/_BASE_URL/_MODEL
   - provider: ark            # uses ARK_API_KEY/_BASE_URL/_MODEL
-  # - baseline: equal_weight # reference baseline (no API)
+  - baseline: equal_weight   # reference baseline (no API)
 
 profiles: [conservative, balanced, aggressive]
 stress_scenarios: all
