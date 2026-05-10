@@ -1,25 +1,31 @@
-# PortBench batch experiment — example config.
+# PortBench batch experiment config.
 #
-# Models: 3 production providers (read API_KEY/BASE_URL/MODEL from .env)
-# Profiles: 3 investor profiles
-# Stress scenarios: all 3 (2015 China / 2020 COVID / 2022 crypto)
-# Plus normal-market backtest in 2024 when stress gate passes.
+# Output layout:
+#   EXPERIMENTS/{rebalance}/{provider}/{model}/{timestamp}/{profile}/{scenario}/
+#
+# One "run" = one model × all profiles. Each model gets its own timestamp directory.
+# Cross-model comparison figures are written to EXPERIMENTS/{rebalance}/comparison_figures/.
 
-batch_id: "{models}_{rebalance}_{date}_{time}"
+# Optional human-readable label stored in run metadata (not used for directory naming).
+# Supports {models}, {rebalance}, {date}, {time} placeholders.
+batch_id: "{models}_{rebalance}_{date}"
+
 data_provider: processed
 data_dir: datasets/processed
 sec_dir: datasets/sec
-rebalance: monthly
+rebalance: monthly           # weekly | monthly | quarterly  →  Level 1 directory
 initial_nav: 1000000
-workers_per_experiment: 3
-parallel_experiments: 1
+workers_per_experiment: 3    # concurrent stress scenarios per profile
+parallel_experiments: 1      # concurrent model runs
 seed: 42
 
 models:
-  # - provider: deepseek        # uses DASHSCOPE_API_KEY/_BASE_URL/_MODEL
-  # - provider: tencent          # uses TENCENT_API_KEY/_BASE_URL/_MODEL
-  - provider: ark              # uses ARK_API_KEY/_BASE_URL/_MODEL
-  - baseline: equal_weight     # reference baseline (no API)
+  - provider: tencent        # uses TENCENT_API_KEY/_BASE_URL/_MODEL
+  - provider: deepseek       # uses DEEPSEEK_API_KEY/_BASE_URL/_MODEL
+  - provider: kimi           # uses KIMI_API_KEY/_BASE_URL/_MODEL
+  - provider: glm            # uses GLM_API_KEY/_BASE_URL/_MODEL
+  - provider: ark            # uses ARK_API_KEY/_BASE_URL/_MODEL
+  # - baseline: equal_weight # reference baseline (no API)
 
 profiles: [conservative, balanced, aggressive]
 stress_scenarios: all
@@ -35,16 +41,16 @@ logging:
 
 on_error: isolate
 output_root: EXPERIMENTS
-timeout: 120                   # per-request LLM timeout in seconds (default 120)
-propagation_weight: 0.1       # CEPS cascade penalty weight (sensitivity analysis)
-resume: true                  # set to true to skip already-completed (model, profile) pairs
+timeout: 120                 # per-request LLM timeout in seconds
+propagation_weight: 0.1      # CEPS cascade penalty weight
+reuse_latest: true          # true = skip models that already have results in EXPERIMENTS/{rebalance}/{provider}/{model}/
 
-run_qa: false                  # true = run QA dataset evaluation for LLM models
+run_qa: false                # true = run QA dataset evaluation for LLM models
 
 qa:
-  dataset_path: datasets/qa_dataset   # directory with train.jsonl/val.jsonl/test.jsonl
-  split: test                  # train | val | test | all
+  dataset_path: datasets/qa_dataset
+  split: test                # train | val | test | all
   templates: [T1, T2, T3, T4, T5, T6, T7]
-  max_pairs_per_template: 50   # cap per template
-  parallel_questions: 4        # concurrent LLM calls per template
-  save_responses: true         # save raw LLM responses in results.jsonl
+  max_pairs_per_template: 50
+  parallel_questions: 4
+  save_responses: true
