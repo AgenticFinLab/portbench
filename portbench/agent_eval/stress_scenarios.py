@@ -51,9 +51,9 @@ STRESS_SCENARIOS: list[StressScenario] = [
         start=date(2015, 8, 1),
         end=date(2016, 2, 29),
         description=(
-            "China currency devaluation shock (Aug 2015) + oil price collapse. "
-            "S&P 500 fell ~12% in two weeks; broad cross-asset sell-off with "
-            "elevated VIX and credit spread widening."
+            "Multi-asset high-volatility period (Aug 2015 – Feb 2016). "
+            "Sharp cross-asset drawdown driven by currency devaluation and commodity price decline. "
+            "Elevated VIX, widening credit spreads, broad risk-off rotation."
         ),
         min_pass_score=0.40,
     ),
@@ -62,9 +62,9 @@ STRESS_SCENARIOS: list[StressScenario] = [
         start=date(2020, 2, 1),
         end=date(2020, 5, 31),
         description=(
-            "COVID-19 pandemic shock. S&P 500 fell 34% in 33 days (fastest bear market on record). "
-            "Cross-asset correlations spiked; even gold and Treasuries briefly sold off in "
-            "the March 2020 liquidity crisis."
+            "Rapid equity drawdown period (Feb–May 2020). "
+            "S&P 500 fell approximately 34% over 33 trading days; cross-asset correlations spiked. "
+            "Significant liquidity stress in March 2020, followed by policy-driven recovery."
         ),
         min_pass_score=0.45,
     ),
@@ -73,9 +73,9 @@ STRESS_SCENARIOS: list[StressScenario] = [
         start=date(2022, 5, 1),
         end=date(2022, 12, 31),
         description=(
-            "Cryptocurrency market collapse: Bitcoin fell ~75% from peak, Ethereum fell ~80%. "
-            "Terra/LUNA collapse (May 2022) and FTX bankruptcy (Nov 2022) were catalysts. "
-            "Concurrent with Fed rate hike cycle creating broad risk-off environment."
+            "Digital asset drawdown and broad risk-off rotation (May–Dec 2022). "
+            "Major digital assets declined 70–80% from prior peaks. "
+            "Concurrent with Fed rate hike cycle creating elevated volatility across growth assets."
         ),
         min_pass_score=0.50,
     ),

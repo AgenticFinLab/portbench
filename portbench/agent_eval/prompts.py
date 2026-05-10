@@ -15,6 +15,7 @@ re-issues the prompt with an even stronger reminder appended.
 
 from __future__ import annotations
 
+import re
 from typing import Iterable
 
 from .base import MarketSnapshot, S1Output, S2Output
@@ -48,6 +49,60 @@ def _quote(s: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Regime display mapping — neutral labels for prompt text
+#
+# Internal regime labels (used for scoring/storage) are kept as-is.
+# Only the text that goes into LLM prompts is remapped.
+# ---------------------------------------------------------------------------
+
+_REGIME_DISPLAY: dict[str, str] = {
+    "crisis": "high-volatility",
+}
+
+
+def _display_regime(regime: str | None) -> str:
+    """Map an internal regime label to its prompt-safe display string."""
+    if regime is None:
+        return "unknown"
+    return _REGIME_DISPLAY.get(regime.lower(), regime)
+
+
+# ---------------------------------------------------------------------------
+# News text sanitiser — strip event-specific crisis language
+#
+# News articles from stress periods can contain words that trigger content
+# safety filters in some LLMs.  We replace the surface form while keeping
+# the factual market signal intact (price data tells the model what happened).
+# Applied uniformly across all models to preserve cross-model comparability.
+# ---------------------------------------------------------------------------
+
+_NEWS_REPLACEMENTS: list[tuple[str, str]] = [
+    (r"\bcrash(?:ed|es|ing)?\b", "sharp decline"),
+    (r"\bcollapse(?:d|s|ing)?\b", "sharp correction"),
+    (r"\bcrisis\b", "high-volatility period"),
+    (r"\bbankruptcy\b", "financial difficulty"),
+    (r"\bbankrupt(?:ed|ing)?\b", "in financial difficulty"),
+    (r"\bmeltdown\b", "significant drawdown"),
+    (r"\bpanic(?:ked|king|s)?\b", "rapid"),
+    (r"\bcatastrophe\b", "adverse event"),
+    (r"\bdisaster\b", "adverse event"),
+    (r"\bdefault(?:ed|ing|s)?\b", "payment difficulty"),
+]
+
+_NEWS_PATTERNS = [
+    (re.compile(pat, re.IGNORECASE), repl)
+    for pat, repl in _NEWS_REPLACEMENTS
+]
+
+
+def _sanitize_news(text: str) -> str:
+    """Replace crisis-specific terms in news text with neutral equivalents."""
+    for pattern, replacement in _NEWS_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+# ---------------------------------------------------------------------------
 # S1 — Market Interpretation
 # ---------------------------------------------------------------------------
 
@@ -62,7 +117,7 @@ def build_s1_prompt(
 ) -> str:
     """Prompt for Stage 1: structured asset views + regime + macro summary."""
     news_block = (
-        f"\nRECENT NEWS / FILINGS:\n{snapshot.news_text[:3000]}\n"
+        f"\nRECENT NEWS / FILINGS:\n{_sanitize_news(snapshot.news_text[:3000])}\n"
         if snapshot.news_text
         else ""
     )
@@ -70,7 +125,7 @@ def build_s1_prompt(
     schema = _schema_block(
         [
             f'  "asset_views": {{ {asset_view_fields} }},',
-            '  "detected_regime": "<bull|bear|sideways|crisis>",',
+            '  "detected_regime": "<bull|bear|sideways|high-volatility>",',
             '  "confidence": <float in [0, 1]>,',
             '  "macro_summary": "<one sentence>"',
         ]
@@ -84,7 +139,7 @@ MARKET DATA (trailing {trailing_days} trading days):
 
 {corr_block}
 
-Current market regime context: {snapshot.market_regime or "unknown"}
+Current market regime context: {_display_regime(snapshot.market_regime)}
 {news_block}
 TASK: Interpret the market data and provide structured asset views.
 
@@ -93,7 +148,7 @@ For each asset, assign a sentiment score in [-1.0, +1.0]:
    0.0 = neutral
   -1.0 = strongly bearish (expect significant underperformance)
 
-Identify the overall market regime: one of "bull", "bear", "sideways", "crisis".
+Identify the overall market regime: one of "bull", "bear", "sideways", "high-volatility".
 
 {schema}
 
@@ -113,7 +168,7 @@ def build_s2_prompt(
     """Prompt for Stage 2: discrete buy/hold/sell signals + strengths."""
     views_str = "\n".join(f"  {a}: view={v:+.3f}" for a, v in s1.asset_views.items())
     news_block = (
-        f"\nRecent news / filings:\n{snapshot.news_text}\n"
+        f"\nRecent news / filings:\n{_sanitize_news(snapshot.news_text)}\n"
         if snapshot.news_text
         else ""
     )
@@ -131,7 +186,7 @@ def build_s2_prompt(
 Stage 1 market interpretation produced these asset views (scale: -1=bearish, +1=bullish):
 {views_str}
 
-Detected market regime: {s1.detected_regime}
+Detected market regime: {_display_regime(s1.detected_regime)}
 Macro summary: {s1.macro_summary}
 {news_block}
 TASK: Convert each asset view into an actionable trading signal.
@@ -185,7 +240,7 @@ Stage 2 signals:
 
 Current portfolio weights: {current_w_str}
 Portfolio NAV: ${snapshot.portfolio_value:,.0f}
-Market regime: {snapshot.market_regime or "unknown"}
+Market regime: {_display_regime(snapshot.market_regime)}
 {corr_section}
 TASK: Allocate portfolio weights based on the signals above.
 
