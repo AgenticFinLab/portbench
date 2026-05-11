@@ -113,6 +113,7 @@ class BacktestEngine:
         self._episode_results = []
         self._per_step_ceps: list[float] = []
         self._per_step_alignment: list[float] = []
+        self._n_refused_steps: int = 0  # episodes with ≥1 refused stage
 
         # Step-level weight cache: {date_str → {weights, step_ceps, step_alignment}}
         # Loaded from disk on init; written after every successful LLM rebalance.
@@ -246,6 +247,10 @@ class BacktestEngine:
             profile_name=self._profile.name if self._profile else None,
             per_step_ceps=list(self._per_step_ceps),
             per_step_alignment=list(self._per_step_alignment),
+            n_refused_steps=self._n_refused_steps,
+            refused_rate=round(
+                self._n_refused_steps / max(1, len(portfolio.trade_history)), 4
+            ),
         )
 
     def _get_target_weights(self, snapshot) -> dict[str, float]:
@@ -272,6 +277,8 @@ class BacktestEngine:
 
             result = self._pipeline.run_episode(snapshot)
             self._episode_results.append(result)
+            if result.refused_stages:
+                self._n_refused_steps += 1
 
             # Collect per-step CEPS
             step_ceps: Optional[float] = None

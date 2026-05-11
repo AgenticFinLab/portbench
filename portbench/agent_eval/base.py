@@ -185,6 +185,7 @@ class S1Output:
     detected_regime: str = "unknown"
     confidence: float = 0.5
     raw_llm_output: str = ""
+    refused: bool = False  # True when model declined to answer
 
 
 @dataclass
@@ -204,6 +205,7 @@ class S2Output:
     strengths: dict[str, float] = field(default_factory=dict)  # [0, 1]
     reasoning: str = ""
     raw_llm_output: str = ""
+    refused: bool = False
 
 
 @dataclass
@@ -225,6 +227,7 @@ class S3Output:
     expected_vol: float = 0.0
     sharpe_estimate: float = 0.0
     raw_llm_output: str = ""
+    refused: bool = False
 
 
 @dataclass
@@ -434,6 +437,7 @@ class EpisodeResult:
     gt_outputs: dict[StageID, Any] = field(default_factory=dict)
     stage_scores: dict[StageID, float] = field(default_factory=dict)
     errors: dict[StageID, str] = field(default_factory=dict)
+    refused_stages: list[str] = field(default_factory=list)  # stage names that returned a refusal fallback
 
     def to_stage_score_list(self):
         """Convert to a list of StageScore objects for CEPS computation."""
@@ -595,6 +599,10 @@ class EvalPipeline:
                 result.stage_scores[sid] = (
                     stage.score(actual, gt) if gt is not None else 1.0
                 )
+                # If the stage returned a refusal fallback, override score to 0
+                if getattr(actual, "refused", False):
+                    result.refused_stages.append(sid.name)
+                    result.stage_scores[sid] = 0.0
                 prior_output = actual
 
                 # Extract prompt and raw response from stage output if present

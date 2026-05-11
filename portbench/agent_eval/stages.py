@@ -116,12 +116,64 @@ def _extract_json(text: str) -> dict:
 _JSON_RETRY_LIMIT = 2  # additional attempts after the first parse failure
 
 
-def _call_with_json_retry(adapter, prompt: str, use_tools: bool, stage_name: str) -> dict:
+class StageRefusalError(RuntimeError):
+    """
+    Raised when an LLM declines to respond to a stage prompt due to content
+    safety filters or policy restrictions.  The pipeline catches this and
+    substitutes a neutral fallback output, recording the refusal in
+    EpisodeResult.refused_stages with a forced stage score of 0.0.
+    """
+
+
+# ---------------------------------------------------------------------------
+# Refusal detection
+# ---------------------------------------------------------------------------
+
+_REFUSAL_PATTERNS: list[re.Pattern] = [
+    # Chinese refusals (common content-safety responses)
+    re.compile(r"无法给到", re.IGNORECASE),
+    re.compile(r"无法回答", re.IGNORECASE),
+    re.compile(r"无法提供", re.IGNORECASE),
+    re.compile(r"无法处理", re.IGNORECASE),
+    re.compile(r"无法.*内容", re.IGNORECASE),
+    re.compile(r"不(能|可以).{0,10}(回答|提供|处理|回复)", re.IGNORECASE),
+    re.compile(r"对不起.*无法", re.IGNORECASE),
+    re.compile(r"抱歉.*无法", re.IGNORECASE),
+    # English refusals
+    re.compile(r"i('m|\s+am)?\s+(not\s+able|unable)\s+to\s+(provide|answer|respond|assist)", re.IGNORECASE),
+    re.compile(r"i\s+can'?t\s+(provide|answer|respond|give|assist)", re.IGNORECASE),
+    re.compile(r"i\s+cannot\s+(provide|answer|respond|give|assist)", re.IGNORECASE),
+    re.compile(r"i\s+(?:must\s+)?decline", re.IGNORECASE),
+]
+
+
+def _is_refusal(raw: str) -> bool:
+    """
+    Return True if the model output looks like a content-safety refusal rather
+    than a legitimate (possibly malformed) JSON response.
+
+    Two conditions trigger detection:
+    1. A known refusal keyword pattern is matched, OR
+    2. The response is very short (< 120 chars) and contains no `{` character,
+       making it structurally impossible to be valid JSON.
+    """
+    if any(p.search(raw) for p in _REFUSAL_PATTERNS):
+        return True
+    # Heuristic: too short to be JSON and contains no opening brace
+    if len(raw.strip()) < 120 and "{" not in raw:
+        return True
+    return False
+
+
+def _call_with_json_retry(adapter, prompt: str, use_tools: bool, stage_name: str) -> tuple:
     """
     Call the LLM and parse a JSON object, retrying on parse failure.
 
     Only LLM-format errors trigger retries. Network / API / HTTP errors
     propagate immediately so the experiment fails loudly.
+    Raises StageRefusalError (a subclass of RuntimeError) if the model output
+    matches a content-safety refusal pattern — callers should catch this
+    separately from generic RuntimeError to apply fallback logic.
     """
     last_err: Optional[Exception] = None
     last_raw: str = ""
@@ -135,6 +187,12 @@ def _call_with_json_retry(adapter, prompt: str, use_tools: bool, stage_name: str
         else:
             raw = adapter.complete(full_prompt)
         last_raw = raw
+        # Detect content-safety refusals immediately — no point retrying
+        if _is_refusal(raw):
+            raise StageRefusalError(
+                f"{stage_name} model refused to respond. "
+                f"Last raw output: {raw!r}"
+            )
         try:
             return _extract_json(raw), raw
         except (json.JSONDecodeError, ValueError) as exc:
@@ -319,7 +377,17 @@ class S1MarketInterpretation(PipelineStage):
         )
 
         self._last_prompt = prompt
-        parsed, raw = _call_with_json_retry(self.adapter, prompt, self.use_tools, "S1")
+        try:
+            parsed, raw = _call_with_json_retry(self.adapter, prompt, self.use_tools, "S1")
+        except StageRefusalError as exc:
+            return S1Output(
+                asset_views={a: 0.0 for a in assets},
+                detected_regime="sideways",
+                confidence=0.0,
+                macro_summary="[refused]",
+                raw_llm_output=str(exc),
+                refused=True,
+            )
         try:
             return S1Output(
                 asset_views={a: float(np.clip(parsed["asset_views"].get(a, 0.0), -1, 1))
@@ -408,7 +476,16 @@ class S2SignalGeneration(PipelineStage):
         prompt = build_s2_prompt(snapshot=snapshot, s1=s1, assets=assets)
 
         self._last_prompt = prompt
-        parsed, raw = _call_with_json_retry(self.adapter, prompt, self.use_tools, "S2")
+        try:
+            parsed, raw = _call_with_json_retry(self.adapter, prompt, self.use_tools, "S2")
+        except StageRefusalError as exc:
+            return S2Output(
+                signals={a: "hold" for a in assets},
+                strengths={a: 0.5 for a in assets},
+                reasoning="[refused]",
+                raw_llm_output=str(exc),
+                refused=True,
+            )
         try:
             valid_signals = {"buy", "hold", "sell"}
             signals = {
@@ -507,7 +584,22 @@ class S3WeightOptimization(PipelineStage):
         )
 
         self._last_prompt = prompt
-        parsed, raw = _call_with_json_retry(self.adapter, prompt, self.use_tools, "S3")
+        try:
+            parsed, raw = _call_with_json_retry(self.adapter, prompt, self.use_tools, "S3")
+        except StageRefusalError as exc:
+            # Hold current weights — no rebalancing when the model refuses
+            current = dict(snapshot.current_weights) if snapshot.current_weights else {}
+            if not current:
+                n = len(assets)
+                current = {a: round(1.0 / n, 4) for a in assets}
+            return S3Output(
+                weights=current,
+                expected_return=0.0,
+                expected_vol=0.0,
+                sharpe_estimate=0.0,
+                raw_llm_output=str(exc),
+                refused=True,
+            )
         try:
             raw_weights = {a: float(parsed["weights"].get(a, 0.0)) for a in assets}
             # Clip negatives and renormalize to enforce constraints

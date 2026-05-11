@@ -61,6 +61,10 @@ class BacktestResult:
         None  # set externally by run_backtest after drawdown check
     )
 
+    # Refusal tracking (populated when use_pipeline=True)
+    n_refused_steps: int = 0    # episodes where ≥1 stage returned a refusal fallback
+    refused_rate: float = 0.0   # n_refused_steps / n_rebalances
+
     def __post_init__(self):
         self._compute_metrics()
         if self.per_step_ceps:
@@ -107,6 +111,9 @@ class BacktestResult:
             d["mean_ceps"] = round(self.mean_ceps, 4)
             d["mean_profile_score"] = round(self.mean_profile_score, 4)
             d["n_rebalances_with_ceps"] = len(self.per_step_ceps)
+        if self.n_refused_steps > 0:
+            d["n_refused_steps"] = self.n_refused_steps
+            d["refused_rate"] = round(self.refused_rate, 4)
         if self.stress_passed is not None:
             d["stress_passed"] = self.stress_passed
         return d
@@ -153,6 +160,8 @@ class BacktestResult:
         obj.per_step_alignment = []
         obj.mean_profile_score = float(d.get("mean_profile_score", 0.0))
         obj.stress_passed = d.get("stress_passed")
+        obj.n_refused_steps = int(d.get("n_refused_steps", 0))
+        obj.refused_rate = float(d.get("refused_rate", 0.0))
         return obj
 
     def summary(self) -> str:
@@ -183,6 +192,10 @@ class BacktestResult:
                 f"Mean CEPS:         {self.mean_ceps:.4f}",
                 f"Mean Profile Score:{self.mean_profile_score:.4f}",
             ]
+        if self.n_refused_steps > 0:
+            lines.append(
+                f"Refused Steps:     {self.n_refused_steps} ({self.refused_rate:.1%})"
+            )
         if self.stress_passed is not None:
             lines.append(
                 f"Stress Gate:       {'PASSED' if self.stress_passed else 'FAILED'}"
