@@ -92,7 +92,7 @@ Detailed module docs live in [`docs/modules/`](docs/modules/):
 
 **`portbench/qa_builder/`** — Seven question templates (T1–T7) generating QA pairs from a `DataProvider` (`MockDataProvider` for synthetic GBM, `ProcessedDataProvider` for real data). Splits are computed dynamically from the data range. `ContextWindow` carries cross-asset correlations and SEC/Kaggle text. Build pipeline ranks dates text-first to maximize text coverage (~81% on the current dataset).
 
-**`portbench/baselines/`** — `EqualWeightBaseline`, `SixtyFortyBaseline`, `RiskParityBaseline` (naive inverse-vol), `CovarianceRiskParityBaseline` (Equal-Risk-Contribution using full covariance), `SmartFolioBaseline` — all implement the same `AgentAdapter` interface as LLM agents and pass through the identical evaluation pipeline.
+**`portbench/baselines/`** — `EqualWeightBaseline`, `SixtyFortyBaseline`, `RiskParityBaseline` (naive inverse-vol), `CovarianceRiskParityBaseline` (Equal-Risk-Contribution using full covariance), `MinVarianceBaseline` (long-only minimum variance) — all implement the same `AgentAdapter` interface as LLM agents and pass through the identical evaluation pipeline.
 
 **`portbench/visualization/`** — Matplotlib helpers for generating dataset, regime, ranking, CEPS, stress, and QA-sample figures.
 
