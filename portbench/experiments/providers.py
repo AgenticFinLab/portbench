@@ -26,6 +26,7 @@ from ..agent_eval.mock_agent import MockAgentAdapter
 from ..baselines import (
     CovarianceRiskParityBaseline,
     EqualWeightBaseline,
+    MinVarianceBaseline,
     RiskParityBaseline,
     SixtyFortyBaseline,
 )
@@ -59,6 +60,7 @@ BASELINE_REGISTRY = {
     "sixty_forty": SixtyFortyBaseline,
     "risk_parity": RiskParityBaseline,
     "cov_risk_parity": CovarianceRiskParityBaseline,
+    "min_variance": MinVarianceBaseline,
 }
 
 

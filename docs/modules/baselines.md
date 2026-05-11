@@ -78,22 +78,23 @@ This is the strong correlation-aware counterpart to `RiskParityBaseline`. Use it
 
 Reference: Spinu, F. (2013). *An Algorithm for Computing Risk Parity Weights*.
 
-### `SmartFolioBaseline` — IJCAI 2025 SOTA
+### `MinVarianceBaseline` — Minimum Variance
 
 ```python
-from portbench.baselines import SmartFolioBaseline
-# Heuristic approximation (default, no package required):
-baseline = SmartFolioBaseline()
-# Real model (requires pip install smartfolio):
-baseline = SmartFolioBaseline(use_real_model=True)
+from portbench.baselines import MinVarianceBaseline
+baseline = MinVarianceBaseline(min_periods=20, ridge=1e-4)
 ```
 
-Interface wrapper for the SmartFolio model (non-LLM SOTA for multi-asset portfolio management). When the `smartfolio` package is not installed, falls back to a momentum + inverse-vol heuristic that approximates the paper's described allocation logic:
+Solves the long-only minimum variance problem using the full empirical covariance matrix:
 
+```text
+min  w' Σ w
+s.t. sum(w) = 1,  w_i >= 0
 ```
-score_i = momentum_weight × trailing_momentum_i + (1 - momentum_weight) × (1/σ_i)
-w_i ∝ max(score_i, 0)   [long-only]
-```
+
+Optimized via SLSQP (scipy). This is the defensive endpoint of the Markowitz efficient frontier — it concentrates weight on the globally least-volatile combination rather than equalizing risk contributions (ERC). Produces more concentrated allocations than ERC when some assets have very low correlation.
+
+Reference: Markowitz, H. (1952). *Portfolio Selection*. Journal of Finance, 7(1), 77–91.
 
 ## Usage in EvalPipeline
 
@@ -110,6 +111,7 @@ Or via the evaluation script:
 ```bash
 python examples/agent_eval/run_evaluation.py --baseline risk_parity
 python examples/agent_eval/run_evaluation.py --baseline cov_risk_parity
+python examples/agent_eval/run_evaluation.py --baseline min_variance
 python examples/agent_eval/run_evaluation.py --baseline equal_weight
 python examples/agent_eval/run_evaluation.py --baseline sixty_forty
 ```
@@ -119,7 +121,8 @@ python examples/agent_eval/run_evaluation.py --baseline sixty_forty
 Baselines are subject to the same stress gate as LLM agents: they must achieve minimum CEPS scores on all three stress scenarios before entering the performance ranking. This ensures that the ranking compares risk-aware strategies on a level playing field.
 
 Expected baseline ordering in normal markets:
-```
-SmartFolio ≥ CovarianceRiskParity ≥ RiskParity ≥ 60/40 ≥ EqualWeight  (CEPS score)
+
+```text
+MinVariance ≥ CovarianceRiskParity ≥ RiskParity ≥ 60/40 ≥ EqualWeight  (CEPS score)
 ```
 (This is a hypothesis to be validated by the benchmark results.)
