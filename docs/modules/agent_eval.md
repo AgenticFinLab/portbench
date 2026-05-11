@@ -318,6 +318,46 @@ Each episode file contains:
 }
 ```
 
+## Content Safety Refusal Handling
+
+Some LLMs (particularly models with stricter content-safety policies) may refuse to respond to financial scenario prompts, returning a short declination message instead of the expected JSON. This is distinct from a JSON-format error and must be handled differently — retrying with a format-correction suffix does nothing for a content-safety refusal.
+
+### Detection (`_is_refusal`)
+
+`_call_with_json_retry` in `stages.py` checks every raw model response for refusal patterns **before** attempting JSON parsing. Detection triggers on either:
+
+1. **Keyword match** — a set of Chinese and English refusal phrases (e.g. `"无法给到"`, `"无法回答"`, `"I cannot provide"`, `"I'm unable to assist"`).
+2. **Structural heuristic** — response is shorter than 120 characters AND contains no `{` character, making it structurally impossible to be valid JSON.
+
+When detected, `StageRefusalError` (a subclass of `RuntimeError`) is raised immediately. **No retries are attempted** — content-safety refusals are deterministic for a given prompt and retrying wastes quota.
+
+### Fallback Outputs (score = 0.0)
+
+Each stage catches `StageRefusalError` and returns a neutral fallback output marked `refused=True`. `EvalPipeline.run_episode()` then overrides the stage score to **0.0** regardless of how the fallback compares to ground truth, and records the stage name in `EpisodeResult.refused_stages`.
+
+| Stage | Fallback output | Rationale |
+| ----- | --------------- | --------- |
+| S1 | `asset_views={a: 0.0}`, `regime="sideways"`, `confidence=0.0` | Neutral — no directional signal |
+| S2 | `signals={a: "hold"}`, `strengths={a: 0.5}` | Conservative — hold everything |
+| S3 | `weights = snapshot.current_weights` (unchanged) | Hold — no rebalancing when model refuses |
+
+S4 and S5 are deterministic and never call the LLM, so they are never refused.
+
+### Tracking in Results
+
+`BacktestResult` tracks refusal statistics across all rebalance steps:
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| `n_refused_steps` | `int` | Episodes where ≥1 stage returned a refusal fallback |
+| `refused_rate` | `float` | `n_refused_steps / n_rebalances` |
+
+Both fields appear in `backtest_result.json`, `summary.txt`, and `run_summary.json` when non-zero.
+
+### Interpreting Results
+
+A high `refused_rate` for a specific model on a specific scenario is informative in itself — it signals a **deployability gap** independent of financial reasoning quality. Results should be reported with and without refused steps separated, and the `refused_rate` should be included as a standalone evaluation dimension in benchmark tables.
+
 ## Stress Testing
 
 ```python

@@ -119,7 +119,8 @@ Frequency: daily OHLCV (primary); hourly for cryptocurrency.
 | Equal Weight | wᵢ = 1/n |
 | 60/40 | w_equity = 0.6, w_bond = 0.4 |
 | Risk Parity | wᵢ ∝ 1/σᵢ |
-| SmartFolio | IJCAI 2025 SOTA (non-LLM upper bound) |
+| Cov Risk Parity (ERC) | Equal marginal risk contribution via full covariance |
+| Min Variance | min w'Σw, long-only (Markowitz efficient frontier) |
 
 ---
 
