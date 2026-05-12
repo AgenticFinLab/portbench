@@ -58,11 +58,11 @@ logging:
 
 on_error: isolate
 output_root: EXPERIMENTS
-timeout: 240                # per-request LLM timeout in seconds
+timeout: 300                # per-request LLM timeout in seconds
 propagation_weight: 0.1      # CEPS cascade penalty weight
 reuse_latest: true          # true = skip models that already have results in EXPERIMENTS/{rebalance}/{provider}/{model}/
 
-run_qa: false                # true = run QA dataset evaluation for LLM models
+run_qa: true                # true = run QA dataset evaluation for LLM models
 
 qa:
   dataset_path: datasets/qa_dataset
