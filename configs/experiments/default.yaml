@@ -29,12 +29,15 @@ models:
   - provider: kimi           # uses KIMI_API_KEY/_BASE_URL/_MODEL
     model: kimi-k2.6
   # - provider: glm          # uses GLM_API_KEY/_BASE_URL/_MODEL
+  #   model: glm-5.1
   - provider: ark            # uses ARK_API_KEY/_BASE_URL/_MODEL
     model: doubao-seed-2-0-pro-260215
   - provider: ark
     model: doubao-seed-2-0-lite-260215
   - provider: dashscope      # uses DASHSCOPE_API_KEY/_BASE_URL/_MODEL
-    model: qwen3.6-plus
+    model: qwen3.6-max-preview
+  - provider: minimax
+    model: minimax-m2.7
   - baseline: equal_weight   # reference baseline (no API)
   - baseline: risk_parity
   - baseline: sixty_forty
@@ -55,7 +58,7 @@ logging:
 
 on_error: isolate
 output_root: EXPERIMENTS
-timeout: 120                 # per-request LLM timeout in seconds
+timeout: 240                # per-request LLM timeout in seconds
 propagation_weight: 0.1      # CEPS cascade penalty weight
 reuse_latest: true          # true = skip models that already have results in EXPERIMENTS/{rebalance}/{provider}/{model}/
 
