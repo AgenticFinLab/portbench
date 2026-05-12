@@ -20,18 +20,16 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from ..experiments.config import ExperimentConfig, ModelSpec
-from ..experiments.providers import build_adapter, model_label as _model_label
+from ..experiments.providers import build_adapter, spec_provider_name, spec_model_name
 from . import paths as qpaths
 from .scorer import score_response
 
 
-def _spec_label(spec: ModelSpec) -> str:
-    kind = spec.kind()
-    if kind == "baseline":
-        return f"baseline-{spec.baseline}"
-    if kind == "mock":
-        return "mock"
-    return _model_label(spec.provider, spec.model)
+def _spec_display_label(spec: ModelSpec) -> str:
+    """Human-readable label for tqdm / summary metadata (not used for paths)."""
+    prov = spec_provider_name(spec)
+    model = spec_model_name(spec)
+    return f"{prov}/{model}"
 
 
 def _load_qa_pairs(dataset_path: str, split: str) -> list[dict]:
@@ -125,7 +123,7 @@ class QAEvaluator:
     def dry_run(self) -> list[dict]:
         out = []
         for spec in self._llm_specs:
-            label = _spec_label(spec)
+            label = _spec_display_label(spec)
             for tid, pairs in sorted(self._pairs_by_template.items()):
                 out.append({
                     "model": label,
@@ -136,7 +134,7 @@ class QAEvaluator:
 
     def run(self) -> dict:
         cfg = self.cfg
-        root = qpaths.qa_root(cfg.output_root, cfg.batch_id)
+        root = qpaths.qa_root(cfg.output_root)
         root.mkdir(parents=True, exist_ok=True)
 
         model_summaries: dict[str, dict] = {}
@@ -150,7 +148,9 @@ class QAEvaluator:
         pbar = tqdm(total=n_total, desc="qa_eval", unit="q", dynamic_ncols=True)
 
         for spec in self._llm_specs:
-            label = _spec_label(spec)
+            provider = spec_provider_name(spec)
+            model_name = spec_model_name(spec)
+            label = _spec_display_label(spec)
             try:
                 adapter = build_adapter(spec.provider, spec.model)
             except Exception as exc:
@@ -159,14 +159,13 @@ class QAEvaluator:
                 continue
 
             model_summary = self._run_model_qa(
-                spec, adapter, label, pbar,
+                spec, adapter, provider, model_name, label, pbar,
             )
             model_summaries[label] = model_summary
 
         pbar.close()
 
         summary = {
-            "batch_id": cfg.batch_id,
             "n_models": len(model_summaries),
             "elapsed_seconds": round(time.time() - t0, 2),
             "models": model_summaries,
@@ -180,12 +179,14 @@ class QAEvaluator:
         self,
         spec: ModelSpec,
         adapter,
+        provider: str,
+        model_name: str,
         label: str,
         pbar,
     ) -> dict:
         cfg = self.cfg
-        ckpt_path = qpaths.qa_checkpoint_file(cfg.output_root, cfg.batch_id, label)
-        completed_keys = qpaths.load_checkpoint(ckpt_path) if cfg.resume else set()
+        ckpt_path = qpaths.qa_checkpoint_file(cfg.output_root, provider, model_name)
+        completed_keys = qpaths.load_checkpoint(ckpt_path) if cfg.reuse_latest else set()
         ckpt_lock = threading.Lock()
 
         template_summaries: dict[str, dict] = {}
@@ -193,7 +194,7 @@ class QAEvaluator:
         for tid in sorted(self._pairs_by_template.keys()):
             pairs = self._pairs_by_template[tid]
             t_summary = self._run_template(
-                adapter, label, tid, pairs,
+                adapter, provider, model_name, label, tid, pairs,
                 completed_keys, ckpt_lock, ckpt_path, pbar,
             )
             template_summaries[tid] = t_summary
@@ -204,7 +205,8 @@ class QAEvaluator:
             all_scores.extend(ts.get("scores", []))
 
         model_summary = {
-            "model": label,
+            "provider": provider,
+            "model": model_name,
             "mean_accuracy": round(float(np.mean(all_scores)), 4) if all_scores else 0.0,
             "n_total": len(all_scores),
             "n_correct": sum(1 for s in all_scores if s >= 0.99),
@@ -214,7 +216,7 @@ class QAEvaluator:
             },
         }
 
-        m_dir = qpaths.qa_model_dir(cfg.output_root, cfg.batch_id, label)
+        m_dir = qpaths.qa_model_dir(cfg.output_root, provider, model_name)
         m_dir.mkdir(parents=True, exist_ok=True)
         (m_dir / "qa_model_summary.json").write_text(
             json.dumps(model_summary, indent=2, default=str), encoding="utf-8"
@@ -223,7 +225,7 @@ class QAEvaluator:
         # Render figures
         if cfg.logging.save_figures:
             try:
-                self._render_model_figures(label, template_summaries)
+                self._render_model_figures(provider, model_name, label, template_summaries)
             except Exception:
                 pass
 
@@ -232,6 +234,8 @@ class QAEvaluator:
     def _run_template(
         self,
         adapter,
+        provider: str,
+        model_name: str,
         label: str,
         template_id: str,
         pairs: list[dict],
@@ -242,7 +246,7 @@ class QAEvaluator:
     ) -> dict:
         cfg = self.cfg
         t_dir = qpaths.qa_template_dir(
-            cfg.output_root, cfg.batch_id, label, template_id
+            cfg.output_root, provider, model_name, template_id
         )
         t_dir.mkdir(parents=True, exist_ok=True)
 
@@ -252,7 +256,6 @@ class QAEvaluator:
 
         def _eval_one(pair: dict) -> None:
             qa_id = pair.get("qa_id", pair.get("id", ""))
-            t_id = pair.get("template_id", pair.get("template", template_id))
             ck = f"{template_id}:{qa_id}"
 
             if ck in completed_keys:
@@ -305,7 +308,7 @@ class QAEvaluator:
 
             with ckpt_lock:
                 completed_keys.add(ck)
-                qpaths.write_checkpoint(ckpt_path, completed_keys, self.cfg.batch_id)
+                qpaths.write_checkpoint(ckpt_path, completed_keys)
 
             pbar.update(1)
 
@@ -336,7 +339,11 @@ class QAEvaluator:
         return summary
 
     def _render_model_figures(
-        self, label: str, template_summaries: dict[str, dict]
+        self,
+        provider: str,
+        model_name: str,
+        label: str,
+        template_summaries: dict[str, dict],
     ) -> None:
         from ..visualization.qa_accuracy_plots import (
             plot_qa_accuracy_heatmap,
@@ -346,10 +353,9 @@ class QAEvaluator:
         from ..visualization.style import save_figure
 
         cfg = self.cfg
-        fig_dir = qpaths.qa_figures_dir(cfg.output_root, cfg.batch_id, label)
+        fig_dir = qpaths.qa_figures_dir(cfg.output_root, provider, model_name)
         fig_dir.mkdir(parents=True, exist_ok=True)
 
-        # Accuracy heatmap (single model — use model as the only row)
         acc_data = {
             label: {
                 tid: ts["accuracy"]
@@ -359,7 +365,6 @@ class QAEvaluator:
         fig = plot_qa_accuracy_heatmap(acc_data, title=f"QA Accuracy — {label}")
         save_figure(fig, str(fig_dir / "accuracy_by_template.png"), formats=("png",))
 
-        # By regime
         regime_data = {
             label: {
                 tid: ts.get("by_regime", {})
@@ -369,7 +374,6 @@ class QAEvaluator:
         fig = plot_qa_accuracy_by_regime(regime_data, title=f"QA Accuracy by Regime — {label}")
         save_figure(fig, str(fig_dir / "accuracy_by_regime.png"), formats=("png",))
 
-        # Score distribution
         dist_data = {
             label: {
                 tid: ts.get("scores", [])

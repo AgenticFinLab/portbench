@@ -422,3 +422,4 @@ def save_figure(fig: plt.Figure, path: str, formats=("pdf", "png")) -> None:
     base.parent.mkdir(parents=True, exist_ok=True)
     for fmt in formats:
         fig.savefig(base.with_suffix(f".{fmt}"))
+    plt.close(fig)

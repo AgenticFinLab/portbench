@@ -1,4 +1,18 @@
-"""QA evaluation path helpers — mirrors portbench/experiments/paths.py."""
+"""QA evaluation path helpers.
+
+Layout (independent of rebalance frequency and run timestamp):
+
+  EXPERIMENTS/
+    qa_eval/
+      {provider}/          e.g. tencent | deepseek | ark
+        {model}/           e.g. hunyuan-turbos | deepseek-v4-pro
+          qa_checkpoint.json
+          qa_model_summary.json
+          figures/
+          {template}/      e.g. T1 | T2 | ... | T7
+            results.jsonl
+            summary.json
+"""
 
 from __future__ import annotations
 
@@ -7,28 +21,26 @@ from datetime import datetime
 from pathlib import Path
 
 
-def qa_root(output_root: str, batch_id: str) -> Path:
-    return Path(output_root) / batch_id / "qa_eval"
+def qa_root(output_root: str) -> Path:
+    return Path(output_root) / "qa_eval"
 
 
-def qa_model_dir(output_root: str, batch_id: str, model_label: str) -> Path:
-    return qa_root(output_root, batch_id) / model_label
+def qa_model_dir(output_root: str, provider: str, model_name: str) -> Path:
+    return qa_root(output_root) / provider / model_name
 
 
 def qa_template_dir(
-    output_root: str, batch_id: str, model_label: str, template_id: str
+    output_root: str, provider: str, model_name: str, template_id: str
 ) -> Path:
-    return qa_model_dir(output_root, batch_id, model_label) / template_id
+    return qa_model_dir(output_root, provider, model_name) / template_id
 
 
-def qa_checkpoint_file(
-    output_root: str, batch_id: str, model_label: str
-) -> Path:
-    return qa_model_dir(output_root, batch_id, model_label) / "qa_checkpoint.json"
+def qa_checkpoint_file(output_root: str, provider: str, model_name: str) -> Path:
+    return qa_model_dir(output_root, provider, model_name) / "qa_checkpoint.json"
 
 
-def qa_figures_dir(output_root: str, batch_id: str, model_label: str) -> Path:
-    return qa_model_dir(output_root, batch_id, model_label) / "figures"
+def qa_figures_dir(output_root: str, provider: str, model_name: str) -> Path:
+    return qa_model_dir(output_root, provider, model_name) / "figures"
 
 
 def load_checkpoint(path: Path) -> set[str]:
@@ -38,14 +50,11 @@ def load_checkpoint(path: Path) -> set[str]:
     return set()
 
 
-def write_checkpoint(
-    path: Path, completed_keys: set[str], batch_id: str
-) -> None:
+def write_checkpoint(path: Path, completed_keys: set[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
             {
-                "batch_id": batch_id,
                 "completed": sorted(completed_keys),
                 "updated_at": datetime.now().isoformat(),
             },
