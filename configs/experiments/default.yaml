@@ -34,14 +34,14 @@ models:
     model: doubao-seed-2-0-pro-260215
   - provider: ark
     model: doubao-seed-2-0-lite-260215
-  - provider: dashscope      # uses DASHSCOPE_API_KEY/_BASE_URL/_MODEL
-    model: qwen3.6-max-preview
+  # - provider: dashscope      # uses DASHSCOPE_API_KEY/_BASE_URL/_MODEL
+  #   model: qwen3.6-max-preview
   - provider: minimax
     model: minimax-m2.7
   - baseline: equal_weight   # reference baseline (no API)
   - baseline: risk_parity
   - baseline: sixty_forty
-  - baseline: covariance_risk_parity
+  - baseline: cov_risk_parity
   - baseline: min_variance
 
 profiles: [conservative, balanced, aggressive]

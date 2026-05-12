@@ -23,7 +23,7 @@ To use a real LLM:
 
 import json
 import re
-from typing import Optional
+from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
@@ -50,6 +50,32 @@ from ..metrics.base import MetricsConfig
 # ---------------------------------------------------------------------------
 # Shared prompt utilities
 # ---------------------------------------------------------------------------
+
+def _recover_truncated_json(text: str) -> Optional[dict]:
+    """
+    Last-resort recovery for truncated LLM output (hit max_tokens mid-JSON).
+    Scans for complete "key":"value" or "key":number pairs inside any named
+    sub-dict and returns whatever could be extracted, keyed by sub-dict name.
+    Returns None if nothing useful is found.
+    """
+    result: dict = {}
+    # Find each named sub-dict: "fieldname": {  ...
+    for m in re.finditer(r'"(\w+)"\s*:\s*\{', text):
+        field = m.group(1)
+        sub = text[m.end():]
+        # Extract complete pairs only: "KEY":"val" or "KEY":number
+        pairs: dict = {}
+        for pm in re.finditer(r'"([^"\\]+)"\s*:\s*(?:"([^"\\]*)"|([-\d.]+))', sub):
+            # Stop once we hit the closing brace of this sub-dict
+            if "}" in sub[: pm.start()]:
+                break
+            k = pm.group(1)
+            v: Any = pm.group(2) if pm.group(2) is not None else float(pm.group(3))
+            pairs[k] = v
+        if pairs:
+            result[field] = pairs
+    return result or None
+
 
 def _extract_json(text: str) -> dict:
     """
@@ -98,6 +124,12 @@ def _extract_json(text: str) -> dict:
         match = re.search(r"\{.*\}", s, re.DOTALL)
         if match:
             return json.loads(match.group())
+        # Case A-recovery: JSON was truncated (e.g. hit max_tokens).
+        # Extract whatever complete sub-dicts are present so downstream stages
+        # can fill in defaults for the missing keys rather than failing entirely.
+        recovered = _recover_truncated_json(s)
+        if recovered:
+            return recovered
 
     # Case B: looks like the body without outer braces — wrap and try
     if '"' in text and ":" in text:

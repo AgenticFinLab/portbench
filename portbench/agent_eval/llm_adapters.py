@@ -94,7 +94,7 @@ class AnthropicAdapter(AgentAdapter):
     def __init__(
         self,
         model: str = "claude-opus-4-6",
-        max_tokens: int = 2048,
+        max_tokens: int = 4096,
         temperature: float = 0.0,
         system_prompt: str = "You are a professional portfolio manager. "
         "Respond with structured JSON as instructed.",
@@ -255,7 +255,7 @@ class OpenAIAdapter(AgentAdapter):
     def __init__(
         self,
         model: str = "gpt-4o",
-        max_tokens: int = 2048,
+        max_tokens: int = 4096,
         temperature: float = 0.0,
         system_prompt: str = "You are a professional portfolio manager. "
         "Respond with structured JSON as instructed.",
@@ -398,7 +398,7 @@ class LiteLLMAdapter(AgentAdapter):
     def __init__(
         self,
         model: str = "anthropic/claude-opus-4-6",
-        max_tokens: int = 2048,
+        max_tokens: int = 4096,
         temperature: float = 0.0,
         system_prompt: str = "You are a professional portfolio manager. "
         "Respond with structured JSON as instructed.",

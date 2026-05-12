@@ -109,12 +109,15 @@ def build_adapter(
 
     if spec.kind == "openai_compat":
         base_url = _env(spec.env_prefix, "BASE_URL")
+        max_tokens_env = _env(spec.env_prefix, "MAX_TOKENS")
         kwargs = dict(
             model=resolved_model,
             api_key_env=f"{spec.env_prefix}_API_KEY",
         )
         if base_url:
             kwargs["base_url"] = base_url
+        if max_tokens_env:
+            kwargs["max_tokens"] = int(max_tokens_env)
         kwargs.update(adapter_kwargs)
         return OpenAIAdapter(**kwargs)
 
@@ -123,6 +126,9 @@ def build_adapter(
         # to a different prefix, copy it through so the SDK picks it up.
         if spec.env_prefix != "ANTHROPIC":
             os.environ.setdefault("ANTHROPIC_API_KEY", api_key)
+        max_tokens_env = _env(spec.env_prefix, "MAX_TOKENS")
+        if max_tokens_env and "max_tokens" not in adapter_kwargs:
+            adapter_kwargs = {"max_tokens": int(max_tokens_env), **adapter_kwargs}
         return AnthropicAdapter(model=resolved_model, **adapter_kwargs)
 
     raise RuntimeError(f"Unhandled provider kind: {spec.kind}")
