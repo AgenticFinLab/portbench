@@ -82,6 +82,7 @@ def analyze_runs(
     from ..visualization.ranking_plots import plot_risk_ranking
     from ..visualization.stress_plots import plot_stress_gate
     from ..visualization.ceps_plots import plot_ceps_heatmap
+    from ..visualization.risk_return_plots import plot_risk_return_scatter
     from ..visualization.style import save_figure
 
     log = logger.info if logger else print
@@ -164,6 +165,17 @@ def analyze_runs(
             figures_written.append("ceps_breakdown.png")
         except Exception as exc:
             log(f"analysis: ceps_breakdown.png skipped ({exc})")
+
+    # Fig 4: Risk-return scatter (stress drawdown × normal Sharpe, colored by gate)
+    try:
+        fig = plot_risk_return_scatter(
+            rows,
+            title=f"Risk vs. Return — {rebalance}",
+        )
+        save_figure(fig, str(fig_dir / "risk_return_scatter.png"), formats=("png",))
+        figures_written.append("risk_return_scatter.png")
+    except Exception as exc:
+        log(f"analysis: risk_return_scatter.png skipped ({exc})")
 
     # Summary table
     table_rows = [

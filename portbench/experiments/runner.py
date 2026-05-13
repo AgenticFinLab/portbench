@@ -127,6 +127,24 @@ def _make_logger(name: str, log_path: Path) -> logging.Logger:
 # Per-scenario and per-profile runners
 # ---------------------------------------------------------------------------
 
+def _is_profile_complete(p_dir: Path, cfg: "ExperimentConfig") -> bool:
+    """
+    Return True only if every expected scenario result file exists on disk.
+
+    Used to demote checkpoint entries that are structurally "done" but are
+    missing backtest_result.json for one or more scenarios (e.g. the run was
+    interrupted after the profile was checkpointed, or normal was previously
+    skipped because the stress gate failed).
+    """
+    for sc_name in cfg.resolved_stress_scenarios():
+        if not (p_dir / f"stress_{sc_name}" / "backtest_result.json").exists():
+            return False
+    if cfg.run_normal:
+        if not (p_dir / "normal" / "backtest_result.json").exists():
+            return False
+    return True
+
+
 def _run_one_scenario(
     cfg: ExperimentConfig,
     spec: ModelSpec,
@@ -308,10 +326,11 @@ def _run_profile(
         all_passed = all_passed and passed
 
     normal_dict = None
-    if cfg.run_normal and all_passed:
+    if cfg.run_normal:
         logger.info(
-            "Phase B: normal backtest %s → %s",
+            "Phase B: normal backtest %s → %s (stress_gate=%s)",
             cfg.normal_period.start, cfg.normal_period.end,
+            "PASSED" if all_passed else "FAILED",
         )
         normal_result = _run_normal(
             cfg, spec, adapter, provider, asset_class_map, profile_obj,
@@ -325,10 +344,8 @@ def _run_profile(
             normal_result.mean_ceps,
             normal_result.mean_profile_score,
         )
-    elif not cfg.run_normal:
-        logger.info("Phase B: skipped (run_normal=false)")
     else:
-        logger.info("Phase B: skipped (stress gate FAILED)")
+        logger.info("Phase B: skipped (run_normal=false)")
 
     if cfg.logging.save_figures:
         try:
@@ -376,6 +393,20 @@ def _run_one_model(
     )
 
     already_done_set = set(already_done or [])
+
+    # Secondary check: verify each checkpointed profile actually has all scenario
+    # data on disk. Profiles missing any backtest_result.json are demoted back to
+    # pending so the scenario-level cache handles skipping what already ran.
+    if already_done_set:
+        incomplete = {p for p in already_done_set
+                      if not _is_profile_complete(r_dir / p, cfg)}
+        if incomplete:
+            logger.info(
+                "Profiles in checkpoint but missing scenario data — re-running: %s",
+                ", ".join(sorted(incomplete)),
+            )
+            already_done_set -= incomplete
+
     pending = [p for p in cfg.profiles if p not in already_done_set]
 
     if already_done_set:
@@ -534,7 +565,10 @@ class BatchRunner:
                 if ts:
                     r_dir = paths.run_dir(cfg.output_root, cfg.rebalance, prov_name, model_name, ts)
                     done = paths.get_completed_profiles(r_dir, cfg.profiles)
-                    if set(done) >= set(cfg.profiles):
+                    # Verify scenario data exists; demote incomplete profiles
+                    truly_done = [p for p in done
+                                  if _is_profile_complete(r_dir / p, cfg)]
+                    if set(truly_done) >= set(cfg.profiles):
                         # All profiles complete — fully reuse this run
                         print(
                             f"[reuse]  {prov_name}/{model_name}: "
@@ -545,13 +579,13 @@ class BatchRunner:
                         continue
                     else:
                         # Partial run — resume from same timestamp
-                        missing = [p for p in cfg.profiles if p not in done]
+                        missing = [p for p in cfg.profiles if p not in truly_done]
                         print(
                             f"[resume] {prov_name}/{model_name}: "
-                            f"{len(done)}/{len(cfg.profiles)} profiles done in run {ts}, "
+                            f"{len(truly_done)}/{len(cfg.profiles)} profiles done in run {ts}, "
                             f"continuing: {', '.join(missing)}"
                         )
-                        to_run.append((spec, prov_name, model_name, ts, done))
+                        to_run.append((spec, prov_name, model_name, ts, truly_done))
                         continue
             # No existing run (or reuse_latest=False) — fresh timestamp
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
