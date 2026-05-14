@@ -120,7 +120,8 @@ def plot_qa_accuracy_by_regime(
     ax.set_xticklabels([_TEMPLATE_NAMES.get(t, t) for t in templates], rotation=45, ha="right")
     ax.set_ylabel("Accuracy")
     ax.set_ylim(0, 1.05)
-    ax.legend(title="Regime", loc="upper right")
+    if all_regimes:
+        ax.legend(title="Regime", loc="upper right")
     ax.set_title(title)
     fig.tight_layout()
     return fig
