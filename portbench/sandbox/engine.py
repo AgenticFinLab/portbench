@@ -40,6 +40,12 @@ _REBALANCE_FREQS = {
     "quarterly": "QS-JAN",  # Quarter Start
 }
 
+_REBALANCE_FORWARD_DAYS = {
+    "weekly": 5,
+    "monthly": 21,
+    "quarterly": 63,
+}
+
 
 class BacktestEngine:
     """
@@ -88,6 +94,7 @@ class BacktestEngine:
         self.start_date = start_date
         self.end_date = end_date
         self.rebalance_freq = rebalance_freq
+        self._forward_days = _REBALANCE_FORWARD_DAYS.get(rebalance_freq, 21)
         self.initial_nav = initial_nav
         self.lookback_days = lookback_days
         self.use_pipeline = use_pipeline
@@ -189,7 +196,8 @@ class BacktestEngine:
             if d in rebalance_dates:
                 # --- Rebalance step ---
                 snapshot = self._snapshot_builder.build(
-                    d, portfolio.weights, portfolio.nav
+                    d, portfolio.weights, portfolio.nav,
+                    forward_days=self._forward_days,
                 )
 
                 if not snapshot.return_data:

@@ -148,6 +148,53 @@ def _extract_json(text: str) -> dict:
 _JSON_RETRY_LIMIT = 2  # additional attempts after the first parse failure
 
 
+def _max_sharpe_weights(assets: list[str], future_return_data: dict) -> dict[str, float]:
+    """
+    Compute max-Sharpe weights for the given assets using realized future returns.
+    Falls back to equal-weight if optimization fails or data is insufficient.
+    """
+    from scipy.optimize import minimize
+
+    data = {a: future_return_data[a] for a in assets if a in future_return_data and not future_return_data[a].empty}
+    eq = {a: round(1.0 / len(assets), 4) for a in assets}
+    if len(data) < 2:
+        return eq
+
+    df = pd.DataFrame(data).dropna()
+    if len(df) < 2:
+        return eq
+
+    mu = df.mean().values
+    cov = df.cov().values
+    n = len(mu)
+    asset_list = list(data.keys())
+
+    def neg_sharpe(w):
+        ret = w @ mu
+        vol = float(np.sqrt(w @ cov @ w + 1e-10))
+        return -ret / vol
+
+    try:
+        result = minimize(
+            neg_sharpe,
+            np.ones(n) / n,
+            method="SLSQP",
+            bounds=[(0.0, 1.0)] * n,
+            constraints=[{"type": "eq", "fun": lambda w: np.sum(w) - 1}],
+            options={"ftol": 1e-9, "maxiter": 500},
+        )
+        if result.success:
+            w = np.maximum(result.x, 0.0)
+            w /= w.sum()
+            weights = {a: round(float(w[i]), 4) for i, a in enumerate(asset_list)}
+            for a in assets:
+                weights.setdefault(a, 0.0)
+            return weights
+    except Exception:
+        pass
+    return eq
+
+
 class StageRefusalError(RuntimeError):
     """
     Raised when an LLM declines to respond to a stage prompt due to content
@@ -421,8 +468,9 @@ class S1MarketInterpretation(PipelineStage):
                 refused=True,
             )
         try:
+            views_src = parsed.get("asset_views", parsed)
             return S1Output(
-                asset_views={a: float(np.clip(parsed["asset_views"].get(a, 0.0), -1, 1))
+                asset_views={a: float(np.clip(views_src.get(a, 0.0), -1, 1))
                              for a in assets},
                 detected_regime=str(parsed.get("detected_regime", gt.detected_regime)),
                 confidence=float(np.clip(parsed.get("confidence", 0.5), 0, 1)),
@@ -526,7 +574,7 @@ class S2SignalGeneration(PipelineStage):
                 for a in assets
             }
             strengths = {
-                a: float(np.clip(parsed["strengths"].get(a, 0.5), 0, 1))
+                a: float(np.clip(parsed.get("strengths", {}).get(a, 0.5), 0, 1))
                 for a in assets
             }
             return S2Output(
@@ -574,6 +622,14 @@ class S3WeightOptimization(PipelineStage):
 
     def compute_ground_truth(self, snapshot: MarketSnapshot) -> S3Output:
         s2_gt = S2SignalGeneration().compute_ground_truth(snapshot)
+        if snapshot.future_return_data:
+            buy_assets = [a for a, sig in s2_gt.signals.items() if sig == "buy"]
+            if not buy_assets:
+                buy_assets = list(s2_gt.signals.keys())
+            weights = _max_sharpe_weights(buy_assets, snapshot.future_return_data)
+            for a in s2_gt.signals:
+                weights.setdefault(a, 0.0)
+            return S3Output(weights=weights)
         return self._signals_to_weights(s2_gt, snapshot)
 
     def _signals_to_weights(self, s2: S2Output, snapshot: MarketSnapshot) -> S3Output:

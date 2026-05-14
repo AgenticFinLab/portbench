@@ -25,6 +25,11 @@ def main(argv=None) -> int:
         help="Run post-run analysis on a rebalance directory (requires --rebalance)",
     )
     p.add_argument(
+        "--rescore",
+        action="store_true",
+        help="Recompute CEPS scores using updated S3 GT (no LLM calls, reads pipeline_logs)",
+    )
+    p.add_argument(
         "--rebalance",
         default="monthly",
         help="Rebalance frequency directory to analyze (default: monthly)",
@@ -40,6 +45,16 @@ def main(argv=None) -> int:
         from .analysis import analyze_runs
         report = analyze_runs(args.rebalance, output_root=args.output_root)
         print(f"Analysis report written to: {report}")
+        return 0
+
+    if args.rescore:
+        from .rescore import rescore_ceps
+        result = rescore_ceps(
+            rebalance=args.rebalance,
+            output_root=args.output_root,
+            config_path=args.config,
+        )
+        print(f"Rescore complete: {result}")
         return 0
 
     if not args.config:

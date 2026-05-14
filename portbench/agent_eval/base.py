@@ -80,6 +80,10 @@ class MarketSnapshot:
                             so downstream code can reason about *intra-class* (e.g. sector
                             concentration within equities) vs *inter-class* (e.g. stock-bond
                             hedging) correlation structure separately.
+        future_return_data: Optional dict mapping asset -> pd.Series of forward returns
+                            (from decision_date to decision_date + rebalance_period).
+                            Used exclusively in S3 ground-truth computation to derive
+                            max-Sharpe optimal weights. Must never be shown to the LLM.
     """
 
     decision_date: date
@@ -92,6 +96,7 @@ class MarketSnapshot:
     market_regime: Optional[str] = None
     correlation_matrix: Optional[pd.DataFrame] = None
     asset_class_map: Optional[dict[str, str]] = None
+    future_return_data: Optional[dict[str, "pd.Series"]] = None
 
     def get_correlation(self) -> pd.DataFrame:
         """

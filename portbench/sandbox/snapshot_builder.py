@@ -44,6 +44,7 @@ class SnapshotBuilder:
         decision_date: date,
         current_weights: dict[str, float],
         nav: float,
+        forward_days: int = 0,
     ) -> MarketSnapshot:
         """
         Build a MarketSnapshot for decision_date with live portfolio state.
@@ -52,6 +53,9 @@ class SnapshotBuilder:
             decision_date:   The date for which to build the snapshot.
             current_weights: Actual portfolio weights at this date (post-drift).
             nav:             Current portfolio NAV.
+            forward_days:    If > 0, fetch this many trading days of future returns
+                             (starting from decision_date) and populate
+                             future_return_data for S3 ground-truth computation.
 
         Returns:
             MarketSnapshot ready to pass to EvalPipeline.run_episode() or
@@ -95,6 +99,19 @@ class SnapshotBuilder:
                 news_text = txt
                 break
 
+        # Future return data for S3 ground-truth (never exposed to LLM)
+        future_return_data = None
+        if forward_days > 0:
+            fwd_end = decision_date + timedelta(days=int(forward_days * 1.6))
+            fwd: dict[str, pd.Series] = {}
+            for asset in self.assets:
+                r = self.provider.get_return_series(asset, decision_date, fwd_end)
+                r = r.iloc[:forward_days]
+                if not r.empty:
+                    fwd[asset] = r
+            if fwd:
+                future_return_data = fwd
+
         return MarketSnapshot(
             decision_date=decision_date,
             price_data=price_data,
@@ -106,4 +123,5 @@ class SnapshotBuilder:
             news_text=news_text,
             correlation_matrix=corr,
             asset_class_map=self.asset_class_map,
+            future_return_data=future_return_data,
         )
