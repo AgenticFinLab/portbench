@@ -24,10 +24,7 @@ Phase A — Stress Gate (3 crisis windows, profile-sensitive pass/fail)
   2022_crypto:         2022-05-01 → 2022-12-31
   Pass condition: abs(max_drawdown) ≤ profile.max_drawdown_tolerance
 
-  If any scenario fails → profile is marked stress_failed, normal phase skipped
-
-Phase B — Normal Market Backtest (2024 full year)
-  Runs only if all 3 stress scenarios pass
+Phase B — Normal Market Backtest (2024, always runs regardless of Phase A result)
   Outputs: CEPS per step + profile alignment score + NAV curve + PnL metrics
 ```
 
@@ -47,8 +44,8 @@ Profile drawdown tolerances:
 DataProvider (MockDataProvider or ProcessedDataProvider)
       │
       ▼
-SnapshotBuilder.build(decision_date, current_weights, nav)
-      │                    ↑ live state
+SnapshotBuilder.build(decision_date, current_weights, nav, forward_days)
+      │  ↑ live state + forward_days from rebalance_freq
       ▼                    │
 MarketSnapshot (patched: "[INVESTOR PROFILE] ..." prepended to news_text)
       │
@@ -97,13 +94,14 @@ Weight drift (mark-to-market) updates weights proportionally to per-asset return
 
 ### `snapshot_builder.py` — SnapshotBuilder
 
-Constructs a `MarketSnapshot` for any decision date, injecting the real current portfolio state rather than the equal-weight assumption used in the static pipeline.
+Constructs a `MarketSnapshot` for any decision date, injecting the real current portfolio state rather than the equal-weight assumption used in the static pipeline. When `forward_days > 0`, also fetches realized future returns and populates `snapshot.future_return_data` for S3 ground-truth computation. `BacktestEngine` derives `forward_days` automatically from `rebalance_freq` (weekly=5, monthly=21, quarterly=63).
 
 ```python
 from portbench.sandbox import SnapshotBuilder
 
 builder = SnapshotBuilder(provider=provider, assets=assets, lookback_days=60)
-snapshot = builder.build(decision_date, current_weights=state.weights, nav=state.nav)
+# forward_days is set automatically by BacktestEngine; pass manually for one-off use:
+snapshot = builder.build(decision_date, current_weights=state.weights, nav=state.nav, forward_days=21)
 ```
 
 ### `engine.py` — BacktestEngine
@@ -220,7 +218,7 @@ outputs/sandbox/{model}/{timestamp}/
       backtest_result.json
     stress_2022_crypto_collapse/
       backtest_result.json
-    normal/                          # only written if all stress scenarios pass
+    normal/                          # always written when run_normal=true
       nav_curve.csv
       weight_history.csv
       backtest_result.json

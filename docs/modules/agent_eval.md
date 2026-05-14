@@ -26,7 +26,7 @@ Tier 2: Sandbox × 3 Investor Profiles
       2022_crypto:        2022-05-01 → 2022-12-31
       Pass condition:     max_drawdown ≤ profile.max_drawdown_tolerance
                           (profile-sensitive: conservative=10%, balanced=20%, aggressive=35%)
-    Phase B — Normal market backtest (2024, only if Phase A passed)
+    Phase B — Normal market backtest (2024, always runs regardless of Phase A result)
       Outputs per rebalance: CEPS score + profile alignment score + NAV
       Final outputs:         Sharpe, CAGR, max_drawdown (realized PnL)
   Aggregated: profile_comparison.json with adaptation_score = std(per-profile returns)
@@ -90,6 +90,7 @@ class MarketSnapshot:
     market_regime: Optional[str]
     correlation_matrix: Optional[pd.DataFrame]   # assets × assets, lazy-computed
     asset_class_map: Optional[dict[str, str]] = None  # ticker -> asset class
+    future_return_data: Optional[dict[str, pd.Series]] = None  # forward returns for S3 GT only — never in LLM prompts
 
     def get_correlation(self) -> pd.DataFrame:
         """Compute (and cache) Pearson correlation matrix from return_data."""
@@ -134,7 +135,7 @@ LLM prompt receives S1 views and must convert them to directional signals with s
 **Input**: `S2Output`  
 **Output**: `S3Output` — `weights: dict[str, float]` summing to 1.0
 
-Ground truth: equal-weight among "buy" assets; 0 for "sell" assets; equal-weight all if no buys.
+Ground truth: **max-Sharpe optimal weights** over buy-signal assets, computed via `scipy.optimize` from `snapshot.future_return_data` (realized returns for the coming rebalance period). Falls back to equal-weight among buy assets if future data is unavailable or optimization fails. `future_return_data` is populated automatically by `SnapshotBuilder` at each rebalance step and is **never included in any LLM prompt** — it is used exclusively for GT computation.
 
 LLM prompt receives signals and must output a weight allocation with sum=1, all values in [0,1].
 
