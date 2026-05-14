@@ -3,7 +3,7 @@
 **PortBench** is a benchmark for evaluating LLMs on multi-asset portfolio management. It addresses three gaps in existing financial benchmarks:
 
 1. **Multi-asset evaluation** — the unit is a portfolio weight allocation across six asset classes (Equities, Bonds, Commodities, Real Estate, Cryptocurrency, Cash), not single-asset buy/sell decisions.
-2. **Risk-first paradigm** — models must pass profile-sensitive stress gates on three crisis windows (2015 China shock, 2020 COVID, 2022 crypto collapse) before entering the performance ranking.
+2. **Risk-first paradigm** — models are evaluated on three crisis windows (2015 China shock, 2020 COVID, 2022 crypto collapse) with profile-sensitive drawdown thresholds, enabling direct comparison of risk management and return generation across all models.
 3. **Two-tier evaluation** — a static QA dataset measuring knowledge, plus a stateful Sandbox backtest measuring realized PnL + CEPS + profile alignment across three investor profiles.
 
 ## Evaluation Architecture
@@ -122,13 +122,13 @@ MarketSnapshot (price/return data, macro context, news_text, correlation_matrix)
  EpisodeResult → CEPS score (collected per step inside the Sandbox)
 ```
 
-| Stage | Type          | Scoring                                                                                   |
-|-------|---------------|-------------------------------------------------------------------------------------------|
-| S1    | LLM           | `1 − MAE(views, gt) / 2`                                                                  |
-| S2    | LLM           | Fraction of assets with correct signal direction                                          |
-| S3    | LLM           | **70% weight accuracy + 30% correlation awareness** (split into 15% intra-class concentration penalty + 15% inter-class hedging credit when an `asset_class_map` is available; otherwise the full 30% uses the variance-ratio fallback) |
-| S4    | Deterministic | not LLM-scored                                                                            |
-| S5    | Deterministic | 50% rebalance decision + 50% VaR/drawdown accuracy                                        |
+| Stage | Type          | Ground Truth | Scoring                                                                                   |
+|-------|---------------|--------------|-------------------------------------------------------------------------------------------|
+| S1    | LLM           | `clip(trailing_return / 0.10, -1, 1)` per asset | `1 − MAE(views, gt) / 2`                          |
+| S2    | LLM           | `view > 0.2 → buy`, `< -0.2 → sell`, else hold | Fraction of assets with correct signal direction |
+| S3    | LLM           | **max-Sharpe weights** over buy-signal assets (computed from realized future returns; never shown to LLM) | **70% weight accuracy + 30% correlation awareness** (15% intra-class concentration penalty + 15% inter-class hedging credit when `asset_class_map` is available; variance-ratio fallback otherwise) |
+| S4    | Deterministic | Execute S3 GT weights at zero slippage | Weight MAE vs GT executed weights                |
+| S5    | Deterministic | Risk metrics from S4 GT weights | 50% rebalance decision + 50% VaR/drawdown accuracy |
 
 Three stages call the LLM (S1, S2, S3) per rebalance; S4 and S5 are deterministic numerical layers.
 
@@ -164,9 +164,9 @@ For each profile, evaluation runs in two phases:
 | `2020_covid` | 2020-02-01 → 2020-05-31 |
 | `2022_crypto` | 2022-05-01 → 2022-12-31 |
 
-Pass condition: `abs(max_drawdown) ≤ profile.max_drawdown_tolerance`. If any scenario fails, the profile is marked `stress_failed` and the normal phase is skipped.
+Pass condition: `abs(max_drawdown) ≤ profile.max_drawdown_tolerance`.
 
-**Phase B — Normal Market Backtest (2024 full year)** — runs only if all 3 stress scenarios pass. Outputs CEPS per step + profile alignment + NAV curve + Sharpe / CAGR / max drawdown / Calmar / etc.
+**Phase B — Normal Market Backtest (2024 full year)** — always runs regardless of Phase A result. Outputs CEPS per step + profile alignment + NAV curve + Sharpe / CAGR / max drawdown / Calmar / etc.
 
 The cross-profile summary computes an `adaptation_score = std(per-profile total_return)` measuring how differently the model behaves across profiles.
 
@@ -241,7 +241,7 @@ outputs/sandbox/{model}/{timestamp}/
     stress_2015_china_shock/backtest_result.json
     stress_2020_covid/backtest_result.json
     stress_2022_crypto/backtest_result.json
-    normal/                          # only if all stress scenarios pass
+    normal/                          # always written when run_normal=true
       nav_curve.csv
       weight_history.csv
       backtest_result.json
@@ -267,6 +267,7 @@ Built-in providers: `dashscope`, `tencent`, `deepseek`, `glm`, `kimi`, `minimax`
 python -m portbench.experiments --config configs/experiments/default.yaml --dry-run
 python -m portbench.experiments --config configs/experiments/default.yaml
 python -m portbench.experiments --analyze --rebalance monthly   # post-run analysis
+python -m portbench.experiments --rescore --rebalance monthly --config configs/experiments/default.yaml  # recompute CEPS without LLM re-calls
 ```
 
 Output layout — results are keyed by `(rebalance, provider, model, timestamp)` and reusable across batches:
@@ -285,7 +286,7 @@ EXPERIMENTS/
     │               ├── experiment.log / figures/
     │               ├── stress_{scenario}/
     │               │   └── backtest_result.json + nav_curve.csv + snapshots/ + ...
-    │               └── normal/         # only if stress gate passes
+    │               └── normal/         # always written when run_normal=true
     └── analysis_report.md             # generated by --analyze
 ```
 
@@ -333,7 +334,7 @@ outputs/                  # All generated artifacts (gitignored)
 
 ## Key Design Constraints
 
-- **Point-in-Time (PiT) safety**: enforced by `ContextWindow.validate_pit()`; no feature may use information from on-or-after the decision date.
+- **Point-in-Time (PiT) safety**: enforced by `ContextWindow.validate_pit()`; no feature may use information from on-or-after the decision date. `MarketSnapshot.future_return_data` is the sole intentional exception — it carries realized forward returns used only to compute the S3 ground truth (max-Sharpe weights) and is never included in any LLM prompt.
 - **Market state partitioning**: test data is labeled bull/bear/sideways/crisis to enable per-state performance decomposition.
 - **Profile-sensitive stress thresholds**: stress gates are tied to each investor profile's drawdown tolerance, not fixed CEPS cutoffs.
 - **Same pipeline for everyone**: baselines and LLM agents flow through identical S1–S5 stages, ensuring a controlled comparison.
