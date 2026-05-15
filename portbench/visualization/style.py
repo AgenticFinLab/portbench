@@ -414,6 +414,58 @@ REGIME_COLORS = FROST_REGIME_COLORS
 MODEL_PALETTE = FROST_MODEL_PALETTE
 
 
+# ---------------------------------------------------------------------------
+# Multi-series line style / marker cycling
+# ---------------------------------------------------------------------------
+
+LINE_STYLES = ["-", "--", "-.", ":"]
+LINE_MARKERS = ["o", "s", "^", "D", "v", "P", "h", "*"]
+
+# 20-color categorical palette (tab20) for figures with many series
+CATEGORICAL_PALETTE = [
+    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+    "#8c564b", "#e377c2", "#17becf", "#bcbd22", "#1a9850",
+    "#aec7e8", "#ffbb78", "#98df8a", "#ff9896", "#c5b0d5",
+    "#c49c94", "#f7b6d2", "#9edae5", "#393b79", "#637939",
+]
+
+# Extended palette for NAV LLM lines (vivid, distinguishable)
+NAV_LLM_PALETTE = [
+    "#1f77b4", "#d62728", "#2ca02c", "#ff7f0e", "#9467bd",
+    "#8c564b", "#e377c2", "#17becf", "#bcbd22", "#1a9850",
+]
+# Gray shades for NAV baseline dashed lines
+NAV_BASELINE_PALETTE = ["#555555", "#888888", "#aaaaaa", "#cccccc"]
+
+
+# ---------------------------------------------------------------------------
+# Model name abbreviation
+# ---------------------------------------------------------------------------
+
+_MODEL_ABBREVS = {
+    "hy3-preview":          "HY3",
+    "deepseek-v4-flash":    "DS-Flash",
+    "deepseek-v4-pro":      "DS-Pro",
+    "kimi-k2.6":            "Kimi-K2",
+    "doubao-seed-2-0-pro":  "Doubao-Pro",
+    "doubao-seed-2-0-lite": "Doubao-Lite",
+    "minimax-m2.7":         "MiniMax",
+    "equal_weight":         "EqWt",
+    "risk_parity":          "RiskPar",
+    "sixty_forty":          "60/40",
+    "cov_risk_parity":      "CovRiskPar",
+    "min_variance":         "MinVar",
+}
+
+
+def abbrev_model_name(model_key: str) -> str:
+    """Shorten 'provider/model-name-YYYYMMDD' to a compact display label."""
+    import re
+    name = model_key.split("/")[-1] if "/" in model_key else model_key
+    name = re.sub(r"-\d{6,8}$", "", name)
+    return _MODEL_ABBREVS.get(name, name)
+
+
 def save_figure(fig: plt.Figure, path: str, formats=("pdf", "png")) -> None:
     """Save figure in one or more formats."""
     import pathlib

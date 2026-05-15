@@ -18,6 +18,9 @@ from .style import (
     STAGE_LABELS,
     STAGE_IDS,
     MODEL_PALETTE,
+    LINE_STYLES,
+    LINE_MARKERS,
+    abbrev_model_name,
 )
 
 
@@ -63,9 +66,12 @@ def plot_ceps_radar(
         values = [scores.get(sid, 0.0) for sid in STAGE_IDS]
         values += values[:1]
         color = MODEL_PALETTE[i % len(MODEL_PALETTE)]
-        ax.plot(angles, values, color=color, linewidth=2, linestyle="solid")
-        ax.fill(angles, values, color=color, alpha=0.15)
-        legend_handles.append(mpatches.Patch(color=color, label=model_name))
+        ls = LINE_STYLES[i % len(LINE_STYLES)]
+        mk = LINE_MARKERS[i % len(LINE_MARKERS)]
+        ax.plot(angles, values, color=color, linewidth=2, linestyle=ls,
+                marker=mk, markersize=5)
+        ax.fill(angles, values, color=color, alpha=0.12)
+        legend_handles.append(mpatches.Patch(color=color, label=abbrev_model_name(model_name)))
 
     ax.legend(
         handles=legend_handles,
@@ -73,7 +79,6 @@ def plot_ceps_radar(
         bbox_to_anchor=(1.35, 1.15),
         fontsize=8,
     )
-    ax.set_title(title, pad=15, fontsize=11, fontweight="bold")
     fig.tight_layout()
     return fig
 
@@ -105,7 +110,8 @@ def plot_ceps_heatmap(
 
     apply_paper_style()
 
-    model_names = list(results.keys())
+    model_keys = list(results.keys())
+    model_names = [abbrev_model_name(k) for k in model_keys]
     col_ids = STAGE_IDS.copy()
     col_labels = [
         "S1\nInterpret.",
@@ -120,10 +126,10 @@ def plot_ceps_heatmap(
         col_labels.append("CEPS\nTotal")
 
     data = []
-    for m in model_names:
-        row = [results[m].get(sid, 0.0) for sid in STAGE_IDS]
+    for k in model_keys:
+        row = [results[k].get(sid, 0.0) for sid in STAGE_IDS]
         if ceps_totals:
-            row.append(ceps_totals.get(m, 0.0))
+            row.append(ceps_totals.get(k, 0.0))
         data.append(row)
     data = np.array(data)
 
@@ -157,7 +163,6 @@ def plot_ceps_heatmap(
     ax.set_xticklabels(col_labels, fontsize=9)
     ax.set_yticks(range(len(model_names)))
     ax.set_yticklabels(model_names, fontsize=9)
-    ax.set_title(title, fontsize=11, fontweight="bold", pad=10)
 
     cbar = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.04)
     cbar.set_label("Score", fontsize=9)
@@ -189,8 +194,9 @@ def plot_ceps_violin(
     """
     apply_paper_style()
 
-    model_names = list(episode_scores.keys())
-    data = [episode_scores[m] for m in model_names]
+    model_keys = list(episode_scores.keys())
+    model_names = [abbrev_model_name(k) for k in model_keys]
+    data = [episode_scores[k] for k in model_keys]
 
     fig, ax = plt.subplots(figsize=figsize)
 
@@ -231,6 +237,5 @@ def plot_ceps_violin(
         0.5, color="red", linestyle="--", linewidth=1, alpha=0.7, label="Pass threshold"
     )
     ax.legend(fontsize=8)
-    ax.set_title(title, fontsize=11, fontweight="bold")
     fig.tight_layout()
     return fig

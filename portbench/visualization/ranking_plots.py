@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.figure import Figure
 
-from .style import apply_paper_style, PAPER_COLORS, MODEL_PALETTE
+from .style import apply_paper_style, PAPER_COLORS, MODEL_PALETTE, abbrev_model_name
 
 
 def plot_risk_ranking(
@@ -46,7 +46,7 @@ def plot_risk_ranking(
     )
     ordered = passed + failed
 
-    model_names = [r["model_name"] for r in ordered]
+    model_names = [abbrev_model_name(r["model_name"]) for r in ordered]
     scores = [r["mean_ceps"] for r in ordered]
     stds = [r.get("std_ceps", 0.0) for r in ordered]
     is_passed = [r.get("risk_gate_passed", True) for r in ordered]
@@ -84,7 +84,7 @@ def plot_risk_ranking(
                 va="center",
                 ha="left",
                 fontsize=7,
-                color="white",
+                color="black",
                 fontweight="bold",
             )
 
@@ -106,7 +106,6 @@ def plot_risk_ranking(
     ax.set_yticklabels(model_names, fontsize=9)
     ax.set_xlabel("Mean CEPS Score")
     ax.set_xlim(0, 1.15)
-    ax.set_title(title, fontsize=11, fontweight="bold")
     ax.invert_yaxis()  # highest score at top
 
     legend_handles = [

@@ -16,7 +16,7 @@ import pandas as pd
 import numpy as np
 from matplotlib.figure import Figure
 
-from .style import apply_paper_style, MODEL_PALETTE, PAPER_COLORS
+from .style import apply_paper_style, MODEL_PALETTE, PAPER_COLORS, LINE_STYLES, LINE_MARKERS, abbrev_model_name
 
 
 def plot_sandbox_nav(
@@ -35,22 +35,32 @@ def plot_sandbox_nav(
     apply_paper_style()
     fig, ax = plt.subplots(figsize=figsize)
 
-    for i, (name, nav) in enumerate(nav_results.items()):
-        color = MODEL_PALETTE[i % len(MODEL_PALETTE)]
-        nav_norm = nav / nav.iloc[0] * 100
-        ax.plot(nav_norm.index, nav_norm.values, label=name, color=color, linewidth=1.5)
+    n_palette = len(MODEL_PALETTE)
+    all_items = list(nav_results.items())
 
-    ax.axhline(
-        100,
-        color="black",
-        linestyle="--",
-        linewidth=0.8,
-        alpha=0.4,
-        label="Start (100)",
-    )
+    for i, (name, nav) in enumerate(all_items):
+        color       = MODEL_PALETTE[i % n_palette]
+        is_baseline = name.startswith("baseline/")
+        ls  = "--" if is_baseline else "-"
+        lw  = 1.2  if is_baseline else 1.6
+        nav_norm = nav / nav.iloc[0] * 100
+        # Only add markers when this index reuses a color already taken
+        if i >= n_palette:
+            mk    = LINE_MARKERS[i % len(LINE_MARKERS)]
+            every = max(1, len(nav_norm) // 8)
+            ax.plot(nav_norm.index, nav_norm.values,
+                    label=abbrev_model_name(name), color=color,
+                    linewidth=lw, linestyle=ls,
+                    marker=mk, markevery=every, markersize=4)
+        else:
+            ax.plot(nav_norm.index, nav_norm.values,
+                    label=abbrev_model_name(name), color=color,
+                    linewidth=lw, linestyle=ls)
+
+    ax.axhline(100, color="black", linestyle="--", linewidth=0.8, alpha=0.4,
+               label="Start (100)")
     ax.set_xlabel("Date")
     ax.set_ylabel("Normalized NAV (base=100)")
-    ax.set_title(title, fontsize=11, fontweight="bold")
     ax.legend(fontsize=8, loc="upper left")
     fig.autofmt_xdate()
     fig.tight_layout()
@@ -117,21 +127,18 @@ def plot_sandbox_metrics(
                 if key in ("total_return", "cagr", "max_drawdown", "volatility")
                 else f"{v:.2f}"
             )
-            ax.text(
-                bar.get_x() + bar.get_width() / 2,
-                bar.get_height(),
-                fmt,
-                ha="center",
-                va="bottom",
-                fontsize=7,
-            )
+            # For positive bars: label just above the top.
+            # For negative bars: label just below the bottom (bar.get_y()+bar.get_height()).
+            tip = bar.get_y() + bar.get_height()  # top for positive, bottom for negative
+            va = "bottom" if v >= 0 else "top"
+            ax.text(bar.get_x() + bar.get_width() / 2, tip, fmt,
+                    ha="center", va=va, fontsize=7)
 
         ax.set_xticks(range(n_models))
-        ax.set_xticklabels(models, rotation=30, ha="right", fontsize=8)
+        ax.set_xticklabels([abbrev_model_name(m) for m in models], rotation=30, ha="right", fontsize=8)
         ax.set_title(metric_labels.get(key, key), fontsize=9)
         ax.axhline(0, color="black", linewidth=0.6, alpha=0.5)
 
-    fig.suptitle(title, fontsize=11, fontweight="bold")
     fig.tight_layout()
     return fig
 
@@ -163,7 +170,7 @@ def plot_ceps_vs_pnl(
         marker = "o" if passed else "x"
         ax.scatter(ceps, ret, color=color, marker=marker, s=80, zorder=3)
         ax.annotate(
-            name,
+            abbrev_model_name(name),
             (ceps, ret),
             textcoords="offset points",
             xytext=(6, 4),
@@ -192,7 +199,6 @@ def plot_ceps_vs_pnl(
     ax.set_xlabel("Mean CEPS Score")
     ax.set_ylabel("Total Return")
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:+.0%}"))
-    ax.set_title(title, fontsize=11, fontweight="bold")
 
     legend_handles = [
         mpatches.Patch(color=MODEL_PALETTE[0], label="Stress gate passed"),
@@ -273,7 +279,6 @@ def plot_stress_drawdown(
             ax.text(j, i, cell_text, ha="center", va="center", fontsize=8, color=color)
 
     plt.colorbar(im, ax=ax, label="Max Drawdown", fraction=0.03, pad=0.04)
-    ax.set_title(title, fontsize=11, fontweight="bold")
     fig.tight_layout()
     return fig
 
@@ -302,28 +307,29 @@ def plot_profile_nav(
         "aggressive": PAPER_COLORS.get("failed", "#c0392b"),
     }
 
+    profile_styles = {
+        "conservative": ("-",  "o"),
+        "balanced":     ("--", "s"),
+        "aggressive":   ("-.", "^"),
+    }
+
     fig, ax = plt.subplots(figsize=figsize)
 
     for profile, nav in profile_nav.items():
         if nav is None or len(nav) == 0:
             continue
         color = profile_colors.get(profile, MODEL_PALETTE[0])
+        ls, mk = profile_styles.get(profile, ("-", "o"))
         nav_norm = nav / nav.iloc[0] * 100
-        ax.plot(
-            nav_norm.index,
-            nav_norm.values,
-            label=profile.capitalize(),
-            color=color,
-            linewidth=1.8,
-        )
+        every = max(1, len(nav_norm) // 8)
+        ax.plot(nav_norm.index, nav_norm.values,
+                label=profile.capitalize(), color=color,
+                linewidth=1.8, linestyle=ls,
+                marker=mk, markevery=every, markersize=5)
 
     ax.axhline(100, color="black", linestyle="--", linewidth=0.8, alpha=0.4)
     ax.set_xlabel("Date")
     ax.set_ylabel("Normalized NAV (base=100)")
-    default_title = (
-        f"Profile NAV Curves — {model_name}" if model_name else "Profile NAV Curves"
-    )
-    ax.set_title(title or default_title, fontsize=11, fontweight="bold")
     ax.legend(fontsize=9)
     fig.autofmt_xdate()
     fig.tight_layout()
