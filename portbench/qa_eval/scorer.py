@@ -54,24 +54,101 @@ def _extract_float(text: str) -> Optional[float]:
 
 
 def _extract_weights(text: str, assets: list[str]) -> Optional[dict[str, float]]:
-    weights = {}
+    if not text or not assets:
+        return None
+
+    # Strip markdown code fences
+    text = re.sub(r"```(?:json)?\s*", "", text).strip().rstrip("`").strip()
+
+    def _parse_val(v) -> Optional[float]:
+        """Parse numeric or string weight value; handles % suffix and >1 percentage form."""
+        if isinstance(v, (int, float)):
+            val = float(v)
+            return val / 100.0 if val > 1.5 else val
+        if isinstance(v, str):
+            s = v.strip()
+            is_pct = s.endswith("%")
+            try:
+                val = float(s.rstrip("%").strip())
+                return val / 100.0 if (is_pct or val > 1.5) else val
+            except ValueError:
+                return None
+        return None
+
+    weights: dict[str, float] = {}
+
+    # ── Try JSON parsing ──────────────────────────────────────────────────────
+    try:
+        import json as _json
+        data = _json.loads(text)
+
+        # Unwrap nested {"weights": {...}} or {"weights": [...]}
+        if isinstance(data, dict) and "weights" in data:
+            inner = data["weights"]
+            if isinstance(inner, dict):
+                data = inner
+            elif isinstance(inner, list) and len(inner) >= len(assets):
+                for i, asset in enumerate(assets):
+                    v = _parse_val(inner[i])
+                    if v is not None:
+                        weights[asset] = v
+                return weights if len(weights) == len(assets) else None
+
+        if isinstance(data, dict):
+            for asset in assets:
+                for key in (
+                    asset, asset.lower(),
+                    f"w_{asset}", f"w_{asset.lower()}",
+                    f"{asset}_weight_pct", f"{asset.lower()}_weight_pct",
+                ):
+                    if key in data:
+                        v = _parse_val(data[key])
+                        if v is not None:
+                            weights[asset] = v
+                            break
+        elif isinstance(data, list) and len(data) >= len(assets):
+            for i, asset in enumerate(assets):
+                v = _parse_val(data[i])
+                if v is not None:
+                    weights[asset] = v
+
+        if len(weights) == len(assets):
+            return weights
+    except (ValueError, TypeError):
+        pass
+
+    # ── Regex fallback — handles plain text and partially-structured responses ─
     text_lower = text.lower()
     for asset in assets:
-        pattern = rf"{re.escape(asset.lower())}\s*[:\-=]\s*([-+]?\d*\.?\d+)\s*%?"
-        match = re.search(pattern, text_lower)
-        if match:
-            val = float(match.group(1))
-            if val > 1.5:
+        if asset in weights:
+            continue
+        # Match w_ASSET or ASSET, optional surrounding quotes, then value with optional %
+        pattern = rf"(?:w_)?{re.escape(asset.lower())}['\"]?\s*[:\-=]\s*['\"]?([-+]?\d*\.?\d+)\s*(%?)"
+        m = re.search(pattern, text_lower)
+        if m:
+            val = float(m.group(1))
+            if m.group(2) == "%" or val > 1.5:
                 val /= 100.0
             weights[asset] = val
-    return weights if weights else None
+
+    if weights:
+        return weights
+
+    # ── Last resort: ordered percentages — "0%, 100%" ────────────────────────
+    pct_nums = re.findall(r"([-+]?\d*\.?\d+)\s*%", text)
+    if len(pct_nums) >= len(assets):
+        for i, asset in enumerate(assets):
+            weights[asset] = float(pct_nums[i]) / 100.0
+        return weights
+
+    return None
 
 
 def _extract_rebalance_decision(text: str) -> Optional[str]:
-    text_lower = text.lower()
-    if "rebalance" in text_lower:
+    text_lower = text.strip().lower()
+    if "rebalance" in text_lower or re.search(r"\byes\b", text_lower):
         return "rebalance"
-    if "hold" in text_lower or "no rebalance" in text_lower:
+    if "hold" in text_lower or "no rebalance" in text_lower or re.search(r"\bno\b", text_lower):
         return "hold"
     return None
 
@@ -102,9 +179,28 @@ _ALLOC_DIRECTIONS = {"increase", "decrease", "neutral"}
 
 def _extract_alloc_directions(text: str) -> dict[str, str]:
     out = {}
+
+    # Try JSON parsing first (handles {"equities": "increase", ...} and nested part_b)
+    try:
+        import json as _json
+        data = _json.loads(re.sub(r"```(?:json)?\s*", "", text).strip().rstrip("`"))
+        if isinstance(data, dict):
+            # Unwrap {"part_b": {...}} nesting
+            if "part_b" in data and isinstance(data["part_b"], dict):
+                data = data["part_b"]
+            for cls in ["equities", "bonds", "commodities", "real_estate", "cryptocurrency", "cash"]:
+                val = data.get(cls, "")
+                if val in _ALLOC_DIRECTIONS:
+                    out[cls] = val
+            if out:
+                return out
+    except (ValueError, TypeError):
+        pass
+
+    # Regex fallback — handles both plain text and JSON key formats
     text_lower = text.lower()
     for cls in ["equities", "bonds", "commodities", "real_estate", "cryptocurrency", "cash"]:
-        pattern = rf"{cls}\s*[:\-=]\s*(\w+)"
+        pattern = rf"{cls}['\"]?\s*[:\-=]\s*['\"]?(\w+)"
         match = re.search(pattern, text_lower)
         if match and match.group(1) in _ALLOC_DIRECTIONS:
             out[cls] = match.group(1)

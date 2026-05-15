@@ -32,6 +32,47 @@ def _spec_display_label(spec: ModelSpec) -> str:
     return f"{prov}/{model}"
 
 
+def _rebuild_summary_from_results(t_dir: Path, template_id: str) -> dict | None:
+    """
+    Reconstruct a template summary dict from results.jsonl.
+    Returns None if the file is missing or empty.
+    Deduplicates by qa_id (keeps last occurrence).
+    """
+    results_file = t_dir / "results.jsonl"
+    if not results_file.exists():
+        return None
+    try:
+        seen: dict[str, dict] = {}
+        for line in results_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            r = json.loads(line)
+            qa_id = r.get("qa_id", r.get("id", ""))
+            seen[qa_id] = r  # last write wins on duplicates
+        records = list(seen.values())
+        if not records:
+            return None
+        scores = [float(r.get("score", 0.0)) for r in records]
+        by_regime: dict[str, list[float]] = {}
+        for r in records:
+            regime = r.get("regime") or r.get("market_regime", "unknown")
+            by_regime.setdefault(regime, []).append(float(r.get("score", 0.0)))
+        return {
+            "template_id": template_id,
+            "accuracy": round(float(np.mean(scores)), 4),
+            "n_total": len(scores),
+            "n_correct": sum(1 for s in scores if s >= 0.99),
+            "by_regime": {
+                reg: round(float(np.mean(ss)), 4)
+                for reg, ss in sorted(by_regime.items())
+            },
+            "scores": [round(s, 4) for s in scores],
+        }
+    except Exception:
+        return None
+
+
 def _load_qa_pairs(dataset_path: str, split: str) -> list[dict]:
     path = Path(dataset_path)
     if not path.exists():
@@ -249,6 +290,21 @@ class QAEvaluator:
             cfg.output_root, provider, model_name, template_id
         )
         t_dir.mkdir(parents=True, exist_ok=True)
+
+        # Fast path: all pairs already evaluated → rebuild summary from results.jsonl
+        # (avoids stale zero-value summaries written by earlier broken resume runs).
+        if pairs and all(
+            f"{template_id}:{p.get('qa_id', p.get('id', ''))}" in completed_keys
+            for p in pairs
+        ):
+            summary = _rebuild_summary_from_results(t_dir, template_id)
+            if summary is not None:
+                # Overwrite stale summary.json with correct values
+                (t_dir / "summary.json").write_text(
+                    json.dumps(summary, indent=2), encoding="utf-8"
+                )
+                pbar.update(len(pairs))
+                return summary
 
         scores: list[float] = []
         by_regime: dict[str, list[float]] = {}

@@ -25,6 +25,11 @@ def main(argv=None) -> int:
         help="Run post-run analysis on a rebalance directory (requires --rebalance)",
     )
     p.add_argument(
+        "--analyze-qa",
+        action="store_true",
+        help="Run QA evaluation analysis (requires qa_summary.json in EXPERIMENTS/qa_eval/)",
+    )
+    p.add_argument(
         "--rescore",
         action="store_true",
         help="Recompute CEPS scores using updated S3 GT (no LLM calls, reads pipeline_logs)",
@@ -45,6 +50,12 @@ def main(argv=None) -> int:
         from .analysis import analyze_runs
         report = analyze_runs(args.rebalance, output_root=args.output_root)
         print(f"Analysis report written to: {report}")
+        return 0
+
+    if getattr(args, "analyze_qa", False):
+        from ..qa_eval.analysis import analyze_qa_results
+        report = analyze_qa_results(output_root=args.output_root)
+        print(f"QA analysis report written to: {report}")
         return 0
 
     if args.rescore:

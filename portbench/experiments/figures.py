@@ -271,10 +271,12 @@ def render_batch_comparison_figures(
             save_figure(fig, str(out_dir / f"nav_comparison_{profile}.png"), formats=("png",))
             log(f"figure: nav_comparison_{profile}.png")
 
-    # Fig B: Metrics comparison per profile
+    # Fig B: Metrics comparison per profile  (LLM models only — baselines have CEPS=0)
     for profile in all_profiles:
         metrics_map: dict[str, dict] = {}
         for mlabel, profiles in model_data.items():
+            if mlabel.startswith("baseline/"):
+                continue
             entry = profiles.get(profile)
             if entry and entry.get("normal"):
                 metrics_map[mlabel] = entry["normal"]
