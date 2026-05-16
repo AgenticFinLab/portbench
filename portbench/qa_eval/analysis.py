@@ -79,6 +79,41 @@ def analyze_qa_results(
                         scores.append(json.loads(line).get("score", 0.0))
             dist_data[label][tid] = scores
 
+    # ── Per-model figures ─────────────────────────────────────────────────────
+    for label, mdata in models_data.items():
+        provider = mdata.get("provider", "")
+        model_name = mdata.get("model", "")
+        fig_dir = qpaths.qa_figures_dir(output_root, provider, model_name)
+        fig_dir.mkdir(parents=True, exist_ok=True)
+
+        single_acc = {label: acc_data[label]}
+        single_regime = {label: regime_data[label]}
+        single_dist = {label: dist_data[label]}
+
+        try:
+            save_figure(
+                plot_qa_accuracy_heatmap(single_acc),
+                str(fig_dir / "accuracy_by_template.png"), formats=("png",),
+            )
+        except Exception as exc:
+            log(f"qa analysis [{label}]: accuracy_by_template.png skipped ({exc})")
+        try:
+            save_figure(
+                plot_qa_accuracy_by_regime(single_regime),
+                str(fig_dir / "accuracy_by_regime.png"), formats=("png",),
+            )
+        except Exception as exc:
+            log(f"qa analysis [{label}]: accuracy_by_regime.png skipped ({exc})")
+        try:
+            save_figure(
+                plot_qa_score_distribution(single_dist),
+                str(fig_dir / "score_distribution.png"), formats=("png",),
+            )
+        except Exception as exc:
+            log(f"qa analysis [{label}]: score_distribution.png skipped ({exc})")
+
+        log(f"qa analysis: per-model figures written for {label}")
+
     figures_written: list[str] = []
 
     def _save(fig, name: str) -> None:

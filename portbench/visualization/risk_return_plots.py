@@ -82,20 +82,16 @@ def plot_risk_return_scatter(
         marker = _PROFILE_MARKERS.get(p["profile"], "o")
         ax.scatter(p["dd"], p["sharpe"],
                    c=color, marker=marker,
-                   s=130, alpha=0.85, linewidths=0.5, edgecolors="white", zorder=3)
+                   s=150, alpha=0.70, linewidths=0.5, edgecolors="white", zorder=3)
 
-    # ── Pass/fail overlays ────────────────────────────────────────────────────
+    # ── Pass/fail overlays (✔/✗ to the right of each point) ─────────────────
     for p in points:
-        if p["passed"]:
-            # Gold five-pointed star slightly above the point
-            ax.scatter(p["dd"], p["sharpe"],
-                       marker="*", color="#FFD700", s=55,
-                       linewidths=0.4, edgecolors="#B8860B", zorder=5)
-        else:
-            # Red exclamation mark centred on the point
-            ax.text(p["dd"], p["sharpe"], "!",
-                    fontsize=9, color="red", fontweight="bold",
-                    ha="center", va="center", zorder=5)
+        symbol = "✔" if p["passed"] else "✗"
+        color  = "#2ecc71" if p["passed"] else "#e74c3c"
+        ax.annotate(symbol, xy=(p["dd"], p["sharpe"]),
+                    xytext=(10, 0), textcoords="offset points",
+                    fontsize=11, color=color, fontweight="bold",
+                    va="center", zorder=5)
 
     # ── Axis limits ──────────────────────────────────────────────────────────
     all_dd     = [p["dd"]     for p in points]
@@ -131,13 +127,13 @@ def plot_risk_return_scatter(
         for prof, mk in _PROFILE_MARKERS.items()
     ]
     indicator_handles = [
-        mlines.Line2D([], [], color="#FFD700", marker="*", linestyle="None",
-                      markersize=9, markeredgecolor="#B8860B", label="Passed"),
-        mlines.Line2D([], [], color="red", marker="$!$", linestyle="None",
-                      markersize=8, label="Failed"),
+        mlines.Line2D([], [], color="#2ecc71", marker="$✔$", linestyle="None",
+                      markersize=9, label="Passed"),
+        mlines.Line2D([], [], color="#e74c3c", marker="$✗$", linestyle="None",
+                      markersize=9, label="Failed"),
     ]
     legend_handles = model_handles + profile_handles + indicator_handles
-    ax.legend(handles=legend_handles, fontsize=8, loc="lower right",
+    ax.legend(handles=legend_handles, fontsize=8, loc="lower left",
               framealpha=0.85, edgecolor="0.8",
               ncols=max(1, len(legend_handles) // 5))
 

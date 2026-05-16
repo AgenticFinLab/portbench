@@ -57,29 +57,39 @@ def plot_stress_gate(
     fig, ax = plt.subplots(figsize=figsize)
 
     # Hatch patterns cycle to visually distinguish models even when colors are similar
-    _HATCHES = ['', '//', '\\\\', 'xx', '..', '++', '--', '||', '//', 'oo']
+    _HATCHES = ["", "//", "\\\\", "xx", "..", "++", "--", "||", "//", "oo"]
 
     bar_width = 0.7 / n_models
     scenario_positions = np.arange(n_scenarios)
 
     for i, model in enumerate(model_names):
-        color      = MODEL_PALETTE[i % len(MODEL_PALETTE)]
+        color = MODEL_PALETTE[i % len(MODEL_PALETTE)]
         hatch_base = _HATCHES[i % len(_HATCHES)] if i >= len(MODEL_PALETTE) else ""
-        offsets    = scenario_positions + (i - n_models / 2 + 0.5) * bar_width
+        offsets = scenario_positions + (i - n_models / 2 + 0.5) * bar_width
         for j in range(n_scenarios):
-            score  = ceps_matrix[i, j]
+            score = ceps_matrix[i, j]
             passed = pass_matrix[i, j]
             ax.bar(
-                offsets[j], score,
+                offsets[j],
+                score,
                 width=bar_width * 0.9,
-                color=color, hatch=hatch_base,
-                alpha=0.85, edgecolor="gray",
+                color=color,
+                hatch=hatch_base,
+                alpha=0.85,
+                edgecolor="gray",
             )
             if not passed:
-                # Red "!" centred at the top of the bar
-                ax.text(offsets[j], score, "!",
-                        ha="center", va="bottom",
-                        fontsize=10, color="red", fontweight="bold", zorder=6)
+                ax.text(
+                    offsets[j],
+                    score,
+                    "✗",
+                    ha="center",
+                    va="bottom",
+                    fontsize=10,
+                    color="red",
+                    fontweight="bold",
+                    zorder=6,
+                )
 
     # Tolerance threshold line
     ax.axhline(
@@ -102,20 +112,30 @@ def plot_stress_gate(
         mpatches.Patch(
             facecolor=MODEL_PALETTE[i % len(MODEL_PALETTE)],
             hatch=_HATCHES[i % len(_HATCHES)] if i >= len(MODEL_PALETTE) else "",
-            edgecolor="gray", label=m,
+            edgecolor="gray",
+            label=m,
         )
         for i, m in enumerate(model_names)
     ]
     handles.append(
-        plt.Line2D([0], [0], color="red", linestyle="--",
-                   label=f"Tolerance ({threshold:.0%})")
+        plt.Line2D(
+            [0], [0], color="red", linestyle="--", label=f"Tolerance ({threshold:.0%})"
+        )
     )
     handles.append(
-        plt.Line2D([], [], marker="$!$", color="red", linestyle="None",
-                   markersize=9, label="! Failed")
+        plt.Line2D(
+            [],
+            [],
+            marker="$✗$",
+            color="red",
+            linestyle="None",
+            markersize=9,
+            label="Failed",
+        )
     )
-    ax.legend(handles=handles, fontsize=8, loc="upper left",
-              ncols=max(1, len(handles) // 4))
+    ax.legend(
+        handles=handles, fontsize=8, loc="upper left", ncols=max(1, len(handles) // 4)
+    )
 
     fig.tight_layout()
     return fig

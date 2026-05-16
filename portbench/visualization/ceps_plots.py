@@ -135,8 +135,7 @@ def plot_ceps_heatmap(
 
     fig, ax = plt.subplots(figsize=figsize)
 
-    # RdYlGn colormap: red=low, green=high
-    cmap = plt.get_cmap("RdBu")
+    cmap = plt.get_cmap("Blues")
     im = ax.imshow(data, cmap=cmap, vmin=0, vmax=1, aspect="auto")
 
     # Draw separator before CEPS column
@@ -147,7 +146,7 @@ def plot_ceps_heatmap(
     for r in range(len(model_names)):
         for c in range(len(col_ids)):
             val = data[r, c]
-            text_color = "black" if 0.35 < val < 0.85 else "white"
+            text_color = "white" if val > 0.6 else "black"
             ax.text(
                 c,
                 r,
