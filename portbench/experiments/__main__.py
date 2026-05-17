@@ -20,24 +20,17 @@ def main(argv=None) -> int:
         help="Print the (provider, model, profile, scenario) matrix without running",
     )
     p.add_argument(
-        "--analyze",
-        action="store_true",
-        help="Run post-run analysis on a rebalance directory (requires --rebalance)",
-    )
-    p.add_argument(
-        "--analyze-qa",
-        action="store_true",
-        help="Run QA evaluation analysis (requires qa_summary.json in EXPERIMENTS/qa_eval/)",
-    )
-    p.add_argument(
         "--rescore",
         action="store_true",
-        help="Recompute CEPS scores using updated S3 GT (no LLM calls, reads pipeline_logs)",
+        help=(
+            "Recompute CEPS scores (no LLM calls), then regenerate all comparison "
+            "figures and analysis report. Use after changing S3 GT or evaluation logic."
+        ),
     )
     p.add_argument(
         "--rebalance",
         default="monthly",
-        help="Rebalance frequency directory to analyze (default: monthly)",
+        help="Rebalance frequency directory (default: monthly)",
     )
     p.add_argument(
         "--output-root",
@@ -46,18 +39,6 @@ def main(argv=None) -> int:
     )
     args = p.parse_args(argv)
 
-    if args.analyze:
-        from .analysis import analyze_runs
-        report = analyze_runs(args.rebalance, output_root=args.output_root)
-        print(f"Analysis report written to: {report}")
-        return 0
-
-    if getattr(args, "analyze_qa", False):
-        from ..qa_eval.analysis import analyze_qa_results
-        report = analyze_qa_results(output_root=args.output_root)
-        print(f"QA analysis report written to: {report}")
-        return 0
-
     if args.rescore:
         from .rescore import rescore_ceps
         result = rescore_ceps(
@@ -65,11 +46,11 @@ def main(argv=None) -> int:
             output_root=args.output_root,
             config_path=args.config,
         )
-        print(f"Rescore complete: {result}")
+        print(f"Rescore + figure regeneration complete: {result}")
         return 0
 
     if not args.config:
-        p.error("--config is required unless --analyze is set")
+        p.error("--config is required (or use --rescore to recompute CEPS and regenerate figures)")
 
     cfg_path = Path(args.config)
     raw_yaml = cfg_path.read_text(encoding="utf-8")
@@ -96,3 +77,4 @@ def main(argv=None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+

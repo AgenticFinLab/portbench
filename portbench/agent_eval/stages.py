@@ -195,6 +195,50 @@ def _max_sharpe_weights(assets: list[str], future_return_data: dict) -> dict[str
     return eq
 
 
+def _min_variance_weights(assets: list[str], return_data: dict) -> dict[str, float]:
+    """
+    Compute minimum-variance weights using historical returns.
+    Falls back to equal-weight if optimization fails or data is insufficient.
+    """
+    from scipy.optimize import minimize
+
+    data = {a: return_data[a] for a in assets if a in return_data and not return_data[a].empty}
+    eq = {a: round(1.0 / len(assets), 4) for a in assets}
+    if len(data) < 2:
+        return eq
+
+    df = pd.DataFrame(data).dropna()
+    if len(df) < 2:
+        return eq
+
+    cov = df.cov().values
+    n = len(data)
+    asset_list = list(data.keys())
+
+    def port_var(w):
+        return float(w @ cov @ w)
+
+    try:
+        result = minimize(
+            port_var,
+            np.ones(n) / n,
+            method="SLSQP",
+            bounds=[(0.0, 1.0)] * n,
+            constraints=[{"type": "eq", "fun": lambda w: np.sum(w) - 1}],
+            options={"ftol": 1e-9, "maxiter": 500},
+        )
+        if result.success:
+            w = np.maximum(result.x, 0.0)
+            w /= w.sum()
+            weights = {a: round(float(w[i]), 4) for i, a in enumerate(asset_list)}
+            for a in assets:
+                weights.setdefault(a, 0.0)
+            return weights
+    except Exception:
+        pass
+    return eq
+
+
 class StageRefusalError(RuntimeError):
     """
     Raised when an LLM declines to respond to a stage prompt due to content
@@ -622,15 +666,29 @@ class S3WeightOptimization(PipelineStage):
 
     def compute_ground_truth(self, snapshot: MarketSnapshot) -> S3Output:
         s2_gt = S2SignalGeneration().compute_ground_truth(snapshot)
+        buy_assets = [a for a, sig in s2_gt.signals.items() if sig == "buy"]
+        if not buy_assets:
+            buy_assets = list(s2_gt.signals.keys())
+
+        # Max-Sharpe component (uses future returns when available)
         if snapshot.future_return_data:
-            buy_assets = [a for a, sig in s2_gt.signals.items() if sig == "buy"]
-            if not buy_assets:
-                buy_assets = list(s2_gt.signals.keys())
-            weights = _max_sharpe_weights(buy_assets, snapshot.future_return_data)
-            for a in s2_gt.signals:
-                weights.setdefault(a, 0.0)
-            return S3Output(weights=weights)
-        return self._signals_to_weights(s2_gt, snapshot)
+            w_sharpe = _max_sharpe_weights(buy_assets, snapshot.future_return_data)
+        else:
+            w_sharpe = {a: round(1.0 / len(buy_assets), 4) for a in buy_assets}
+
+        # Min-Variance component (uses historical returns — purely risk-driven)
+        w_minvar = _min_variance_weights(buy_assets, snapshot.return_data)
+
+        # 50/50 blend: reward both return optimization and risk management
+        all_assets = list(s2_gt.signals.keys())
+        blended: dict[str, float] = {}
+        for a in all_assets:
+            blended[a] = 0.5 * w_sharpe.get(a, 0.0) + 0.5 * w_minvar.get(a, 0.0)
+        total = sum(blended.values())
+        if total > 0:
+            blended = {a: round(v / total, 4) for a, v in blended.items()}
+
+        return S3Output(weights=blended)
 
     def _signals_to_weights(self, s2: S2Output, snapshot: MarketSnapshot) -> S3Output:
         buy_assets = [a for a, sig in s2.signals.items() if sig == "buy"]
