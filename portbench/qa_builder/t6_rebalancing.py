@@ -1,7 +1,6 @@
 """
 T6 – Rebalancing Decision
-Determine whether to rebalance a portfolio given current vs. target weights,
-transaction costs, and a threshold rule.
+Determine whether to rebalance and identify the most critical trade.
 Complexity level 3.
 """
 
@@ -22,16 +21,20 @@ from .base import (
 
 class T6RebalancingDecision(QABuilder):
     """
-    Template T6: Rebalancing Decision.
+    Template T6: Rebalancing Decision with Trade Identification.
 
-    Rebalancing is triggered when the maximum absolute weight deviation from
-    target exceeds a threshold AND the expected transaction cost is below the
-    expected improvement in risk-adjusted return.
+    Two-part question:
+      Part A: Should the portfolio be rebalanced?
+              Decision rule: rebalance if max(|w_current_i - w_target_i|) > threshold.
+      Part B: If rebalancing, which asset has the largest deviation from target
+              and what is the required trade size (as fraction of portfolio)?
 
-    Simplified rule used here:
-        Rebalance if max(|w_current_i - w_target_i|) > rebal_threshold
-
-    The answer is "yes" (rebalance) or "no" (hold).
+    Design vs. original:
+      - Pre-computed max_deviation and turnover are NOT provided; the model must
+        identify the most deviated asset itself (tests analytical ability).
+      - Drift is calibrated so that seq % 2 == 0 → rebalance needed,
+        seq % 2 == 1 → hold, giving exactly 50/50 balance by construction.
+      - The two-part answer tests both decision reasoning and quantitative trade sizing.
     """
 
     def __init__(
@@ -41,11 +44,6 @@ class T6RebalancingDecision(QABuilder):
         rebal_threshold: float = 0.05,
         transaction_cost_rate: float = 0.001,
     ):
-        """
-        Args:
-            rebal_threshold:      Trigger threshold for max weight deviation (e.g., 0.05 = 5%).
-            transaction_cost_rate: Round-trip transaction cost per unit traded (e.g., 0.1%).
-        """
         super().__init__(provider, config)
         self.rebal_threshold = rebal_threshold
         self.transaction_cost_rate = transaction_cost_rate
@@ -64,8 +62,6 @@ class T6RebalancingDecision(QABuilder):
 
     def _select_assets(self, decision_date: date) -> list[str]:
         import random
-
-        # Always include equities + crypto for text coverage; add 2 more from others.
         text_classes = ["equities", "cryptocurrency"]
         other_classes = ["bonds", "commodities", "real_estate", "cash"]
         rng = random.Random(hash(decision_date) + 5)
@@ -84,59 +80,76 @@ class T6RebalancingDecision(QABuilder):
         d = context.decision_date
         n = len(assets)
 
-        rng = np.random.default_rng(hash(d) + 5)
+        rng = np.random.default_rng(abs(hash(d)) + seq)
+        target_weights = np.ones(n) / n
 
-        # Simulate current weights (drifted from equal-weight target due to price changes)
-        target_weights = np.ones(n) / n  # Equal-weight target
+        # 50/50 balance by construction: even seq → rebalance case, odd → hold case
+        if seq % 2 == 0:
+            # Force at least one asset well above threshold
+            drifts = rng.normal(0, 0.18, n)
+            for _ in range(10):
+                drifted = target_weights * (1 + drifts)
+                cw = np.clip(drifted / drifted.sum(), 0, 1)
+                if np.max(np.abs(cw - target_weights)) > self.rebal_threshold:
+                    break
+                drifts *= 1.5
+        else:
+            # Keep all deviations strictly below threshold
+            drifts = rng.uniform(
+                -self.rebal_threshold * 0.65,
+                 self.rebal_threshold * 0.65,
+                n,
+            )
 
-        # Drift: apply random recent returns to distort weights
-        drifts = rng.normal(0, 0.08, n)  # Simulate asset-level drift
         drifted = target_weights * (1 + drifts)
         current_weights = np.clip(drifted / drifted.sum(), 0, 1)
 
-        max_deviation = float(np.max(np.abs(current_weights - target_weights)))
-        total_turnover = float(np.sum(np.abs(current_weights - target_weights)))
-        total_cost = total_turnover * self.transaction_cost_rate
-
-        # Decision rule: rebalance if max deviation exceeds threshold
+        deviations = current_weights - target_weights
+        max_dev_idx = int(np.argmax(np.abs(deviations)))
+        max_deviation = float(np.abs(deviations[max_dev_idx]))
         should_rebalance = max_deviation > self.rebal_threshold
-        answer = "yes" if should_rebalance else "no"
 
-        current_str = ", ".join(
-            f"w_{a}={current_weights[i]:.4f}" for i, a in enumerate(assets)
-        )
-        target_str = ", ".join(
-            f"w_{a}={target_weights[i]:.4f}" for i, a in enumerate(assets)
-        )
-        dev_str = ", ".join(
-            f"Δ{a}={current_weights[i]-target_weights[i]:+.4f}"
+        primary_asset = assets[max_dev_idx]
+        primary_trade = round(float(deviations[max_dev_idx]), 4)
+        trade_direction = "sell" if primary_trade > 0 else "buy"
+        trade_magnitude = round(abs(primary_trade), 4)
+
+        holdings_str = "\n".join(
+            f"  {a}: current={current_weights[i]:.4f}, target={target_weights[i]:.4f}"
             for i, a in enumerate(assets)
         )
 
         context_summary = (
             f"Max weight deviation: {max_deviation:.4f}, threshold: {self.rebal_threshold}. "
-            f"Decision: {answer} (rebalance)."
+            f"Decision: {'yes' if should_rebalance else 'no'}."
         )
 
         question = (
-            f"Current portfolio weights: {current_str}\n"
-            f"Target portfolio weights: {target_str}\n"
-            f"Weight deviations: {dev_str}\n"
+            f"Portfolio holdings (current vs. target weights):\n{holdings_str}\n\n"
             f"Rebalancing threshold: {self.rebal_threshold:.2%}\n"
-            f"Transaction cost rate (round-trip): {self.transaction_cost_rate:.2%}\n"
-            f"Estimated total turnover if rebalanced: {total_turnover:.4f}\n"
-            f"Estimated transaction cost: {total_cost:.4f}\n"
-            f"Market regime: {context.market_regime.value if context.market_regime else 'unknown'}\n\n"
-            f"Should the portfolio be rebalanced? Answer: yes or no."
+            f"Transaction cost (round-trip): {self.transaction_cost_rate:.2%}\n"
+            f"Market regime: "
+            f"{context.market_regime.value if context.market_regime else 'unknown'}\n\n"
+            f"Part A: Should this portfolio be rebalanced? (yes or no)\n"
+            f"Part B: If yes — identify the asset with the largest deviation from its "
+            f"target weight and specify the required trade as a fraction of portfolio "
+            f"(e.g., 'buy 0.0300 of ASSET' or 'sell 0.0500 of ASSET')."
         )
 
+        if should_rebalance:
+            answer = f"yes; {trade_direction} {trade_magnitude:.4f} of {primary_asset}"
+        else:
+            answer = "no"
+
         explanation = (
-            f"Maximum absolute deviation: {max_deviation:.4f}.\n"
-            f"Rebalancing threshold: {self.rebal_threshold:.4f}.\n"
-            f"{max_deviation:.4f} {'>' if should_rebalance else '<='} {self.rebal_threshold:.4f} "
-            f"→ decision: '{answer}'.\n"
-            f"If rebalanced: total turnover = {total_turnover:.4f}, "
-            f"transaction cost = {total_cost:.6f} (negligible vs. drift)."
+            "Weight deviations: "
+            + ", ".join(f"{a}={deviations[i]:+.4f}" for i, a in enumerate(assets))
+            + f"\nMax |deviation|={max_deviation:.4f} vs threshold={self.rebal_threshold}.\n"
+            + (
+                f"Rebalance: {trade_direction} {trade_magnitude:.4f} of {primary_asset}."
+                if should_rebalance
+                else "All deviations within threshold — hold."
+            )
         )
 
         split = self.config.get_split(d) or Split.TRAIN
@@ -157,16 +170,12 @@ class T6RebalancingDecision(QABuilder):
             answer_numeric=float(should_rebalance),
             explanation=explanation,
             metadata={
-                "current_weights": {
-                    a: round(float(current_weights[i]), 4) for i, a in enumerate(assets)
-                },
-                "target_weights": {
-                    a: round(float(target_weights[i]), 4) for i, a in enumerate(assets)
-                },
+                "current_weights": {a: round(float(current_weights[i]), 4) for i, a in enumerate(assets)},
+                "target_weights": {a: round(float(target_weights[i]), 4) for i, a in enumerate(assets)},
                 "max_deviation": round(max_deviation, 6),
-                "total_turnover": round(total_turnover, 6),
-                "transaction_cost": round(total_cost, 6),
                 "threshold": self.rebal_threshold,
                 "should_rebalance": should_rebalance,
+                "primary_asset": primary_asset,
+                "primary_trade": primary_trade,
             },
         )

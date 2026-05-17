@@ -355,6 +355,14 @@ class QAEvaluator:
                     "complexity": pair.get("complexity", ""),
                     "split": pair.get("split", ""),
                 }
+                # Do NOT checkpoint errors/timeouts — allow them to be retried on resume.
+                with results_lock:
+                    qpaths.append_result(t_dir, record)
+                    scores.append(sc)
+                    regime = pair.get("market_regime", "unknown")
+                    by_regime.setdefault(regime, []).append(sc)
+                pbar.update(1)
+                return
 
             with results_lock:
                 qpaths.append_result(t_dir, record)

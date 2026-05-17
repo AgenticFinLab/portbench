@@ -114,9 +114,10 @@ class T3PositionSizing(QABuilder):
                 if context.news_text
                 else ""
             )
-            + f"\nUsing the fixed-fractional position sizing method, determine the maximum "
-            f"position size in {asset} as a fraction of total portfolio. "
-            f"(Approximate worst-case single-period loss as |VaR(99%)|.)"
+            + f"\nDetermine the maximum fraction of total portfolio capital that should be "
+            f"allocated to {asset}, given the {pct_threshold}% drawdown constraint. "
+            f"Report as a decimal between 0.00 and 1.00 (e.g., 0.25 = 25%; "
+            f"maximum is 1.00 = 100% of portfolio)."
         )
 
         explanation = (

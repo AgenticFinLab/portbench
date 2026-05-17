@@ -261,11 +261,48 @@ def _score_t5(gt_answer: str, response: str, assets: list[str] = None, **kw) -> 
 
 
 def _score_t6(gt_answer: str, response: str, **kw) -> float:
+    """
+    T6 scoring — two-part answer: "yes; sell/buy X of ASSET" or "no".
+    Part A (40%): correct yes/no decision.
+    Part B (60%, only when GT=yes): correct asset + trade direction.
+    When GT="no": Part B score = 1.0 (nothing to identify, full credit if decision correct).
+    """
+    gt_lower = gt_answer.strip().lower()
+    resp_lower = response.strip().lower()
+
+    # ── Part A: yes/no decision ──────────────────────────────────────────────
     gt_dec = _extract_rebalance_decision(gt_answer)
     pred_dec = _extract_rebalance_decision(response)
-    if gt_dec is None or pred_dec is None:
-        return 0.0
-    return 1.0 if gt_dec == pred_dec else 0.0
+    decision_score = 1.0 if (gt_dec and pred_dec and gt_dec == pred_dec) else 0.0
+
+    if gt_dec != "rebalance":
+        # GT is "no" → only decision matters (full credit for Part B)
+        return decision_score
+
+    # ── Part B: identify primary asset and trade direction (GT=yes) ──────────
+    # Parse GT: "yes; sell 0.0500 of SPY" → direction=sell, asset=SPY
+    import re
+    gt_match = re.search(
+        r"(sell|buy)\s+([\d.]+)\s+of\s+(\S+)", gt_lower
+    )
+    if not gt_match:
+        return 0.4 * decision_score  # No GT Part B to compare
+
+    gt_dir = gt_match.group(1)   # "sell" or "buy"
+    gt_asset = gt_match.group(3).upper()
+
+    resp_match = re.search(r"(sell|buy)\s+([\d.]+)\s+of\s+(\S+)", resp_lower)
+    if not resp_match:
+        return 0.4 * decision_score  # Model gave no trade info
+
+    pred_dir = resp_match.group(1)
+    pred_asset = resp_match.group(3).upper()
+
+    direction_match = 1.0 if pred_dir == gt_dir else 0.0
+    asset_match = 1.0 if pred_asset == gt_asset else 0.0
+    part_b = 0.5 * direction_match + 0.5 * asset_match
+
+    return 0.4 * decision_score + 0.6 * part_b
 
 
 def _score_t7(gt_answer: str, response: str, **kw) -> float:
