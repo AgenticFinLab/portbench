@@ -62,10 +62,10 @@ config = QAConfig(train_start="2015-01-01", train_end="2022-12-31", ...)
 |----------|------|-----------|--------|
 | T1 `T1ReturnPrediction` | Predict return direction (up/down/flat) for next N days | 1 | Single |
 | T2 `T2RiskAssessment` | Estimate VaR and CVaR at given confidence | 1 | Single |
-| T3 `T3PositionSizing` | Compute max position size given drawdown limit | 1 | Single |
-| T4 `T4PairwiseAllocation` | Minimum-variance allocation across 2 assets | 2 | Pair |
+| T3 `T3PositionSizing` | Compute max position size given drawdown limit (no formula hint; cap at 1.0 stated explicitly) | 1 | Single |
+| T4 `T4PairwiseAllocation` | Constrained min-variance allocation across 2 assets subject to a minimum return floor | 2 | Pair |
 | T5 `T5MultiAssetOptimization` | Maximum-Sharpe allocation across 3+ assets (SLSQP) | 3 | Multi |
-| T6 `T6RebalancingDecision` | Decide whether to rebalance given current vs. target weights | 3 | Multi |
+| T6 `T6RebalancingDecision` | Identify the most deviated asset and quantify the required trade (50% yes/50% no by construction) | 3 | Multi |
 | T7 `T7RegimeDetection` | Detect regime and recommend allocation direction | 4 | Full portfolio |
 
 ### Ground Truth Computation
@@ -74,10 +74,10 @@ Each template computes ground truth from observable data strictly before `decisi
 
 - **T1**: Future return from `decision_date` to `decision_date + horizon_days` (uses future prices — only the answer uses future data, not the context)
 - **T2**: Historical simulation VaR/CVaR from 252-day return window
-- **T3**: Fixed-fractional: `f* = max_drawdown_limit / |VaR(99%)|`, capped at 1.0
-- **T4**: Analytic min-variance: `w1* = (σ₂² - σ₁₂) / (σ₁² + σ₂² - 2σ₁₂)`
+- **T3**: Fixed-fractional: `f* = max_drawdown_limit / |VaR(99%)|`, capped at 1.0. Question no longer names the formula — model must know position sizing methodology.
+- **T4**: Constrained min-variance with return floor `E[r] ≥ μ_floor`. When constraint is binding: `w1 = (μ_floor − μ2) / (μ1 − μ2)`; else: unconstrained analytic solution. ~50% of questions have a binding constraint (alternated by index). Explicit covariance/correlation values are **not** provided in the question — only σ₁, σ₂, and annualized mean returns.
 - **T5**: SLSQP optimizer: `max E[r]ᵀw / sqrt(wᵀΣw)` subject to `Σwᵢ=1, wᵢ≥0`
-- **T6**: `|w_current - w_target| > threshold` → "rebalance"; else → "hold"
+- **T6**: Decision rule: `max|w_current − w_target| > threshold` → rebalance; else → hold. **50% yes / 50% no by construction** (drift magnitude is calibrated per index parity). Answer format: `"yes; sell/buy X.XXXX of ASSET"` or `"no"` — model must identify the most deviated asset and its trade size. Pre-computed deviation totals are **not** given in the question.
 - **T7**: Regime from trailing returns; allocation direction from `_REGIME_ALLOCATION` lookup
 
 ## ContextWindow and Cross-Asset Correlation

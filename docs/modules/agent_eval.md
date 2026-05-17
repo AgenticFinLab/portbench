@@ -139,13 +139,15 @@ Ground truth: **max-Sharpe optimal weights** over buy-signal assets, computed vi
 
 LLM prompt receives signals and must output a weight allocation with sum=1, all values in [0,1].
 
-**Scoring**: Composite score — **70% weight accuracy + 30% correlation awareness**:
+**Scoring**: Composite score — **σ × weight accuracy + (1−σ) × correlation awareness** (default σ = 0.5):
 
-- *Weight accuracy*: `1 - weight_MAE / 2`
-- *Correlation awareness* (30%): when `snapshot.asset_class_map` is set, the 30% is split into:
-  - *15% intra-class concentration penalty* — for each class, `class_weight × max(avg_intra_corr, 0)` is summed and subtracted from 1; piling weight inside a class with high mutual correlation is penalized.
-  - *15% inter-class hedging credit* — weighted average of off-diagonal inter-class correlations (`Σ w_i w_j corr(class_i, class_j)`), mapped via `(1 − avg)/2`; spreading weight across weakly / negatively correlated classes is rewarded.
-  - When no `asset_class_map` is available, the full 30% falls back to the variance-ratio score `clip(2 − var(actual)/var(gt), 0, 1)`.
+- *Weight accuracy*: `1 - weight_MAE / 2` against max-Sharpe GT
+- *Correlation awareness* (1−σ): when `snapshot.asset_class_map` is set, split equally into:
+  - *50% intra-class concentration penalty* — for each class, `class_weight × max(avg_intra_corr, 0)` is summed and subtracted from 1; piling weight inside a class with high mutual correlation is penalized.
+  - *50% inter-class hedging credit* — weighted average of off-diagonal inter-class correlations, mapped via `(1 − avg)/2`; spreading weight across weakly / negatively correlated classes is rewarded.
+  - When no `asset_class_map` is available, the full (1−σ) portion falls back to the variance-ratio score `clip(2 − var(actual)/var(gt), 0, 1)`.
+
+`sigma` is a constructor parameter (default 0.5): σ=1 evaluates pure return optimality, σ=0 evaluates pure risk diversification, σ=0.5 provides balanced return–risk evaluation.
 
 ### S4 — Execution Simulation (`S4ExecutionSimulation`)
 
