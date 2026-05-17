@@ -651,13 +651,33 @@ class S3WeightOptimization(PipelineStage):
     """
     Stage 3: Portfolio Weight Optimization.
 
-    Ground truth: equal-weight among "buy" signals, 0 for "sell".
-    Scores using weight MAE normalized to [0, 1].
+    Ground truth: max-Sharpe optimal weights computed from realized future returns
+    (restricted to buy-signal assets from S2). Falls back to equal-weight when
+    future return data is unavailable.
+
+    Scoring:
+        S3 score = σ × accuracy_score + (1-σ) × correlation_awareness_score
+
+    where:
+        accuracy_score         = 1 - weight_MAE / 2  (closeness to max-Sharpe GT)
+        correlation_awareness  = 0.5×intra_class + 0.5×inter_class  (when asset_class_map present)
+                               = variance_ratio_score  (fallback)
+        σ (sigma)              = controllable return-vs-risk balance parameter (default 0.5)
+
+    σ = 1.0 → pure return-optimization evaluation
+    σ = 0.0 → pure risk/diversification evaluation
+    σ = 0.5 → balanced return-risk evaluation (default)
     """
 
-    def __init__(self, adapter: AgentAdapter = None, use_tools: bool = False):
+    def __init__(
+        self,
+        adapter: AgentAdapter = None,
+        use_tools: bool = False,
+        sigma: float = 0.5,
+    ):
         self.adapter = adapter or MockAgentAdapter()
         self.use_tools = use_tools
+        self.sigma = float(np.clip(sigma, 0.0, 1.0))
         self._last_snapshot: Optional[MarketSnapshot] = None
 
     @property
@@ -670,25 +690,17 @@ class S3WeightOptimization(PipelineStage):
         if not buy_assets:
             buy_assets = list(s2_gt.signals.keys())
 
-        # Max-Sharpe component (uses future returns when available)
+        # GT = max-Sharpe optimal weights (uses realized future returns as oracle)
         if snapshot.future_return_data:
-            w_sharpe = _max_sharpe_weights(buy_assets, snapshot.future_return_data)
+            weights = _max_sharpe_weights(buy_assets, snapshot.future_return_data)
         else:
-            w_sharpe = {a: round(1.0 / len(buy_assets), 4) for a in buy_assets}
+            # Fallback: equal-weight when future data is unavailable
+            n = len(buy_assets)
+            weights = {a: round(1.0 / n, 4) for a in buy_assets}
 
-        # Min-Variance component (uses historical returns — purely risk-driven)
-        w_minvar = _min_variance_weights(buy_assets, snapshot.return_data)
-
-        # 50/50 blend: reward both return optimization and risk management
-        all_assets = list(s2_gt.signals.keys())
-        blended: dict[str, float] = {}
-        for a in all_assets:
-            blended[a] = 0.5 * w_sharpe.get(a, 0.0) + 0.5 * w_minvar.get(a, 0.0)
-        total = sum(blended.values())
-        if total > 0:
-            blended = {a: round(v / total, 4) for a, v in blended.items()}
-
-        return S3Output(weights=blended)
+        for a in s2_gt.signals:
+            weights.setdefault(a, 0.0)
+        return S3Output(weights=weights)
 
     def _signals_to_weights(self, s2: S2Output, snapshot: MarketSnapshot) -> S3Output:
         buy_assets = [a for a, sig in s2.signals.items() if sig == "buy"]
@@ -768,41 +780,32 @@ class S3WeightOptimization(PipelineStage):
 
     def score(self, actual: S3Output, ground_truth: S3Output) -> float:
         """
-        Composite score = 70% weight accuracy + 30% correlation awareness.
+        S3 score = σ × accuracy_score + (1-σ) × correlation_awareness
 
-        Weight accuracy: 1 - weight_mae / 2 (normalized, max error = 2.0)
-
-        Correlation awareness (30%) is split into two components when an
-        asset_class_map is available on the snapshot:
-          - 15%: intra-class concentration penalty — high weight on tickers
-                 inside a class with high mutual correlation is penalized
-                 (concentration in correlated names is not real diversification).
-          - 15%: inter-class hedging credit — distributing weight across asset
-                 classes whose returns are weakly / negatively correlated is
-                 rewarded (cross-class diversification).
-        When no asset_class_map is available, the full 30% falls back to the
-        original variance-ratio score.
-
-        Falls back to 100% weight accuracy if the snapshot is not available
-        or fewer than 2 assets have sufficient return data.
+        accuracy_score = 1 - weight_MAE / 2  (closeness to max-Sharpe GT)
+        correlation_awareness:
+          - With asset_class_map: 0.5 × intra_class + 0.5 × inter_class
+          - Without:              variance_ratio fallback
+        σ (self.sigma) controls the return-vs-risk balance (default 0.5).
         """
         from ..metrics.allocation_metrics import weight_mae
         mae = weight_mae(actual.weights, ground_truth.weights)
         accuracy_score = float(np.clip(1.0 - mae / 2.0, 0.0, 1.0))
 
         snap = getattr(self, "_last_snapshot", None)
-        if snap is None:
+        if snap is None or self.sigma >= 1.0:
             return accuracy_score
 
         if snap.asset_class_map:
             intra = self._intra_class_diversification_score(actual.weights, snap)
             inter = self._inter_class_hedging_score(actual.weights, snap)
-            return float(0.70 * accuracy_score + 0.15 * intra + 0.15 * inter)
+            corr_score = 0.5 * intra + 0.5 * inter
+        else:
+            corr_score = self._correlation_awareness_score(
+                actual.weights, ground_truth.weights, snap
+            )
 
-        corr_score = self._correlation_awareness_score(
-            actual.weights, ground_truth.weights, snap
-        )
-        return float(0.70 * accuracy_score + 0.30 * corr_score)
+        return float(self.sigma * accuracy_score + (1.0 - self.sigma) * corr_score)
 
     def _intra_class_diversification_score(
         self,
