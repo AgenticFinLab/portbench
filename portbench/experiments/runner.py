@@ -163,7 +163,7 @@ def _run_one_scenario(
     scenario_name: str,
     out_dir: Path,
 ):
-    """Run one stress scenario; persist artifacts; return (result, passed).
+    """Run one stress scenario; persist artifacts; return (result, passed, dd_score, ceps_tier).
 
     If backtest_result.json already exists in out_dir, the scenario is skipped
     and its result is loaded from disk (scenario-level resume).
@@ -177,7 +177,9 @@ def _run_one_scenario(
             data = json.loads(cached_result_path.read_text(encoding="utf-8"))
             result = _BR.from_dict(data)
             passed = bool(data.get("stress_passed", False))
-            return result, passed
+            dd_score = float(data.get("dd_score", max(0.0, 1.0 - abs(result.max_drawdown) / max(profile_obj.max_drawdown_tolerance, 1e-6))))
+            ceps_tier = data.get("ceps_tier", "D")
+            return result, passed, dd_score, ceps_tier
         except Exception:
             pass  # corrupt cache — fall through and re-run
 
@@ -214,9 +216,17 @@ def _run_one_scenario(
 
     result = engine.run()
     passed = abs(result.max_drawdown) <= profile_obj.max_drawdown_tolerance
+    # Direction A: continuous drawdown score ∈ [0, 1]
+    dd_score = max(0.0, 1.0 - abs(result.max_drawdown) / profile_obj.max_drawdown_tolerance)
+    # Direction B: CEPS tier label based on scenario tier thresholds
+    mean_ceps = result.mean_ceps
+    ceps_tier = "D"
+    for threshold, tier in zip(scenario.ceps_tiers, ["D", "C", "B", "A"]):
+        if mean_ceps >= threshold:
+            ceps_tier = tier
     result.stress_passed = passed
-    paths.save_backtest_result(result, out_dir)
-    return result, passed
+    paths.save_backtest_result(result, out_dir, extra_fields={"dd_score": round(dd_score, 4), "ceps_tier": ceps_tier})
+    return result, passed, dd_score, ceps_tier
 
 
 def _run_normal(
@@ -316,13 +326,14 @@ def _run_profile(
             results[sc_name] = fut.result()  # raises → caller catches
 
     for sc_name in scenarios:
-        result, passed = results[sc_name]
+        result, passed, dd_score, ceps_tier = results[sc_name]
         status = "PASSED" if passed else "FAILED"
         logger.info(
-            "  %s: %s drawdown=%.2f%% tol=%.0f%%",
+            "  %s: %s drawdown=%.2f%% tol=%.0f%% dd_score=%.3f ceps_tier=%s",
             sc_name, status,
             result.max_drawdown * 100,
             profile_obj.max_drawdown_tolerance * 100,
+            dd_score, ceps_tier,
         )
         stress_summaries.append({
             "scenario": sc_name,
@@ -330,6 +341,8 @@ def _run_profile(
             "max_drawdown": round(result.max_drawdown, 4),
             "tolerance": profile_obj.max_drawdown_tolerance,
             "total_return": round(result.total_return, 4),
+            "dd_score": round(dd_score, 4),
+            "ceps_tier": ceps_tier,
         })
         all_passed = all_passed and passed
 

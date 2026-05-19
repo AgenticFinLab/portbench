@@ -20,6 +20,9 @@ from ..visualization.sandbox_plots import (
     plot_sandbox_nav,
     plot_stress_drawdown,
 )
+from ..visualization.stress_plots import (
+    plot_stress_continuous_heatmap,
+)
 from ..visualization.correlation_plots import (
     load_processed_correlation,
     plot_correlation_evolution,
@@ -314,3 +317,34 @@ def render_batch_comparison_figures(
             )
             save_figure(fig, str(out_dir / f"stress_drawdown_{safe_name}.png"), formats=("png",))
             log(f"figure: stress_drawdown_{safe_name}.png")
+
+    # Fig D: Stress continuous score heatmap (dd_score + CEPS tier) — cross-model
+    continuous_data: dict[str, dict[str, dict[str, dict]]] = {}
+    for mlabel, profiles in model_data.items():
+        model_entry: dict[str, dict[str, dict]] = {}
+        for profile_name, entry in profiles.items():
+            stress = entry.get("stress")
+            if not stress:
+                continue
+            sc_entry: dict[str, dict] = {}
+            for sc, payload in stress.items():
+                sc_entry[sc] = {
+                    "dd_score": payload.get("dd_score", 0.0),
+                    "ceps_tier": payload.get("ceps_tier", ""),
+                    "passed": payload.get("stress_passed", False),
+                    "max_drawdown": payload.get("max_drawdown", 0.0),
+                }
+            if sc_entry:
+                model_entry[profile_name] = sc_entry
+        if model_entry:
+            continuous_data[mlabel] = model_entry
+    if continuous_data:
+        try:
+            fig = plot_stress_continuous_heatmap(
+                continuous_data,
+                title="Stress Score — Drawdown Continuous (color) + CEPS Tier (text)",
+            )
+            save_figure(fig, str(out_dir / "stress_continuous_heatmap.png"), formats=("png",))
+            log("figure: stress_continuous_heatmap.png")
+        except Exception as exc:
+            log(f"stress_continuous_heatmap skipped: {exc}")

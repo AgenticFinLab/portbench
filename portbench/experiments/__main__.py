@@ -28,6 +28,15 @@ def main(argv=None) -> int:
         ),
     )
     p.add_argument(
+        "--sigma-ablation",
+        action="store_true",
+        help=(
+            "Run σ ablation: rescore S3 for σ ∈ sigma_ablation_values from config "
+            "(default [0.0, 0.25, 0.5, 0.75, 1.0]). Writes results.json + sigma_ablation.png "
+            "to EXPERIMENTS/{rebalance}/sigma_ablation/. No LLM re-calls required."
+        ),
+    )
+    p.add_argument(
         "--rebalance",
         default="monthly",
         help="Rebalance frequency directory (default: monthly)",
@@ -41,6 +50,7 @@ def main(argv=None) -> int:
 
     if args.rescore:
         from .rescore import rescore_ceps
+
         result = rescore_ceps(
             rebalance=args.rebalance,
             output_root=args.output_root,
@@ -49,8 +59,26 @@ def main(argv=None) -> int:
         print(f"Rescore + figure regeneration complete: {result}")
         return 0
 
+    if getattr(args, "sigma_ablation", False):
+        from .rescore import rescore_sigma_ablation
+
+        sigma_values = None
+        if args.config:
+            cfg = ExperimentConfig.from_yaml(args.config)
+            sigma_values = cfg.sigma_ablation_values
+        results_path = rescore_sigma_ablation(
+            sigma_values=sigma_values,
+            rebalance=args.rebalance,
+            output_root=args.output_root,
+            config_path=args.config,
+        )
+        print(f"σ ablation complete: {results_path}")
+        return 0
+
     if not args.config:
-        p.error("--config is required (or use --rescore to recompute CEPS and regenerate figures)")
+        p.error(
+            "--config is required (or use --rescore / --sigma-ablation to recompute without LLM calls)"
+        )
 
     cfg_path = Path(args.config)
     raw_yaml = cfg_path.read_text(encoding="utf-8")
@@ -77,4 +105,3 @@ def main(argv=None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

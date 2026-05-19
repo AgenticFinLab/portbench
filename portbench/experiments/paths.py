@@ -191,11 +191,14 @@ def find_best_run(
 # Persistence helpers
 # ---------------------------------------------------------------------------
 
-def save_backtest_result(result: BacktestResult, out_dir: Path) -> None:
+def save_backtest_result(result: BacktestResult, out_dir: Path, extra_fields: dict = None) -> None:
     """Persist BacktestResult fully: JSON + summary + nav/weight CSV + trades."""
     out_dir.mkdir(parents=True, exist_ok=True)
+    result_dict = result.to_dict()
+    if extra_fields:
+        result_dict.update(extra_fields)
     (out_dir / "backtest_result.json").write_text(
-        json.dumps(result.to_dict(), indent=2, default=str), encoding="utf-8"
+        json.dumps(result_dict, indent=2, default=str), encoding="utf-8"
     )
     (out_dir / "summary.txt").write_text(result.summary() + "\n", encoding="utf-8")
 

@@ -130,6 +130,7 @@ class ExperimentConfig:
     run_qa: bool = False  # run QA dataset evaluation alongside sandbox
     qa: QAConfig = field(default_factory=QAConfig)
     generation: GenerationConfig = field(default_factory=GenerationConfig)
+    sigma_ablation_values: list = field(default_factory=lambda: [0.0, 0.25, 0.5, 0.75, 1.0])
 
     @staticmethod
     def from_yaml(path: str | Path) -> "ExperimentConfig":
@@ -194,6 +195,7 @@ class ExperimentConfig:
             run_qa=bool(raw.get("run_qa", False)),
             qa=_parse_qa_config(raw.get("qa") or {}),
             generation=gen_obj,
+            sigma_ablation_values=list(raw.get("sigma_ablation_values", [0.0, 0.25, 0.5, 0.75, 1.0])),
         )
 
     def resolved_stress_scenarios(self) -> list[str]:

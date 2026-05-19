@@ -114,7 +114,7 @@ class BacktestEngine:
         # Build pipeline once (reused across all rebalance steps)
         self._pipeline: Optional[EvalPipeline] = None
         if use_pipeline:
-            self._pipeline = build_default_pipeline(strategy, use_tools=use_tools)
+            self._pipeline = build_default_pipeline(strategy, use_tools=use_tools, profile=profile)
 
         # Per-rebalance collection (populated in _get_target_weights)
         self._episode_results = []
