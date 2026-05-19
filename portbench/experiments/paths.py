@@ -43,6 +43,7 @@ from ..sandbox.result import BacktestResult
 # Directory builders
 # ---------------------------------------------------------------------------
 
+
 def rebalance_dir(output_root: str, rebalance: str) -> Path:
     return Path(output_root) / rebalance
 
@@ -126,18 +127,20 @@ def dataset_figures_dir(output_root: str) -> Path:
 def checkpoint_file(
     output_root: str, rebalance: str, provider: str, model_name: str, timestamp: str
 ) -> Path:
-    return run_dir(output_root, rebalance, provider, model_name, timestamp) / "checkpoint.json"
+    return (
+        run_dir(output_root, rebalance, provider, model_name, timestamp)
+        / "checkpoint.json"
+    )
 
 
 # ---------------------------------------------------------------------------
 # Run selection: find best (most complete, then latest) existing timestamp
 # ---------------------------------------------------------------------------
 
+
 def count_completed_profiles(ts_dir: Path, expected_profiles: list[str]) -> int:
     """Count how many expected profiles have at least experiment.log in ts_dir."""
-    return sum(
-        1 for p in expected_profiles if (ts_dir / p / "experiment.log").exists()
-    )
+    return sum(1 for p in expected_profiles if (ts_dir / p / "experiment.log").exists())
 
 
 def get_completed_profiles(ts_dir: Path, expected_profiles: list[str]) -> list[str]:
@@ -180,7 +183,9 @@ def find_best_run(
             continue
         ts = child.name
         score = count_completed_profiles(child, expected_profiles)
-        if score > best_score or (score == best_score and (best_ts is None or ts > best_ts)):
+        if score > best_score or (
+            score == best_score and (best_ts is None or ts > best_ts)
+        ):
             best_score = score
             best_ts = ts
 
@@ -191,7 +196,10 @@ def find_best_run(
 # Persistence helpers
 # ---------------------------------------------------------------------------
 
-def save_backtest_result(result: BacktestResult, out_dir: Path, extra_fields: dict = None) -> None:
+
+def save_backtest_result(
+    result: BacktestResult, out_dir: Path, extra_fields: dict = None
+) -> None:
     """Persist BacktestResult fully: JSON + summary + nav/weight CSV + trades."""
     out_dir.mkdir(parents=True, exist_ok=True)
     result_dict = result.to_dict()

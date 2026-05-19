@@ -19,9 +19,7 @@ from typing import Optional
 from . import paths
 
 
-def _load_run_summaries(
-    output_root: str, rebalance: str
-) -> list[dict]:
+def _load_run_summaries(output_root: str, rebalance: str) -> list[dict]:
     """
     Scan EXPERIMENTS/{rebalance}/ and return all run_summary.json contents,
     using the best (most complete, then latest) run per model.
@@ -32,16 +30,25 @@ def _load_run_summaries(
 
     summaries = []
     for prov_dir in sorted(rebal_dir.iterdir()):
-        if not prov_dir.is_dir() or prov_dir.name.startswith("_") or prov_dir.name == "comparison_figures":
+        if (
+            not prov_dir.is_dir()
+            or prov_dir.name.startswith("_")
+            or prov_dir.name == "comparison_figures"
+        ):
             continue
         for m_dir in sorted(prov_dir.iterdir()):
             if not m_dir.is_dir():
                 continue
             # Find best run (most profiles complete, then latest)
-            ts = paths.find_best_run(output_root, rebalance, prov_dir.name, m_dir.name, [])
+            ts = paths.find_best_run(
+                output_root, rebalance, prov_dir.name, m_dir.name, []
+            )
             if not ts:
                 continue
-            summary_file = paths.run_dir(output_root, rebalance, prov_dir.name, m_dir.name, ts) / "run_summary.json"
+            summary_file = (
+                paths.run_dir(output_root, rebalance, prov_dir.name, m_dir.name, ts)
+                / "run_summary.json"
+            )
             if summary_file.exists():
                 data = json.loads(summary_file.read_text(encoding="utf-8"))
                 summaries.append(data)
@@ -63,9 +70,12 @@ def _flatten_rows(summaries: list[dict]) -> list[dict]:
                 rows.append({**base, "phase": "stress", **sr})
             if payload.get("normal") is not None:
                 import numpy as np
+
                 normal = dict(payload["normal"])
                 per_step = normal.pop("per_step_ceps", [])
-                normal["std_ceps"] = round(float(np.std(per_step)), 6) if per_step else 0.0
+                normal["std_ceps"] = (
+                    round(float(np.std(per_step)), 6) if per_step else 0.0
+                )
                 rows.append({**base, "phase": "normal", **normal})
     return rows
 
@@ -82,7 +92,11 @@ def _load_stage_scores(output_root: str, rebalance: str) -> dict[str, dict[str, 
     results: dict[str, dict[str, list[float]]] = {}
 
     for prov_dir in sorted(rebal_dir.iterdir()):
-        if not prov_dir.is_dir() or prov_dir.name.startswith("_") or prov_dir.name == "comparison_figures":
+        if (
+            not prov_dir.is_dir()
+            or prov_dir.name.startswith("_")
+            or prov_dir.name == "comparison_figures"
+        ):
             continue
         if prov_dir.name == "baseline":
             continue
@@ -90,7 +104,9 @@ def _load_stage_scores(output_root: str, rebalance: str) -> dict[str, dict[str, 
             if not m_dir.is_dir():
                 continue
             model_key = f"{prov_dir.name}/{m_dir.name}"
-            ts = paths.find_best_run(output_root, rebalance, prov_dir.name, m_dir.name, [])
+            ts = paths.find_best_run(
+                output_root, rebalance, prov_dir.name, m_dir.name, []
+            )
             if not ts:
                 continue
             r_dir = paths.run_dir(output_root, rebalance, prov_dir.name, m_dir.name, ts)
@@ -98,7 +114,9 @@ def _load_stage_scores(output_root: str, rebalance: str) -> dict[str, dict[str, 
             stage_accum: dict[str, list[float]] = {}
             for profile_dir in sorted(r_dir.iterdir()):
                 if not profile_dir.is_dir() or profile_dir.name not in (
-                    "conservative", "balanced", "aggressive"
+                    "conservative",
+                    "balanced",
+                    "aggressive",
                 ):
                     continue
                 logs_root = profile_dir / "normal" / "pipeline_logs"
@@ -214,7 +232,7 @@ def _write_figure_index(comp_dir: Path, rebalance: str) -> None:
             lines.append(f"## `{fname}`")
             lines.append("")
             if fname.startswith("stress_drawdown_"):
-                model = fname[len("stress_drawdown_"):-4].replace("_", "/", 1)
+                model = fname[len("stress_drawdown_") : -4].replace("_", "/", 1)
                 lines.append(
                     f"**Stress Drawdown Heatmap — {model}** — Rows = stress scenarios, "
                     "columns = investor profiles. Cell color = magnitude of max drawdown; "
@@ -294,16 +312,20 @@ def analyze_runs(
         ceps_vals = [r.get("mean_ceps", 0.0) for r in normal_rows]
         std_vals = [r.get("std_ceps", 0.0) for r in normal_rows]
         gate_passed = all(r.get("stress_gate_passed", False) for r in normal_rows)
-        ranking_data.append({
-            "model_name": model,
-            "mean_ceps": sum(ceps_vals) / len(ceps_vals) if ceps_vals else 0.0,
-            "std_ceps": sum(std_vals) / len(std_vals) if std_vals else 0.0,
-            "risk_gate_passed": gate_passed,
-        })
+        ranking_data.append(
+            {
+                "model_name": model,
+                "mean_ceps": sum(ceps_vals) / len(ceps_vals) if ceps_vals else 0.0,
+                "std_ceps": sum(std_vals) / len(std_vals) if std_vals else 0.0,
+                "risk_gate_passed": gate_passed,
+            }
+        )
 
     if ranking_data:
         try:
-            fig = plot_risk_ranking(ranking_data, title=f"Risk-First Ranking — {rebalance}")
+            fig = plot_risk_ranking(
+                ranking_data, title=f"Risk-First Ranking — {rebalance}"
+            )
             save_figure(fig, str(fig_dir / "rankings.png"), formats=("png",))
             figures_written.append("rankings.png")
         except Exception as exc:
@@ -327,15 +349,18 @@ def analyze_runs(
             for model, normal_rows in model_normal.items():
                 if model.startswith("baseline/"):
                     continue
-                ceps_totals[model] = (
-                    sum(r.get("mean_ceps", 0.0) for r in normal_rows) / len(normal_rows)
-                )
+                ceps_totals[model] = sum(
+                    r.get("mean_ceps", 0.0) for r in normal_rows
+                ) / len(normal_rows)
             if ceps_totals:
                 stage_scores = _load_stage_scores(output_root, rebalance)
                 # Fill zeros for models without pipeline_logs
                 results_map = {m: stage_scores.get(m, {}) for m in ceps_totals}
-                fig = plot_ceps_heatmap(results_map, ceps_totals=ceps_totals,
-                                        title=f"CEPS Breakdown — {rebalance}")
+                fig = plot_ceps_heatmap(
+                    results_map,
+                    ceps_totals=ceps_totals,
+                    title=f"CEPS Breakdown — {rebalance}",
+                )
                 save_figure(fig, str(fig_dir / "ceps_breakdown.png"), formats=("png",))
                 figures_written.append("ceps_breakdown.png")
         except Exception as exc:
@@ -387,7 +412,8 @@ def analyze_runs(
             "std_ceps": f"{r.get('std_ceps', 0.0):.4f}",
             "stress": "PASS" if r.get("stress_gate_passed") else "FAIL",
         }
-        for r in rows if r.get("phase") == "normal"
+        for r in rows
+        if r.get("phase") == "normal"
     ]
     table_rows.sort(key=lambda r: (r["model"], r["profile"]))
 
@@ -426,5 +452,8 @@ def analyze_runs(
 def analyze_batch(batch_id: str, output_root: str = "EXPERIMENTS", logger=None) -> Path:
     """Deprecated: use analyze_runs(rebalance, output_root) instead."""
     import warnings
-    warnings.warn("analyze_batch is deprecated; use analyze_runs(rebalance)", DeprecationWarning)
+
+    warnings.warn(
+        "analyze_batch is deprecated; use analyze_runs(rebalance)", DeprecationWarning
+    )
     return analyze_runs(rebalance=batch_id, output_root=output_root, logger=logger)

@@ -7,7 +7,11 @@ from .base import (
     MarketSnapshot,
     PipelineStage,
     RiskAlert,
-    S1Output, S2Output, S3Output, S4Output, S5Output,
+    S1Output,
+    S2Output,
+    S3Output,
+    S4Output,
+    S5Output,
     StageID,
     TradeOrder,
 )
@@ -23,13 +27,20 @@ from .stages import (
     S5RiskMonitoring,
 )
 from .stress_scenarios import ScenarioInjector, StressScenario, STRESS_SCENARIOS
-from .investor_profiles import InvestorProfile, PROFILES, ProfileAlignmentScorer, ProfiledPipeline
+from .investor_profiles import (
+    InvestorProfile,
+    PROFILES,
+    ProfileAlignmentScorer,
+    ProfiledPipeline,
+)
 
 
 from .tools import ToolSpec, get_tools, dispatch_tool, BUILTIN_TOOLS
 
 
-def build_default_pipeline(adapter: AgentAdapter = None, use_tools: bool = False, profile=None) -> EvalPipeline:
+def build_default_pipeline(
+    adapter: AgentAdapter = None, use_tools: bool = False, profile=None
+) -> EvalPipeline:
     """
     Construct a default five-stage EvalPipeline with the given adapter.
 
@@ -64,27 +75,52 @@ def build_default_pipeline(adapter: AgentAdapter = None, use_tools: bool = False
 
 __all__ = [
     # Base
-    "StageID", "MarketSnapshot",
-    "S1Output", "S2Output", "S3Output", "S4Output", "S5Output",
-    "TradeOrder", "RiskAlert",
-    "PipelineStage", "AgentAdapter",
-    "EpisodeResult", "EvalPipeline",
+    "StageID",
+    "MarketSnapshot",
+    "S1Output",
+    "S2Output",
+    "S3Output",
+    "S4Output",
+    "S5Output",
+    "TradeOrder",
+    "RiskAlert",
+    "PipelineStage",
+    "AgentAdapter",
+    "EpisodeResult",
+    "EvalPipeline",
     # Cloud adapters
     "MockAgentAdapter",
-    "AnthropicAdapter", "OpenAIAdapter", "LiteLLMAdapter",
+    "AnthropicAdapter",
+    "OpenAIAdapter",
+    "LiteLLMAdapter",
     # Local adapters
-    "VLLMAdapter", "OllamaAdapter", "HuggingFaceAdapter",
+    "VLLMAdapter",
+    "OllamaAdapter",
+    "HuggingFaceAdapter",
     # Stages
-    "S1MarketInterpretation", "S2SignalGeneration", "S3WeightOptimization",
-    "S4ExecutionSimulation", "S5RiskMonitoring",
+    "S1MarketInterpretation",
+    "S2SignalGeneration",
+    "S3WeightOptimization",
+    "S4ExecutionSimulation",
+    "S5RiskMonitoring",
     # Stress testing
-    "StressScenario", "ScenarioInjector", "STRESS_SCENARIOS",
+    "StressScenario",
+    "ScenarioInjector",
+    "STRESS_SCENARIOS",
     # Investor profiles
-    "InvestorProfile", "PROFILES", "ProfileAlignmentScorer", "ProfiledPipeline",
+    "InvestorProfile",
+    "PROFILES",
+    "ProfileAlignmentScorer",
+    "ProfiledPipeline",
     # Logging
-    "EvalLogger", "EpisodeLog", "StageLog",
+    "EvalLogger",
+    "EpisodeLog",
+    "StageLog",
     # Tools
-    "ToolSpec", "get_tools", "dispatch_tool", "BUILTIN_TOOLS",
+    "ToolSpec",
+    "get_tools",
+    "dispatch_tool",
+    "BUILTIN_TOOLS",
     # Factory
     "build_default_pipeline",
 ]

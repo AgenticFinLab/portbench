@@ -50,6 +50,7 @@ class GenerationConfig:
     temperature: float = 0.0
     max_tokens: int = 4096
 
+
 import yaml
 
 
@@ -130,7 +131,9 @@ class ExperimentConfig:
     run_qa: bool = False  # run QA dataset evaluation alongside sandbox
     qa: QAConfig = field(default_factory=QAConfig)
     generation: GenerationConfig = field(default_factory=GenerationConfig)
-    sigma_ablation_values: list = field(default_factory=lambda: [0.0, 0.25, 0.5, 0.75, 1.0])
+    sigma_ablation_values: list = field(
+        default_factory=lambda: [0.0, 0.25, 0.5, 0.75, 1.0]
+    )
 
     @staticmethod
     def from_yaml(path: str | Path) -> "ExperimentConfig":
@@ -165,7 +168,9 @@ class ExperimentConfig:
         )
 
         batch_id_raw = raw.get("batch_id") or ""
-        batch_id = _expand_batch_id(batch_id_raw, models, raw.get("rebalance", "monthly"))
+        batch_id = _expand_batch_id(
+            batch_id_raw, models, raw.get("rebalance", "monthly")
+        )
 
         return ExperimentConfig(
             batch_id=batch_id,
@@ -195,7 +200,9 @@ class ExperimentConfig:
             run_qa=bool(raw.get("run_qa", False)),
             qa=_parse_qa_config(raw.get("qa") or {}),
             generation=gen_obj,
-            sigma_ablation_values=list(raw.get("sigma_ablation_values", [0.0, 0.25, 0.5, 0.75, 1.0])),
+            sigma_ablation_values=list(
+                raw.get("sigma_ablation_values", [0.0, 0.25, 0.5, 0.75, 1.0])
+            ),
         )
 
     def resolved_stress_scenarios(self) -> list[str]:
@@ -219,7 +226,9 @@ def _to_date(value) -> date:
     raise ValueError(f"Cannot parse date: {value!r}")
 
 
-def _expand_batch_id(template: str, models: list[ModelSpec], rebalance: str = "monthly") -> str:
+def _expand_batch_id(
+    template: str, models: list[ModelSpec], rebalance: str = "monthly"
+) -> str:
     """
     Expand batch_id template variables:
       {models}    — abbreviated model labels joined by "_" (max 3 models shown)
@@ -262,8 +271,7 @@ def _expand_batch_id(template: str, models: list[ModelSpec], rebalance: str = "m
     models_str = models_str.replace("/", "-").replace(":", "-").replace(" ", "-")
 
     return (
-        template
-        .replace("{models}", models_str)
+        template.replace("{models}", models_str)
         .replace("{rebalance}", rebalance)
         .replace("{date}", now.strftime("%Y%m%d"))
         .replace("{time}", now.strftime("%H%M%S"))
@@ -274,7 +282,9 @@ def _parse_qa_config(raw: dict) -> QAConfig:
     return QAConfig(
         dataset_path=raw.get("dataset_path", "datasets/qa/qa_dataset.jsonl"),
         split=raw.get("split", "test"),
-        templates=list(raw.get("templates", ["T1", "T2", "T3", "T4", "T5", "T6", "T7"])),
+        templates=list(
+            raw.get("templates", ["T1", "T2", "T3", "T4", "T5", "T6", "T7"])
+        ),
         max_pairs_per_template=int(raw.get("max_pairs_per_template", 50)),
         parallel_questions=int(raw.get("parallel_questions", 4)),
         save_responses=bool(raw.get("save_responses", True)),

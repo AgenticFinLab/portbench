@@ -132,7 +132,11 @@ class MarketSnapshot:
             ac = self.asset_class_map.get(a)
             if ac:
                 groups.setdefault(ac, []).append(a)
-        return {ac: cm.loc[members, members] for ac, members in groups.items() if len(members) >= 2}
+        return {
+            ac: cm.loc[members, members]
+            for ac, members in groups.items()
+            if len(members) >= 2
+        }
 
     def get_inter_class_correlation(self) -> pd.DataFrame:
         """
@@ -442,7 +446,9 @@ class EpisodeResult:
     gt_outputs: dict[StageID, Any] = field(default_factory=dict)
     stage_scores: dict[StageID, float] = field(default_factory=dict)
     errors: dict[StageID, str] = field(default_factory=dict)
-    refused_stages: list[str] = field(default_factory=list)  # stage names that returned a refusal fallback
+    refused_stages: list[str] = field(
+        default_factory=list
+    )  # stage names that returned a refusal fallback
 
     def to_stage_score_list(self):
         """Convert to a list of StageScore objects for CEPS computation."""
@@ -620,7 +626,9 @@ class EvalPipeline:
             except Exception as exc:
                 result.errors[sid] = str(exc)
                 if self._logger is not None:
-                    duration_ms = (datetime.now() - episode_start).total_seconds() * 1000
+                    duration_ms = (
+                        datetime.now() - episode_start
+                    ).total_seconds() * 1000
                     self._logger.log_episode(
                         result=result,
                         prompts=prompts,
@@ -629,9 +637,7 @@ class EvalPipeline:
                         ceps_score=0.0,
                         duration_ms=duration_ms,
                     )
-                raise RuntimeError(
-                    f"Pipeline stage {sid} failed: {exc}"
-                ) from exc
+                raise RuntimeError(f"Pipeline stage {sid} failed: {exc}") from exc
 
         # Write episode log if logging is enabled
         if self._logger is not None:

@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import matplotlib
+
 matplotlib.use("Agg")
 import sys
 import threading
@@ -60,9 +61,14 @@ _STRESS_BY_NAME = {s.name: s for s in STRESS_SCENARIOS}
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _build_strategy(
-    spec: ModelSpec, noise: float, seed: int, timeout: float = 120.0,
-    temperature: float = 0.0, max_tokens: int = 4096,
+    spec: ModelSpec,
+    noise: float,
+    seed: int,
+    timeout: float = 120.0,
+    temperature: float = 0.0,
+    max_tokens: int = 4096,
 ) -> AgentAdapter:
     kind = spec.kind()
     if kind == "baseline":
@@ -70,9 +76,12 @@ def _build_strategy(
     if kind == "mock":
         return build_mock(noise=noise, seed=seed)
     effective_temp = spec.temperature if spec.temperature is not None else temperature
-    effective_max_tokens = spec.max_tokens if spec.max_tokens is not None else max_tokens
+    effective_max_tokens = (
+        spec.max_tokens if spec.max_tokens is not None else max_tokens
+    )
     return build_adapter(
-        spec.provider, spec.model,  # type: ignore[arg-type]
+        spec.provider,
+        spec.model,  # type: ignore[arg-type]
         timeout=timeout,
         temperature=effective_temp,
         max_tokens=effective_max_tokens,
@@ -84,6 +93,7 @@ def _resolve_model_name(spec: ModelSpec) -> str:
     if spec.baseline or spec.mock:
         return spec_model_name(spec)
     from .providers import PROVIDER_REGISTRY, _env
+
     model = spec.model
     if not model:
         prov_spec = PROVIDER_REGISTRY[spec.provider.lower()]
@@ -105,7 +115,14 @@ def _build_provider(cfg: ExperimentConfig):
 
 
 def _build_asset_class_map(provider) -> dict[str, str]:
-    classes = ["equities", "bonds", "commodities", "real_estate", "cryptocurrency", "cash"]
+    classes = [
+        "equities",
+        "bonds",
+        "commodities",
+        "real_estate",
+        "cryptocurrency",
+        "cash",
+    ]
     out: dict[str, str] = {}
     for cls in classes:
         try:
@@ -134,6 +151,7 @@ def _make_logger(name: str, log_path: Path) -> logging.Logger:
 # ---------------------------------------------------------------------------
 # Per-scenario and per-profile runners
 # ---------------------------------------------------------------------------
+
 
 def _is_profile_complete(p_dir: Path, cfg: "ExperimentConfig") -> bool:
     """
@@ -177,7 +195,17 @@ def _run_one_scenario(
             data = json.loads(cached_result_path.read_text(encoding="utf-8"))
             result = _BR.from_dict(data)
             passed = bool(data.get("stress_passed", False))
-            dd_score = float(data.get("dd_score", max(0.0, 1.0 - abs(result.max_drawdown) / max(profile_obj.max_drawdown_tolerance, 1e-6))))
+            dd_score = float(
+                data.get(
+                    "dd_score",
+                    max(
+                        0.0,
+                        1.0
+                        - abs(result.max_drawdown)
+                        / max(profile_obj.max_drawdown_tolerance, 1e-6),
+                    ),
+                )
+            )
             ceps_tier = data.get("ceps_tier", "D")
             return result, passed, dd_score, ceps_tier
         except Exception:
@@ -217,7 +245,9 @@ def _run_one_scenario(
     result = engine.run()
     passed = abs(result.max_drawdown) <= profile_obj.max_drawdown_tolerance
     # Direction A: continuous drawdown score ∈ [0, 1]
-    dd_score = max(0.0, 1.0 - abs(result.max_drawdown) / profile_obj.max_drawdown_tolerance)
+    dd_score = max(
+        0.0, 1.0 - abs(result.max_drawdown) / profile_obj.max_drawdown_tolerance
+    )
     # Direction B: CEPS tier label based on scenario tier thresholds
     mean_ceps = result.mean_ceps
     ceps_tier = "D"
@@ -225,7 +255,11 @@ def _run_one_scenario(
         if mean_ceps >= threshold:
             ceps_tier = tier
     result.stress_passed = passed
-    paths.save_backtest_result(result, out_dir, extra_fields={"dd_score": round(dd_score, 4), "ceps_tier": ceps_tier})
+    paths.save_backtest_result(
+        result,
+        out_dir,
+        extra_fields={"dd_score": round(dd_score, 4), "ceps_tier": ceps_tier},
+    )
     return result, passed, dd_score, ceps_tier
 
 
@@ -314,7 +348,12 @@ def _run_profile(
         futs = {
             ex.submit(
                 _run_one_scenario,
-                cfg, spec, adapter, provider, asset_class_map, profile_obj,
+                cfg,
+                spec,
+                adapter,
+                provider,
+                asset_class_map,
+                profile_obj,
                 sc_name,
                 p_dir / f"stress_{sc_name}",
             ): sc_name
@@ -330,31 +369,41 @@ def _run_profile(
         status = "PASSED" if passed else "FAILED"
         logger.info(
             "  %s: %s drawdown=%.2f%% tol=%.0f%% dd_score=%.3f ceps_tier=%s",
-            sc_name, status,
+            sc_name,
+            status,
             result.max_drawdown * 100,
             profile_obj.max_drawdown_tolerance * 100,
-            dd_score, ceps_tier,
+            dd_score,
+            ceps_tier,
         )
-        stress_summaries.append({
-            "scenario": sc_name,
-            "passed": passed,
-            "max_drawdown": round(result.max_drawdown, 4),
-            "tolerance": profile_obj.max_drawdown_tolerance,
-            "total_return": round(result.total_return, 4),
-            "dd_score": round(dd_score, 4),
-            "ceps_tier": ceps_tier,
-        })
+        stress_summaries.append(
+            {
+                "scenario": sc_name,
+                "passed": passed,
+                "max_drawdown": round(result.max_drawdown, 4),
+                "tolerance": profile_obj.max_drawdown_tolerance,
+                "total_return": round(result.total_return, 4),
+                "dd_score": round(dd_score, 4),
+                "ceps_tier": ceps_tier,
+            }
+        )
         all_passed = all_passed and passed
 
     normal_dict = None
     if cfg.run_normal:
         logger.info(
             "Phase B: normal backtest %s → %s (stress_gate=%s)",
-            cfg.normal_period.start, cfg.normal_period.end,
+            cfg.normal_period.start,
+            cfg.normal_period.end,
             "PASSED" if all_passed else "FAILED",
         )
         normal_result = _run_normal(
-            cfg, spec, adapter, provider, asset_class_map, profile_obj,
+            cfg,
+            spec,
+            adapter,
+            provider,
+            asset_class_map,
+            profile_obj,
             p_dir / "normal",
         )
         normal_dict = normal_result.to_dict()
@@ -370,7 +419,9 @@ def _run_profile(
 
     if cfg.logging.save_figures:
         try:
-            render_experiment_figures(p_dir, model_label or profile_name, profile_name, logger=logger)
+            render_experiment_figures(
+                p_dir, model_label or profile_name, profile_name, logger=logger
+            )
         except Exception as exc:
             logger.warning("figure rendering failed: %s", exc)
 
@@ -384,6 +435,7 @@ def _run_profile(
 # ---------------------------------------------------------------------------
 # Per-model runner (all profiles for one model, one timestamp)
 # ---------------------------------------------------------------------------
+
 
 def _run_one_model(
     cfg: ExperimentConfig,
@@ -405,7 +457,9 @@ def _run_one_model(
 
     Returns {profile_name: summary_dict} for ALL profiles (old + new).
     """
-    r_dir = paths.run_dir(cfg.output_root, cfg.rebalance, prov_name, model_name, timestamp)
+    r_dir = paths.run_dir(
+        cfg.output_root, cfg.rebalance, prov_name, model_name, timestamp
+    )
     r_dir.mkdir(parents=True, exist_ok=True)
 
     logger = _make_logger(
@@ -419,8 +473,9 @@ def _run_one_model(
     # data on disk. Profiles missing any backtest_result.json are demoted back to
     # pending so the scenario-level cache handles skipping what already ran.
     if already_done_set:
-        incomplete = {p for p in already_done_set
-                      if not _is_profile_complete(r_dir / p, cfg)}
+        incomplete = {
+            p for p in already_done_set if not _is_profile_complete(r_dir / p, cfg)
+        }
         if incomplete:
             logger.info(
                 "Profiles in checkpoint but missing scenario data — re-running: %s",
@@ -433,10 +488,17 @@ def _run_one_model(
     if already_done_set:
         logger.info(
             "Resuming run ts=%s — skipping %d already-complete profile(s): %s",
-            timestamp, len(already_done_set), ", ".join(sorted(already_done_set)),
+            timestamp,
+            len(already_done_set),
+            ", ".join(sorted(already_done_set)),
         )
     else:
-        logger.info("Model run started: provider=%s model=%s ts=%s", prov_name, model_name, timestamp)
+        logger.info(
+            "Model run started: provider=%s model=%s ts=%s",
+            prov_name,
+            model_name,
+            timestamp,
+        )
 
     # Pre-load results for already-completed profiles from existing run_summary.json
     profile_results: dict[str, dict] = {}
@@ -450,8 +512,12 @@ def _run_one_model(
                 pass  # summary missing or corrupt — completed profiles have no in-memory results
 
     adapter = _build_strategy(
-        spec, noise=cfg.noise, seed=cfg.seed, timeout=cfg.timeout,
-        temperature=cfg.generation.temperature, max_tokens=cfg.generation.max_tokens,
+        spec,
+        noise=cfg.noise,
+        seed=cfg.seed,
+        timeout=cfg.timeout,
+        temperature=cfg.generation.temperature,
+        max_tokens=cfg.generation.max_tokens,
     )
 
     errors_path = r_dir / "errors.jsonl"
@@ -465,8 +531,14 @@ def _run_one_model(
 
         try:
             summary = _run_profile(
-                cfg, spec, adapter, provider, asset_class_map,
-                profile_name, p_dir, p_logger,
+                cfg,
+                spec,
+                adapter,
+                provider,
+                asset_class_map,
+                profile_name,
+                p_dir,
+                p_logger,
                 model_label=f"{prov_name}/{model_name}",
             )
             profile_results[profile_name] = summary
@@ -474,22 +546,27 @@ def _run_one_model(
 
             # Update checkpoint after each completed profile
             (r_dir / "checkpoint.json").write_text(
-                json.dumps({"completed": completed, "updated_at": datetime.now().isoformat()},
-                           indent=2),
+                json.dumps(
+                    {"completed": completed, "updated_at": datetime.now().isoformat()},
+                    indent=2,
+                ),
                 encoding="utf-8",
             )
         except Exception as exc:
             tb = traceback.format_exc()
             p_logger.error("Profile failed: %s", exc)
             with errors_lock:
-                paths.append_jsonl(errors_path, {
-                    "timestamp": datetime.now().isoformat(),
-                    "provider": prov_name,
-                    "model": model_name,
-                    "profile": profile_name,
-                    "error": str(exc),
-                    "traceback": tb,
-                })
+                paths.append_jsonl(
+                    errors_path,
+                    {
+                        "timestamp": datetime.now().isoformat(),
+                        "provider": prov_name,
+                        "model": model_name,
+                        "profile": profile_name,
+                        "error": str(exc),
+                        "traceback": tb,
+                    },
+                )
             paths.write_error(p_dir, {"error": str(exc), "traceback": tb})
             if cfg.on_error == "fail_fast":
                 raise
@@ -500,6 +577,7 @@ def _run_one_model(
 # ---------------------------------------------------------------------------
 # Summary writers
 # ---------------------------------------------------------------------------
+
 
 def _write_run_summary(
     r_dir: Path,
@@ -529,6 +607,7 @@ def _write_run_summary(
 # BatchRunner
 # ---------------------------------------------------------------------------
 
+
 class BatchRunner:
     def __init__(self, cfg: ExperimentConfig, raw_yaml: Optional[str] = None):
         self.cfg = cfg
@@ -543,9 +622,23 @@ class BatchRunner:
             model = _resolve_model_name(spec)
             for profile in self.cfg.profiles:
                 for sc in scenarios:
-                    out.append({"provider": prov, "model": model, "profile": profile, "scenario": sc})
+                    out.append(
+                        {
+                            "provider": prov,
+                            "model": model,
+                            "profile": profile,
+                            "scenario": sc,
+                        }
+                    )
                 if self.cfg.run_normal:
-                    out.append({"provider": prov, "model": model, "profile": profile, "scenario": "normal"})
+                    out.append(
+                        {
+                            "provider": prov,
+                            "model": model,
+                            "profile": profile,
+                            "scenario": "normal",
+                        }
+                    )
         return out
 
     def run(self) -> dict:
@@ -569,7 +662,9 @@ class BatchRunner:
         asset_class_map = _build_asset_class_map(data_provider)
 
         # Resolve (provider, model_name) for every spec
-        model_specs: list[tuple[ModelSpec, str, str]] = []  # (spec, prov_name, model_name)
+        model_specs: list[tuple[ModelSpec, str, str]] = (
+            []
+        )  # (spec, prov_name, model_name)
         for spec in cfg.models:
             prov_name = spec_provider_name(spec)
             model_name = _resolve_model_name(spec)
@@ -587,11 +682,14 @@ class BatchRunner:
                     cfg.output_root, cfg.rebalance, prov_name, model_name, cfg.profiles
                 )
                 if ts:
-                    r_dir = paths.run_dir(cfg.output_root, cfg.rebalance, prov_name, model_name, ts)
+                    r_dir = paths.run_dir(
+                        cfg.output_root, cfg.rebalance, prov_name, model_name, ts
+                    )
                     done = paths.get_completed_profiles(r_dir, cfg.profiles)
                     # Verify scenario data exists; demote incomplete profiles
-                    truly_done = [p for p in done
-                                  if _is_profile_complete(r_dir / p, cfg)]
+                    truly_done = [
+                        p for p in done if _is_profile_complete(r_dir / p, cfg)
+                    ]
                     if set(truly_done) >= set(cfg.profiles):
                         # All profiles complete — fully reuse this run
                         print(
@@ -635,29 +733,45 @@ class BatchRunner:
         def _task(spec, prov_name, model_name, timestamp, already_done):
             nonlocal n_done, n_failed
             t0 = time.time()
-            r_dir = paths.run_dir(cfg.output_root, cfg.rebalance, prov_name, model_name, timestamp)
+            r_dir = paths.run_dir(
+                cfg.output_root, cfg.rebalance, prov_name, model_name, timestamp
+            )
             try:
                 profile_results = _run_one_model(
-                    cfg, spec, data_provider, asset_class_map,
-                    prov_name, model_name, timestamp, errors_lock,
+                    cfg,
+                    spec,
+                    data_provider,
+                    asset_class_map,
+                    prov_name,
+                    model_name,
+                    timestamp,
+                    errors_lock,
                     already_done=already_done,
                 )
                 _write_run_summary(
-                    r_dir, prov_name, model_name, timestamp, cfg.rebalance,
-                    profile_results, time.time() - t0,
+                    r_dir,
+                    prov_name,
+                    model_name,
+                    timestamp,
+                    cfg.rebalance,
+                    profile_results,
+                    time.time() - t0,
                 )
                 run_timestamps[(prov_name, model_name)] = timestamp
                 n_done += 1
             except Exception as exc:
                 tb = traceback.format_exc()
                 with errors_lock:
-                    paths.append_jsonl(r_dir / "errors.jsonl", {
-                        "timestamp": datetime.now().isoformat(),
-                        "provider": prov_name,
-                        "model": model_name,
-                        "error": str(exc),
-                        "traceback": tb,
-                    })
+                    paths.append_jsonl(
+                        r_dir / "errors.jsonl",
+                        {
+                            "timestamp": datetime.now().isoformat(),
+                            "provider": prov_name,
+                            "model": model_name,
+                            "error": str(exc),
+                            "traceback": tb,
+                        },
+                    )
                 n_failed += 1
                 if cfg.on_error == "fail_fast":
                     raise
@@ -684,20 +798,29 @@ class BatchRunner:
         # ── Save env metadata ───────────────────────────────────────────────
         import subprocess
         import sys as _sys
+
         try:
-            git_hash = subprocess.run(
-                ["git", "rev-parse", "--short", "HEAD"],
-                capture_output=True, text=True, timeout=5,
-            ).stdout.strip() or "unknown"
+            git_hash = (
+                subprocess.run(
+                    ["git", "rev-parse", "--short", "HEAD"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                ).stdout.strip()
+                or "unknown"
+            )
         except Exception:
             git_hash = "unknown"
         (rebal_dir / "_env_meta.json").write_text(
-            json.dumps({
-                "rebalance": cfg.rebalance,
-                "git_hash": git_hash,
-                "python": _sys.version,
-                "updated_at": datetime.now().isoformat(),
-            }, indent=2),
+            json.dumps(
+                {
+                    "rebalance": cfg.rebalance,
+                    "git_hash": git_hash,
+                    "python": _sys.version,
+                    "updated_at": datetime.now().isoformat(),
+                },
+                indent=2,
+            ),
             encoding="utf-8",
         )
 
@@ -712,13 +835,16 @@ class BatchRunner:
                     output_root=cfg.output_root,
                     rebalance=cfg.rebalance,
                 )
-                print(f"[figures] comparison figures → {rebal_dir / 'comparison_figures'}")
+                print(
+                    f"[figures] comparison figures → {rebal_dir / 'comparison_figures'}"
+                )
             except Exception as exc:
                 print(f"[figures] batch comparison failed: {exc}")
 
         # ── QA evaluation ───────────────────────────────────────────────────
         if cfg.run_qa:
             from ..qa_eval.evaluator import QAEvaluator
+
             try:
                 qa_eval = QAEvaluator(cfg)
                 qa_summary = qa_eval.run()

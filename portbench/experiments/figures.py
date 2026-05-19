@@ -115,7 +115,6 @@ def render_experiment_figures(
         save_figure(fig, str(fig_dir / "stress_drawdown.png"), formats=("png",))
         log("figure: stress_drawdown.png")
 
-
     # 4. Cross-asset correlation evolution (one figure per phase that has snapshots)
     for phase_dir in [profile_dir / "normal"] + sorted(
         c for c in profile_dir.iterdir() if c.is_dir() and c.name.startswith("stress_")
@@ -161,7 +160,9 @@ def render_dataset_correlation_figures(
 
     if amap:
         fig = plot_inter_class_correlation(corr, amap)
-        save_figure(fig, str(output_dir / "inter_class_correlation.png"), formats=("png",))
+        save_figure(
+            fig, str(output_dir / "inter_class_correlation.png"), formats=("png",)
+        )
         log("figure: inter_class_correlation.png")
 
 
@@ -216,13 +217,19 @@ def render_batch_comparison_figures(
     # If no timestamps provided, auto-discover by scanning rebal_dir
     if not run_timestamps:
         for prov_dir in sorted(rebal_dir.iterdir()):
-            if not prov_dir.is_dir() or prov_dir.name.startswith("_") or prov_dir.name == "comparison_figures":
+            if (
+                not prov_dir.is_dir()
+                or prov_dir.name.startswith("_")
+                or prov_dir.name == "comparison_figures"
+            ):
                 continue
             for m_dir in sorted(prov_dir.iterdir()):
                 if not m_dir.is_dir():
                     continue
                 key = f"{prov_dir.name}/{m_dir.name}"
-                ts = _paths.find_best_run(output_root, rebalance, prov_dir.name, m_dir.name, [])
+                ts = _paths.find_best_run(
+                    output_root, rebalance, prov_dir.name, m_dir.name, []
+                )
                 if ts:
                     run_timestamps[key] = ts
 
@@ -237,14 +244,21 @@ def render_batch_comparison_figures(
         r_dir = _paths.run_dir(output_root, rebalance, prov_name, model_name, timestamp)
         profiles_data: dict[str, dict] = {}
         for profile_dir_path in sorted(r_dir.iterdir()):
-            if not profile_dir_path.is_dir() or not (profile_dir_path / "experiment.log").exists():
+            if (
+                not profile_dir_path.is_dir()
+                or not (profile_dir_path / "experiment.log").exists()
+            ):
                 continue
             profile_name = profile_dir_path.name
             nav = _load_normal_nav(profile_dir_path)
             normal = _load_normal_result(profile_dir_path)
             stress = _load_stress_results(profile_dir_path)
             if nav is not None or normal is not None or stress:
-                profiles_data[profile_name] = {"nav": nav, "normal": normal, "stress": stress}
+                profiles_data[profile_name] = {
+                    "nav": nav,
+                    "normal": normal,
+                    "stress": stress,
+                }
         if profiles_data:
             model_data[model_key] = profiles_data
 
@@ -271,7 +285,9 @@ def render_batch_comparison_figures(
                 nav_map,
                 title=f"NAV Comparison — {profile.capitalize()} Profile",
             )
-            save_figure(fig, str(out_dir / f"nav_comparison_{profile}.png"), formats=("png",))
+            save_figure(
+                fig, str(out_dir / f"nav_comparison_{profile}.png"), formats=("png",)
+            )
             log(f"figure: nav_comparison_{profile}.png")
 
     # Fig B: Metrics comparison per profile  (LLM models only — baselines have CEPS=0)
@@ -286,14 +302,24 @@ def render_batch_comparison_figures(
         if metrics_map:
             fig = plot_sandbox_metrics(
                 metrics_map,
-                metric_keys=["total_return", "sharpe_ratio", "max_drawdown", "mean_ceps"],
+                metric_keys=[
+                    "total_return",
+                    "sharpe_ratio",
+                    "max_drawdown",
+                    "mean_ceps",
+                ],
                 title=f"Performance Comparison — {profile.capitalize()} Profile",
             )
-            save_figure(fig, str(out_dir / f"metrics_comparison_{profile}.png"), formats=("png",))
+            save_figure(
+                fig,
+                str(out_dir / f"metrics_comparison_{profile}.png"),
+                formats=("png",),
+            )
             log(f"figure: metrics_comparison_{profile}.png")
 
     # Fig C: Stress drawdown heatmap per model
     from ..agent_eval.investor_profiles import PROFILES
+
     for mlabel, profiles in model_data.items():
         stress_data: dict[str, dict] = {}
         for profile_name, entry in profiles.items():
@@ -315,7 +341,9 @@ def render_batch_comparison_figures(
                 stress_data,
                 title=f"Stress Drawdown — {mlabel}",
             )
-            save_figure(fig, str(out_dir / f"stress_drawdown_{safe_name}.png"), formats=("png",))
+            save_figure(
+                fig, str(out_dir / f"stress_drawdown_{safe_name}.png"), formats=("png",)
+            )
             log(f"figure: stress_drawdown_{safe_name}.png")
 
     # Fig D: Stress continuous score heatmap (dd_score + CEPS tier) — cross-model
@@ -344,7 +372,9 @@ def render_batch_comparison_figures(
                 continuous_data,
                 title="Stress Score — Drawdown Continuous (color) + CEPS Tier (text)",
             )
-            save_figure(fig, str(out_dir / "stress_continuous_heatmap.png"), formats=("png",))
+            save_figure(
+                fig, str(out_dir / "stress_continuous_heatmap.png"), formats=("png",)
+            )
             log("figure: stress_continuous_heatmap.png")
         except Exception as exc:
             log(f"stress_continuous_heatmap skipped: {exc}")

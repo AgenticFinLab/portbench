@@ -90,8 +90,7 @@ _NEWS_REPLACEMENTS: list[tuple[str, str]] = [
 ]
 
 _NEWS_PATTERNS = [
-    (re.compile(pat, re.IGNORECASE), repl)
-    for pat, repl in _NEWS_REPLACEMENTS
+    (re.compile(pat, re.IGNORECASE), repl) for pat, repl in _NEWS_REPLACEMENTS
 ]
 
 
