@@ -149,6 +149,8 @@ LLM prompt receives signals and must output a weight allocation with sum=1, all 
 
 `sigma` is a constructor parameter (default 0.5): σ=1 evaluates pure return optimality, σ=0 evaluates pure risk diversification, σ=0.5 provides balanced return–risk evaluation.
 
+**σ ablation**: Run `python -m portbench.experiments --sigma-ablation` to rescore all models for σ ∈ {0.0, 0.25, 0.5, 0.75, 1.0} from existing pipeline logs (no LLM re-calls). Results are written to `EXPERIMENTS/{rebalance}/sigma_ablation/results.json` and `sigma_ablation.png` (3-panel line chart, one per investor profile). This identifies whether model rankings are σ-sensitive — a model that ranks #1 at σ=1 but last at σ=0 pursues returns without diversification.
+
 ### S4 — Execution Simulation (`S4ExecutionSimulation`)
 
 **Deterministic** — no LLM call. Simulates execution costs:
@@ -163,6 +165,8 @@ LLM prompt receives signals and must output a weight allocation with sum=1, all 
 - Maximum drawdown from peak
 - Weight drift vs equal-weight target
 - Triggers alerts and `rebalance_needed` flag when limits are breached
+
+**Profile-aware thresholds**: When constructed with an `InvestorProfile`, S5 uses the profile's own `var_limit` and `max_drawdown_tolerance` as alert thresholds instead of the class-level conservative defaults (VAR=−2%, DD=−10%). This ensures S5 scoring reflects each investor's actual risk tolerance rather than a uniform conservative standard. The `build_default_pipeline(adapter, profile=profile)` factory handles this automatically.
 
 **Scoring**: 50% correct `rebalance_needed` decision + 50% VaR/drawdown accuracy.
 

@@ -128,7 +128,7 @@ MarketSnapshot (price/return data, macro context, news_text, correlation_matrix)
 | S2    | LLM           | `view > 0.2 → buy`, `< -0.2 → sell`, else hold | Fraction of assets with correct signal direction |
 | S3    | LLM           | **max-Sharpe weights** over buy-signal assets (computed from realized future returns; never shown to LLM) | **σ × weight accuracy + (1−σ) × correlation awareness** (default σ=0.5). Correlation awareness = 50% intra-class concentration penalty + 50% inter-class hedging credit when `asset_class_map` is available; variance-ratio fallback otherwise. σ is configurable: σ=1 → pure return optimality, σ=0 → pure risk diversification. |
 | S4    | Deterministic | Execute S3 GT weights at zero slippage | Weight MAE vs GT executed weights                |
-| S5    | Deterministic | Risk metrics from S4 GT weights | 50% rebalance decision + 50% VaR/drawdown accuracy |
+| S5    | Deterministic | Risk metrics from S4 GT weights | 50% rebalance decision + 50% VaR/drawdown accuracy; thresholds adapt to investor profile (`var_limit`, `max_drawdown_tolerance`) |
 
 Three stages call the LLM (S1, S2, S3) per rebalance; S4 and S5 are deterministic numerical layers.
 
@@ -151,9 +151,9 @@ Each model is evaluated across **three investor profiles**, each with its own pa
 
 | Profile | `max_drawdown_tolerance` | `max_equity_weight` | `var_limit` |
 |---------|--------------------------|---------------------|-------------|
-| Conservative | 10% | 40% | 5% |
-| Balanced | 20% | 65% | 10% |
-| Aggressive | 35% | 90% | 20% |
+| Conservative | 10% | 40% | −0.01 (1%) |
+| Balanced | 20% | 65% | −0.02 (2%) |
+| Aggressive | 35% | 90% | −0.04 (4%) |
 
 For each profile, evaluation runs in two phases:
 
@@ -267,6 +267,7 @@ Built-in providers: `dashscope`, `tencent`, `deepseek`, `glm`, `kimi`, `minimax`
 python -m portbench.experiments --config configs/experiments/default.yaml --dry-run
 python -m portbench.experiments --config configs/experiments/default.yaml
 python -m portbench.experiments --rescore --rebalance monthly --config configs/experiments/default.yaml  # recompute CEPS + regenerate all figures + report
+python -m portbench.experiments --sigma-ablation --rebalance monthly --config configs/experiments/default.yaml  # σ ablation across [0.0, 0.25, 0.5, 0.75, 1.0]
 ```
 
 Output layout — results are keyed by `(rebalance, provider, model, timestamp)` and reusable across batches:
