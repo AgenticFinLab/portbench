@@ -70,7 +70,16 @@ def _recover_truncated_json(text: str) -> Optional[dict]:
             if "}" in sub[: pm.start()]:
                 break
             k = pm.group(1)
-            v: Any = pm.group(2) if pm.group(2) is not None else float(pm.group(3))
+            if pm.group(2) is not None:
+                # String value: accept only if it looks like a clean numeric string.
+                # Discard garbled values like ': 0.0,\n    ' (JSON corruption artifacts).
+                s_val = pm.group(2).strip()
+                try:
+                    v: Any = float(s_val)
+                except ValueError:
+                    continue  # skip corrupted entry
+            else:
+                v = float(pm.group(3))
             pairs[k] = v
         if pairs:
             result[field] = pairs
@@ -92,6 +101,9 @@ def _extract_json(text: str) -> dict:
     text = re.sub(r"```(?:json)?\s*", "", text).strip().rstrip("`").strip()
     if not text:
         raise ValueError("Empty model response")
+    # Remove invalid JSON control characters (U+0000–U+001F excluding \t \n \r)
+    # Models occasionally embed stray control chars in long JSON responses.
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
 
     # Case A: text begins with `{` — find the FIRST balanced object
     if text.lstrip().startswith("{"):
@@ -119,14 +131,19 @@ def _extract_json(text: str) -> dict:
             elif ch == "}":
                 depth -= 1
                 if depth == 0 and start is not None:
-                    return json.loads(s[start : i + 1])
+                    try:
+                        return json.loads(s[start : i + 1])
+                    except json.JSONDecodeError:
+                        break  # fall through to greedy regex then recovery
         # Fall through to greedy regex
         match = re.search(r"\{.*\}", s, re.DOTALL)
         if match:
-            return json.loads(match.group())
-        # Case A-recovery: JSON was truncated (e.g. hit max_tokens).
-        # Extract whatever complete sub-dicts are present so downstream stages
-        # can fill in defaults for the missing keys rather than failing entirely.
+            try:
+                return json.loads(match.group())
+            except json.JSONDecodeError:
+                pass  # fall through to recovery
+        # Case A-recovery: JSON was truncated or structurally corrupt.
+        # Extracts whatever complete sub-dicts or key-value pairs are present.
         recovered = _recover_truncated_json(s)
         if recovered:
             return recovered
@@ -513,11 +530,23 @@ class S1MarketInterpretation(PipelineStage):
             )
         try:
             views_src = parsed.get("asset_views", parsed)
+
+            def _safe_view(v) -> float:
+                try:
+                    return float(np.clip(float(v), -1.0, 1.0))
+                except (TypeError, ValueError):
+                    return 0.0
+
+            def _safe_float(v, default: float = 0.0, lo: float = 0.0, hi: float = 1.0) -> float:
+                try:
+                    return float(np.clip(float(v), lo, hi))
+                except (TypeError, ValueError):
+                    return default
+
             return S1Output(
-                asset_views={a: float(np.clip(views_src.get(a, 0.0), -1, 1))
-                             for a in assets},
+                asset_views={a: _safe_view(views_src.get(a, 0.0)) for a in assets},
                 detected_regime=str(parsed.get("detected_regime", gt.detected_regime)),
-                confidence=float(np.clip(parsed.get("confidence", 0.5), 0, 1)),
+                confidence=_safe_float(parsed.get("confidence", 0.5), default=0.5),
                 macro_summary=str(parsed.get("macro_summary", "")),
                 raw_llm_output=raw,
             )
@@ -612,13 +641,19 @@ class S2SignalGeneration(PipelineStage):
             )
         try:
             valid_signals = {"buy", "hold", "sell"}
+            raw_signals = parsed.get("signals")
+            if not isinstance(raw_signals, dict):
+                raw_signals = {}
             signals = {
-                a: parsed["signals"].get(a, "hold")
-                if parsed["signals"].get(a, "hold") in valid_signals else "hold"
+                a: (raw_signals.get(a, "hold")
+                    if raw_signals.get(a, "hold") in valid_signals else "hold")
                 for a in assets
             }
+            raw_strengths = parsed.get("strengths")
+            if not isinstance(raw_strengths, dict):
+                raw_strengths = {}
             strengths = {
-                a: float(np.clip(parsed.get("strengths", {}).get(a, 0.5), 0, 1))
+                a: float(np.clip(raw_strengths.get(a, 0.5), 0, 1))
                 for a in assets
             }
             return S2Output(
@@ -702,7 +737,7 @@ class S3WeightOptimization(PipelineStage):
             weights.setdefault(a, 0.0)
         return S3Output(weights=weights)
 
-    def _signals_to_weights(self, s2: S2Output, snapshot: MarketSnapshot) -> S3Output:
+    def _signals_to_weights(self, s2: S2Output) -> S3Output:
         buy_assets = [a for a, sig in s2.signals.items() if sig == "buy"]
         if not buy_assets:
             # All hold/sell: equal weight across all assets
@@ -720,7 +755,7 @@ class S3WeightOptimization(PipelineStage):
         s2 = prior_output if prior_output is not None else S2SignalGeneration(self.adapter).run(snapshot)
         if isinstance(self.adapter, MockAgentAdapter):
             gt = self._signals_to_weights(
-                S2SignalGeneration().compute_ground_truth(snapshot), snapshot
+                S2SignalGeneration().compute_ground_truth(snapshot)
             )
             # Add noise: perturb weights and renormalize
             noisy = {
@@ -759,18 +794,35 @@ class S3WeightOptimization(PipelineStage):
                 refused=True,
             )
         try:
-            raw_weights = {a: float(parsed["weights"].get(a, 0.0)) for a in assets}
-            # Clip negatives and renormalize to enforce constraints
-            raw_weights = {a: max(0.0, w) for a, w in raw_weights.items()}
+            raw_weights_src = parsed.get("weights")
+            if not isinstance(raw_weights_src, dict):
+                raw_weights_src = parsed  # flat dict fallback: {"SPY": 0.5, ...}
+            raw_weights = {}
+            for a in assets:
+                try:
+                    raw_weights[a] = max(0.0, float(raw_weights_src.get(a, 0.0)))
+                except (TypeError, ValueError):
+                    raw_weights[a] = 0.0
             total = sum(raw_weights.values())
             if total <= 0:
-                raise ValueError("All weights are zero or negative")
-            weights = {a: round(w / total, 4) for a, w in raw_weights.items()}
+                # All-zero weights: model chose to hold cash / expressed no conviction.
+                # Fall back to equal-weight so the pipeline can continue.
+                n = len(assets)
+                weights = {a: round(1.0 / n, 4) for a in assets}
+            else:
+                weights = {a: round(w / total, 4) for a, w in raw_weights.items()}
+
+            def _safe_float_s3(v, default=0.0):
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    return default
+
             return S3Output(
                 weights=weights,
-                expected_return=float(parsed.get("expected_return", 0.0)),
-                expected_vol=float(parsed.get("expected_vol", 0.0)),
-                sharpe_estimate=float(parsed.get("sharpe_estimate", 0.0)),
+                expected_return=_safe_float_s3(parsed.get("expected_return", 0.0)),
+                expected_vol=_safe_float_s3(parsed.get("expected_vol", 0.0)),
+                sharpe_estimate=_safe_float_s3(parsed.get("sharpe_estimate", 0.0)),
                 raw_llm_output=raw,
             )
         except (KeyError, ValueError, TypeError) as exc:
