@@ -68,6 +68,8 @@ For each provider key, `build_adapter()` reads three env vars:
 | `{PREFIX}_API_KEY` | Yes | Auth credential. Missing → `RuntimeError`, **no silent fallback**. |
 | `{PREFIX}_BASE_URL` | Optional (anthropic ignores) | OpenAI-compatible endpoint URL. |
 | `{PREFIX}_MODEL` | Optional | Default model when YAML omits `model:`. |
+| `{PREFIX}_TEMPERATURE` | Optional | Decoding temperature. Overridden by YAML `generation.temperature` or per-model `temperature:`. |
+| `{PREFIX}_MAX_TOKENS` | Optional | Max generation tokens. Overridden by YAML `generation.max_tokens` or per-model `max_tokens:`. |
 
 Example `.env` snippet:
 
@@ -124,6 +126,9 @@ models:
   - provider: dashscope                # uses DASHSCOPE_MODEL from .env
   - provider: tencent
     model: hunyuan-pro                 # explicit model override
+  - provider: kimi
+    model: kimi-k2.6
+    temperature: 1.0                   # per-model override (takes priority over generation.temperature)
   - provider: ark
   - baseline: equal_weight             # built-in baseline (no API)
   - mock: true                         # MockAgentAdapter, for harness tests
@@ -134,6 +139,10 @@ run_normal: true
 normal_period:
   start: 2024-01-01
   end: 2024-12-31
+
+generation:
+  temperature: 0.0                     # global default for all LLM models
+  max_tokens: 4096                     # global default; override per model with max_tokens: N
 
 logging:
   save_pipeline_logs: true             # per-stage prompt + raw_response + parsed_output
@@ -156,6 +165,7 @@ reuse_latest: false                    # true = skip models with existing result
 - `use_tools: true` enables native tool-calling for S1/S2/S3 stages. Has no effect on baseline or mock models.
 - `propagation_weight` controls the CEPS cascade penalty: `ceps = mean_stage_scores - weight × Σmax(score[i]-score[i+1], 0)`.
 - `reuse_latest: true` checks `EXPERIMENTS/{rebalance}/{provider}/{model}/` for existing timestamp directories. Picks the most complete (most profiles finished), then the latest. A warning is printed if the reused run is partial.
+- `generation.temperature` and `generation.max_tokens` set a **global default** for all LLM models. Individual model entries can override either field by adding `temperature:` or `max_tokens:` inline. Priority: per-model YAML > `generation` block > `{PREFIX}_TEMPERATURE`/`{PREFIX}_MAX_TOKENS` env vars > adapter hardcoded default (0.0 / 4096).
 
 ---
 

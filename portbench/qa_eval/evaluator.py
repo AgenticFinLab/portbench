@@ -193,7 +193,11 @@ class QAEvaluator:
             model_name = spec_model_name(spec)
             label = _spec_display_label(spec)
             try:
-                adapter = build_adapter(spec.provider, spec.model)
+                adapter = build_adapter(
+                    spec.provider, spec.model,
+                    temperature=spec.temperature if spec.temperature is not None else self.cfg.generation.temperature,
+                    max_tokens=spec.max_tokens if spec.max_tokens is not None else self.cfg.generation.max_tokens,
+                )
             except Exception as exc:
                 print(f"[QA] adapter build failed for {label}: {exc}")
                 pbar.update(sum(len(p) for p in self._pairs_by_template.values()))
@@ -385,18 +389,24 @@ class QAEvaluator:
                 except Exception:
                     pass
 
-        # Write template summary
-        summary = {
-            "template_id": template_id,
-            "accuracy": round(float(np.mean(scores)), 4) if scores else 0.0,
-            "n_total": len(scores),
-            "n_correct": sum(1 for s in scores if s >= 0.99),
-            "by_regime": {
-                r: round(float(np.mean(ss)), 4)
-                for r, ss in sorted(by_regime.items())
-            },
-            "scores": [round(s, 4) for s in scores],
-        }
+        # Always rebuild summary from the full results.jsonl so that previously
+        # checkpointed results (skipped this run) are included alongside new ones.
+        rebuilt = _rebuild_summary_from_results(t_dir, template_id)
+        if rebuilt is not None:
+            summary = rebuilt
+        else:
+            # Fallback: only new scores (e.g. empty results.jsonl)
+            summary = {
+                "template_id": template_id,
+                "accuracy": round(float(np.mean(scores)), 4) if scores else 0.0,
+                "n_total": len(scores),
+                "n_correct": sum(1 for s in scores if s >= 0.99),
+                "by_regime": {
+                    r: round(float(np.mean(ss)), 4)
+                    for r, ss in sorted(by_regime.items())
+                },
+                "scores": [round(s, 4) for s in scores],
+            }
         (t_dir / "summary.json").write_text(
             json.dumps(summary, indent=2), encoding="utf-8"
         )

@@ -19,6 +19,10 @@ workers_per_experiment: 3    # concurrent stress scenarios per profile
 parallel_experiments: 1      # concurrent model runs
 seed: 42
 
+generation:
+  temperature: 0.0           # global default; override per model with temperature: X
+  max_tokens: 4096
+
 models:
   - provider: tencent        # uses TENCENT_API_KEY/_BASE_URL/_MODEL
     model: hy3-preview
@@ -28,6 +32,7 @@ models:
     model: deepseek-v4-flash
   - provider: kimi           # uses KIMI_API_KEY/_BASE_URL/_MODEL
     model: kimi-k2.6
+    temperature: 1.0         # kimi requires temperature=1.0
   - provider: glm          # uses GLM_API_KEY/_BASE_URL/_MODEL
     model: glm-5.1
   - provider: ark            # uses ARK_API_KEY/_BASE_URL/_MODEL

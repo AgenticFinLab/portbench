@@ -44,6 +44,12 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Optional, Union
 
+
+@dataclass
+class GenerationConfig:
+    temperature: float = 0.0
+    max_tokens: int = 4096
+
 import yaml
 
 
@@ -55,6 +61,8 @@ class ModelSpec:
     model: Optional[str] = None  # optional override of {PREFIX}_MODEL
     baseline: Optional[str] = None  # for baseline strategies
     mock: bool = False  # MockAgentAdapter
+    temperature: Optional[float] = None  # overrides global generation.temperature
+    max_tokens: Optional[int] = None  # overrides global generation.max_tokens
 
     def kind(self) -> str:
         if self.baseline:
@@ -121,6 +129,7 @@ class ExperimentConfig:
     reuse_latest: bool = False  # reuse the most complete existing run per model
     run_qa: bool = False  # run QA dataset evaluation alongside sandbox
     qa: QAConfig = field(default_factory=QAConfig)
+    generation: GenerationConfig = field(default_factory=GenerationConfig)
 
     @staticmethod
     def from_yaml(path: str | Path) -> "ExperimentConfig":
@@ -146,6 +155,12 @@ class ExperimentConfig:
                 for k, v in log_raw.items()
                 if k in {"save_pipeline_logs", "save_snapshots", "save_figures"}
             }
+        )
+
+        gen_raw = raw.get("generation") or {}
+        gen_obj = GenerationConfig(
+            temperature=float(gen_raw.get("temperature", 0.0)),
+            max_tokens=int(gen_raw.get("max_tokens", 4096)),
         )
 
         batch_id_raw = raw.get("batch_id") or ""
@@ -178,6 +193,7 @@ class ExperimentConfig:
             reuse_latest=bool(raw.get("reuse_latest", False)),
             run_qa=bool(raw.get("run_qa", False)),
             qa=_parse_qa_config(raw.get("qa") or {}),
+            generation=gen_obj,
         )
 
     def resolved_stress_scenarios(self) -> list[str]:

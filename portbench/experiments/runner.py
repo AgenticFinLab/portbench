@@ -61,14 +61,22 @@ _STRESS_BY_NAME = {s.name: s for s in STRESS_SCENARIOS}
 # ---------------------------------------------------------------------------
 
 def _build_strategy(
-    spec: ModelSpec, noise: float, seed: int, timeout: float = 120.0
+    spec: ModelSpec, noise: float, seed: int, timeout: float = 120.0,
+    temperature: float = 0.0, max_tokens: int = 4096,
 ) -> AgentAdapter:
     kind = spec.kind()
     if kind == "baseline":
         return build_baseline(spec.baseline)  # type: ignore[arg-type]
     if kind == "mock":
         return build_mock(noise=noise, seed=seed)
-    return build_adapter(spec.provider, spec.model, timeout=timeout)  # type: ignore[arg-type]
+    effective_temp = spec.temperature if spec.temperature is not None else temperature
+    effective_max_tokens = spec.max_tokens if spec.max_tokens is not None else max_tokens
+    return build_adapter(
+        spec.provider, spec.model,  # type: ignore[arg-type]
+        timeout=timeout,
+        temperature=effective_temp,
+        max_tokens=effective_max_tokens,
+    )
 
 
 def _resolve_model_name(spec: ModelSpec) -> str:
@@ -428,7 +436,10 @@ def _run_one_model(
             except Exception:
                 pass  # summary missing or corrupt — completed profiles have no in-memory results
 
-    adapter = _build_strategy(spec, noise=cfg.noise, seed=cfg.seed, timeout=cfg.timeout)
+    adapter = _build_strategy(
+        spec, noise=cfg.noise, seed=cfg.seed, timeout=cfg.timeout,
+        temperature=cfg.generation.temperature, max_tokens=cfg.generation.max_tokens,
+    )
 
     errors_path = r_dir / "errors.jsonl"
     completed = list(already_done or [])
