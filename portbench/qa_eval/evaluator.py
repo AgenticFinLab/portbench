@@ -127,10 +127,10 @@ def _build_eval_prompt(pair: dict) -> str:
         f"Question: {question}\n\n"
         "Instructions:\n"
         "- Answer directly and concisely\n"
-        "- For numeric answers, provide a single number\n"
-        "- For direction answers, reply with exactly one word: positive, negative, or flat\n"
-        "- For allocation answers, provide weights as percentages summing to 100%\n"
-        "- For rebalancing decisions, reply with: rebalance or hold\n\n"
+        "- Follow exactly the answer format specified in the question above\n"
+        "- For direction prediction: reply with one word — positive, negative, or flat\n"
+        "- For numeric answers: provide a single decimal number (e.g., -0.02 or 0.75)\n"
+        "- For portfolio weight answers: provide decimals summing to 1.0 (e.g., 0.60 not 60%)\n\n"
         "Answer:"
     )
 
