@@ -6,7 +6,7 @@ into the evaluation pipeline as dedicated test episodes. Models must achieve
 minimum scores on all stress scenarios before entering the main performance ranking.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Optional
 
@@ -35,6 +35,7 @@ class StressScenario:
     end: date
     description: str
     min_pass_score: float = 0.50
+    ceps_tiers: list = field(default_factory=lambda: [0.1, 0.4, 0.6, 0.8])
     fallback_start: Optional[date] = None
     fallback_end: Optional[date] = None
     fallback_description: str = ""

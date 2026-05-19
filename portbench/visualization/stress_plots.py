@@ -139,3 +139,88 @@ def plot_stress_gate(
 
     fig.tight_layout()
     return fig
+
+
+def plot_stress_continuous_heatmap(
+    data: dict[str, dict[str, dict[str, dict]]],
+    title: str = "Stress Test Continuous Score",
+    figsize: tuple = (10, 5),
+) -> Figure:
+    """
+    Heatmap of continuous drawdown scores (direction A) with CEPS tier labels (direction B).
+
+    Args:
+        data: {model_key: {profile: {scenario: {dd_score, ceps_tier, passed, max_drawdown}}}}
+        title:   Figure title.
+        figsize: Figure size.
+
+    Returns:
+        matplotlib Figure. Cell color = dd_score (green=1=safe, red=0=full loss),
+        cell text = CEPS tier (A/B/C/D).
+    """
+    import matplotlib.colors as mcolors
+
+    apply_paper_style()
+
+    # Collect all (profile, scenario) column keys
+    model_keys = list(data.keys())
+    col_keys: list[tuple[str, str]] = []
+    for profile_data in data.values():
+        for profile, sc_data in profile_data.items():
+            for sc in sc_data:
+                if (profile, sc) not in col_keys:
+                    col_keys.append((profile, sc))
+    col_keys.sort()
+
+    n_rows = len(model_keys)
+    n_cols = len(col_keys)
+
+    score_matrix = np.zeros((n_rows, n_cols))
+    tier_matrix: list[list[str]] = [[""] * n_cols for _ in range(n_rows)]
+
+    for i, mk in enumerate(model_keys):
+        for j, (profile, sc) in enumerate(col_keys):
+            entry = data.get(mk, {}).get(profile, {}).get(sc, {})
+            score_matrix[i, j] = entry.get("dd_score", 0.0)
+            tier_matrix[i][j] = entry.get("ceps_tier", "")
+
+    cmap = mcolors.LinearSegmentedColormap.from_list(
+        "dd_score", ["#e74c3c", "#f39c12", "#2ecc71"]
+    )
+
+    fig, ax = plt.subplots(figsize=figsize)
+    im = ax.imshow(score_matrix, cmap=cmap, vmin=0.0, vmax=1.0, aspect="auto")
+
+    # Cell text: CEPS tier
+    for i in range(n_rows):
+        for j in range(n_cols):
+            tier = tier_matrix[i][j]
+            score = score_matrix[i, j]
+            text_color = "black" if 0.3 < score < 0.85 else "white"
+            if tier:
+                ax.text(
+                    j,
+                    i,
+                    tier,
+                    ha="center",
+                    va="center",
+                    fontsize=9,
+                    fontweight="bold",
+                    color=text_color,
+                )
+
+    from .style import abbrev_model_name
+
+    ax.set_yticks(range(n_rows))
+    ax.set_yticklabels([abbrev_model_name(m) for m in model_keys], fontsize=8)
+
+    col_labels = [f"{p[:4]}\n{s}" for p, s in col_keys]
+    ax.set_xticks(range(n_cols))
+    ax.set_xticklabels(col_labels, fontsize=7, rotation=30, ha="right")
+
+    plt.colorbar(im, ax=ax, label="Drawdown Score (1=safe, 0=full loss)", fraction=0.03)
+    ax.set_title(title, fontsize=11, fontweight="bold")
+    ax.set_xlabel("Profile × Scenario", fontsize=9)
+
+    fig.tight_layout()
+    return fig

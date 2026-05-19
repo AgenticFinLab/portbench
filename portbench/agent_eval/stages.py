@@ -1074,15 +1074,25 @@ class S5RiskMonitoring(PipelineStage):
     Stage 5: Risk Monitoring.
 
     Computes portfolio-level risk metrics and triggers alerts when thresholds
-    are breached. Thresholds are conservative defaults; adjust in QAConfig.
+    are breached. When an InvestorProfile is provided, var_limit and
+    drawdown_limit are read from the profile; otherwise class-level defaults
+    are used (conservative-equivalent).
     """
 
-    VAR_LIMIT = -0.02          # 1-day VaR(95%) threshold: -2%
-    DRAWDOWN_LIMIT = -0.10     # Drawdown limit: -10%
-    DRIFT_LIMIT = 0.05         # Max weight drift: 5%
+    VAR_LIMIT = -0.02          # 1-day VaR(95%) threshold: -2%  (class default)
+    DRAWDOWN_LIMIT = -0.10     # Drawdown limit: -10%            (class default)
+    DRIFT_LIMIT = 0.05         # Max weight drift: 5%            (no profile field)
 
-    def __init__(self, adapter: AgentAdapter = None):
+    def __init__(self, adapter: AgentAdapter = None, profile=None):
         self.adapter = adapter or MockAgentAdapter()
+        # Profile-aware thresholds: use profile fields when available
+        if profile is not None:
+            self._var_limit = profile.var_limit
+            self._drawdown_limit = -profile.max_drawdown_tolerance
+        else:
+            self._var_limit = self.VAR_LIMIT
+            self._drawdown_limit = self.DRAWDOWN_LIMIT
+        self._drift_limit = self.DRIFT_LIMIT
 
     @property
     def stage_id(self) -> StageID:
@@ -1112,12 +1122,12 @@ class S5RiskMonitoring(PipelineStage):
         drift = float(max(abs(w - target_w) for w in weights.values())) if weights else 0.0
 
         alerts = []
-        if port_var < self.VAR_LIMIT:
-            alerts.append(RiskAlert("var_breach", port_var, self.VAR_LIMIT, "warning", "reduce"))
-        if port_dd < self.DRAWDOWN_LIMIT:
-            alerts.append(RiskAlert("drawdown", port_dd, self.DRAWDOWN_LIMIT, "critical", "rebalance"))
-        if drift > self.DRIFT_LIMIT:
-            alerts.append(RiskAlert("weight_drift", drift, self.DRIFT_LIMIT, "warning", "rebalance"))
+        if port_var < self._var_limit:
+            alerts.append(RiskAlert("var_breach", port_var, self._var_limit, "warning", "reduce"))
+        if port_dd < self._drawdown_limit:
+            alerts.append(RiskAlert("drawdown", port_dd, self._drawdown_limit, "critical", "rebalance"))
+        if drift > self._drift_limit:
+            alerts.append(RiskAlert("weight_drift", drift, self._drift_limit, "warning", "rebalance"))
 
         rebalance_needed = any(a.action == "rebalance" for a in alerts)
 

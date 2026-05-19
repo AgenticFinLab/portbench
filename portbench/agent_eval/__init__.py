@@ -29,7 +29,7 @@ from .investor_profiles import InvestorProfile, PROFILES, ProfileAlignmentScorer
 from .tools import ToolSpec, get_tools, dispatch_tool, BUILTIN_TOOLS
 
 
-def build_default_pipeline(adapter: AgentAdapter = None, use_tools: bool = False) -> EvalPipeline:
+def build_default_pipeline(adapter: AgentAdapter = None, use_tools: bool = False, profile=None) -> EvalPipeline:
     """
     Construct a default five-stage EvalPipeline with the given adapter.
 
@@ -38,6 +38,9 @@ def build_default_pipeline(adapter: AgentAdapter = None, use_tools: bool = False
                     so production runs cannot silently fall back to MockAgentAdapter.
         use_tools:  If True, S1/S2/S3 stages call complete_with_tools() instead of
                     complete(), enabling multi-turn tool execution for cloud adapters.
+        profile:    Optional InvestorProfile. When provided, S5 uses the profile's
+                    var_limit and max_drawdown_tolerance as alert thresholds instead
+                    of the class-level conservative defaults.
 
     Returns:
         EvalPipeline ready to call run_episode().
@@ -54,7 +57,7 @@ def build_default_pipeline(adapter: AgentAdapter = None, use_tools: bool = False
         S2SignalGeneration(adapter, use_tools=use_tools),
         S3WeightOptimization(adapter, use_tools=use_tools),
         S4ExecutionSimulation(adapter),
-        S5RiskMonitoring(adapter),
+        S5RiskMonitoring(adapter, profile=profile),
     ]
     return EvalPipeline(stages)
 
