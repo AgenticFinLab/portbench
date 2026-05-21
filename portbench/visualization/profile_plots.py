@@ -107,7 +107,26 @@ def plot_profile_alignment(
     ax.legend(handles=legend_handles, fontsize=8, loc="lower right")
     ax.set_title(title, fontsize=11, fontweight="bold")
 
+    # Annotate profile constraint difficulty under each group
+    constraint_notes = [
+        "equity≤40%  bond≥15%  VaR≥−1%",
+        "equity≤65%  bond≥10%  VaR≥−2%",
+        "equity≤90%  bond≥5%   VaR≥−4%",
+    ]
+    for j, (note, label) in enumerate(zip(constraint_notes, _PROFILE_LABELS)):
+        ax.text(
+            j,
+            -0.09,
+            note,
+            ha="center",
+            va="top",
+            fontsize=6,
+            color="#7f8c8d",
+            transform=ax.get_xaxis_transform(),
+        )
+
     fig.tight_layout()
+    fig.subplots_adjust(bottom=0.18)
     return fig
 
 

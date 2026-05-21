@@ -273,11 +273,27 @@ def render_batch_comparison_figures(
             if p not in all_profiles:
                 all_profiles.append(p)
 
+    # Compute sorted model order once: LLM by mean CEPS asc, baselines by mean Sharpe desc
+    def _nav_sort_key(mk: str) -> tuple:
+        is_baseline = mk.startswith("baseline/")
+        vals = []
+        for p_data in model_data[mk].values():
+            n = p_data.get("normal") if isinstance(p_data, dict) else None
+            if n:
+                vals.append(
+                    n.get("sharpe_ratio", 0.0) if is_baseline
+                    else n.get("mean_ceps", 999.0)
+                )
+        mean_val = sum(vals) / len(vals) if vals else (0.0 if is_baseline else 999.0)
+        return (int(is_baseline), -mean_val if is_baseline else mean_val)
+
+    sorted_model_keys = sorted(model_data.keys(), key=_nav_sort_key)
+
     # Fig A: NAV comparison per profile
     for profile in all_profiles:
         nav_map: dict[str, pd.Series] = {}
-        for mlabel, profiles in model_data.items():
-            entry = profiles.get(profile)
+        for mlabel in sorted_model_keys:
+            entry = model_data[mlabel].get(profile)
             if entry and entry.get("nav") is not None:
                 nav_map[mlabel] = entry["nav"]
         if nav_map:
@@ -346,7 +362,7 @@ def render_batch_comparison_figures(
             )
             log(f"figure: stress_drawdown_{safe_name}.png")
 
-    # Fig D: Stress continuous score heatmap (dd_score + CEPS tier) — cross-model
+    # Fig D: Stress threshold chart (dd_score lollipop with tier reference lines) — cross-model
     continuous_data: dict[str, dict[str, dict[str, dict]]] = {}
     for mlabel, profiles in model_data.items():
         model_entry: dict[str, dict[str, dict]] = {}
@@ -354,13 +370,22 @@ def render_batch_comparison_figures(
             stress = entry.get("stress")
             if not stress:
                 continue
+            tol = PROFILES.get(profile_name, None)
+            tol_val = tol.max_drawdown_tolerance if tol else 0.10
             sc_entry: dict[str, dict] = {}
             for sc, payload in stress.items():
+                dd = payload.get("max_drawdown", 0.0)
+                # Retroactively compute dd_score when field is absent or zero
+                stored = payload.get("dd_score")
+                if stored is None or stored == 0.0:
+                    dd_score = max(0.0, 1.0 - abs(dd) / max(tol_val, 1e-6))
+                else:
+                    dd_score = float(stored)
                 sc_entry[sc] = {
-                    "dd_score": payload.get("dd_score", 0.0),
+                    "dd_score": dd_score,
                     "ceps_tier": payload.get("ceps_tier", ""),
                     "passed": payload.get("stress_passed", False),
-                    "max_drawdown": payload.get("max_drawdown", 0.0),
+                    "max_drawdown": dd,
                 }
             if sc_entry:
                 model_entry[profile_name] = sc_entry
@@ -370,11 +395,11 @@ def render_batch_comparison_figures(
         try:
             fig = plot_stress_continuous_heatmap(
                 continuous_data,
-                title="Stress Score — Drawdown Continuous (color) + CEPS Tier (text)",
+                title="Stress Test — Drawdown Score vs Tier Thresholds",
             )
             save_figure(
-                fig, str(out_dir / "stress_continuous_heatmap.png"), formats=("png",)
+                fig, str(out_dir / "stress.png"), formats=("png",)
             )
-            log("figure: stress_continuous_heatmap.png")
+            log("figure: stress.png")
         except Exception as exc:
             log(f"stress_continuous_heatmap skipped: {exc}")

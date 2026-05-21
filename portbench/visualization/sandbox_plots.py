@@ -16,7 +16,7 @@ import pandas as pd
 import numpy as np
 from matplotlib.figure import Figure
 
-from .style import apply_paper_style, MODEL_PALETTE, PAPER_COLORS, LINE_STYLES, LINE_MARKERS, abbrev_model_name
+from .style import apply_paper_style, MODEL_PALETTE, PAPER_COLORS, LINE_STYLES, LINE_MARKERS, abbrev_model_name, NAV_LLM_PALETTE, NAV_BASELINE_PALETTE
 
 
 def plot_sandbox_nav(
@@ -27,41 +27,58 @@ def plot_sandbox_nav(
     """
     Line chart of NAV curves for multiple models/baselines.
 
+    LLM models: solid lines, top section of legend, colored from NAV_LLM_PALETTE.
+    Baselines:  dashed lines, bottom section of legend, colored from NAV_BASELINE_PALETTE.
+    All lines carry distinct markers (spaced) to aid identification when colors are similar.
+
     Args:
         nav_results: {label: pd.Series(index=DatetimeIndex, values=NAV)}
+                     Keys are expected in sorted order (best model first within each group).
         title:       Figure title.
         figsize:     Figure dimensions.
     """
     apply_paper_style()
     fig, ax = plt.subplots(figsize=figsize)
 
-    n_palette = len(MODEL_PALETTE)
-    all_items = list(nav_results.items())
+    llm_items  = [(n, s) for n, s in nav_results.items() if not n.startswith("baseline/")]
+    base_items = [(n, s) for n, s in nav_results.items() if     n.startswith("baseline/")]
 
-    for i, (name, nav) in enumerate(all_items):
-        color       = MODEL_PALETTE[i % n_palette]
-        is_baseline = name.startswith("baseline/")
-        ls  = "--" if is_baseline else "-"
-        lw  = 1.2  if is_baseline else 1.6
-        nav_norm = nav / nav.iloc[0] * 100
-        # Only add markers when this index reuses a color already taken
-        if i >= n_palette:
-            mk    = LINE_MARKERS[i % len(LINE_MARKERS)]
-            every = max(1, len(nav_norm) // 8)
-            ax.plot(nav_norm.index, nav_norm.values,
-                    label=abbrev_model_name(name), color=color,
-                    linewidth=lw, linestyle=ls,
-                    marker=mk, markevery=every, markersize=4)
-        else:
-            ax.plot(nav_norm.index, nav_norm.values,
-                    label=abbrev_model_name(name), color=color,
-                    linewidth=lw, linestyle=ls)
+    _MARKERS = ["o", "s", "^", "D", "v", "P", "h", "*"]
 
-    ax.axhline(100, color="black", linestyle="--", linewidth=0.8, alpha=0.4,
-               label="Start (100)")
+    def _plot_group(items, palette, linestyle, lw_base):
+        handles = []
+        for i, (name, nav) in enumerate(items):
+            color    = palette[i % len(palette)]
+            marker   = _MARKERS[i % len(_MARKERS)]
+            nav_norm = nav / nav.iloc[0] * 100
+            every    = max(1, len(nav_norm) // 10)
+            line, = ax.plot(
+                nav_norm.index, nav_norm.values,
+                label=abbrev_model_name(name),
+                color=color, linewidth=lw_base,
+                linestyle=linestyle,
+                marker=marker, markevery=every, markersize=4,
+                markerfacecolor=color, markeredgewidth=0.5, markeredgecolor="white",
+            )
+            handles.append(line)
+        return handles
+
+    llm_handles  = _plot_group(llm_items,  NAV_LLM_PALETTE,      "-",  1.8)
+    base_handles = _plot_group(base_items, NAV_BASELINE_PALETTE,  "--", 1.2)
+
+    ax.axhline(100, color="#aaaaaa", linestyle=":", linewidth=0.8, alpha=0.6)
     ax.set_xlabel("Date")
     ax.set_ylabel("Normalized NAV (base=100)")
-    ax.legend(fontsize=8, loc="upper left")
+
+    # Two-section legend: LLM at top, baselines below, separated by a title row
+    import matplotlib.lines as mlines
+    spacer = mlines.Line2D([], [], color="none", label="")
+    llm_title    = mlines.Line2D([], [], color="none", label="── LLM Models ──")
+    base_title   = mlines.Line2D([], [], color="none", label="── Baselines ──")
+    legend_handles = [llm_title] + llm_handles + [spacer, base_title] + base_handles
+    ax.legend(handles=legend_handles, fontsize=7, loc="upper left",
+              framealpha=0.85, edgecolor="0.8")
+
     fig.autofmt_xdate()
     fig.tight_layout()
     return fig

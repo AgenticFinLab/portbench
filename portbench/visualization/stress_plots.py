@@ -141,86 +141,244 @@ def plot_stress_gate(
     return fig
 
 
+def plot_stress_threshold_chart(
+    data: dict[str, dict[str, dict[str, dict]]],
+    title: str = "Stress Test Drawdown Score",
+    thresholds: list = None,
+    tier_labels: list = None,
+    figsize: tuple = (14, 5),
+) -> Figure:
+    """
+    Dot chart showing each model's continuous drawdown score against threshold levels.
+
+    One subplot per stress scenario. Within each subplot:
+      - Colored background bands per tier zone (D=red, C=orange, B=yellow, A=green)
+      - X-axis: models sorted by worst-case dd_score (best left, worst right)
+      - Y-axis: dd_score ∈ [0, 1]
+      - Filled dot = passed stress gate; hollow ring = failed
+      - Lollipop stems from y=0 to the dot
+      - Worst-profile dot annotated with actual max_drawdown %
+
+    Args:
+        data: {model_key: {profile: {scenario: {dd_score, ceps_tier, passed, max_drawdown}}}}
+        title:       Figure title.
+        thresholds:  Y positions for tier boundaries (ascending).
+        tier_labels: Labels for each tier band (same length as thresholds).
+        figsize:     Figure size.
+
+    Returns:
+        matplotlib Figure.
+    """
+    if thresholds is None:
+        thresholds = [0.1, 0.4, 0.6, 0.8]
+    if tier_labels is None:
+        tier_labels = ["D", "C", "B", "A"]
+
+    apply_paper_style()
+
+    # Tier band colors: D(red) C(orange) B(yellow) A(green)
+    _TIER_BAND_COLORS = ["#fde8e8", "#fde8c8", "#fdfbe8", "#e8fde8"]
+
+    # Collect scenario and model keys
+    model_keys = list(data.keys())
+    scenario_set: list[str] = []
+    for profile_data in data.values():
+        for sc_data in profile_data.values():
+            for sc in sc_data:
+                if sc not in scenario_set:
+                    scenario_set.append(sc)
+    scenario_set.sort()
+
+    profile_order = ["conservative", "balanced", "aggressive"]
+    # Frost-themed profile colors: dark navy / steel blue / gray
+    profile_colors = {
+        "conservative": "#1e3d6e",  # dark navy (AF darkened)
+        "balanced":     "#4a6fa5",  # steel blue (AF1)
+        "aggressive":   "#8a8a8a",  # dark silver-gray
+    }
+    profile_markers = {"conservative": "o", "balanced": "s", "aggressive": "^"}
+
+    # Separate LLM models and baselines
+    llm_keys = [mk for mk in model_keys if not mk.startswith("baseline/")]
+    baseline_keys = [mk for mk in model_keys if mk.startswith("baseline/")]
+
+    # Sort each group: primary=worst dd_score desc, secondary=mean dd_score desc
+    def _sort_key(mk: str) -> tuple:
+        scores = []
+        for profile in profile_order:
+            for sc in scenario_set:
+                entry = data.get(mk, {}).get(profile, {}).get(sc, {})
+                if entry:
+                    scores.append(entry.get("dd_score", 0.0))
+        if not scores:
+            return (0.0, 0.0)
+        return (min(scores), sum(scores) / len(scores))
+
+    llm_keys = sorted(llm_keys, key=_sort_key, reverse=True)
+    baseline_keys = sorted(baseline_keys, key=_sort_key, reverse=True)
+    ordered_keys = llm_keys + baseline_keys
+
+    n_scenarios = len(scenario_set)
+    if n_scenarios == 0:
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.text(0.5, 0.5, "No stress data", ha="center", va="center", transform=ax.transAxes)
+        return fig
+
+    fig, axes = plt.subplots(1, n_scenarios, figsize=figsize, sharey=True)
+    if n_scenarios == 1:
+        axes = [axes]
+
+    x_pos = np.arange(len(ordered_keys))
+    x_labels = [abbrev_model_name(mk) for mk in ordered_keys]
+    n_profiles = len(profile_order)
+    offsets = np.linspace(-0.18, 0.18, n_profiles)
+
+    for ax_idx, sc_name in enumerate(scenario_set):
+        ax = axes[ax_idx]
+
+        # ── Tier background bands ──────────────────────────────────────────────
+        band_bounds = [0.0] + thresholds + [1.05]
+        for bi in range(len(band_bounds) - 1):
+            color_idx = min(bi, len(_TIER_BAND_COLORS) - 1)
+            ax.axhspan(
+                band_bounds[bi],
+                band_bounds[bi + 1],
+                color=_TIER_BAND_COLORS[color_idx],
+                alpha=0.45,
+                zorder=0,
+            )
+
+        # Tier boundary lines + labels on the right spine
+        for thresh, label in zip(thresholds, tier_labels):
+            ax.axhline(thresh, color="#aab0b8", linestyle="--", linewidth=0.7, zorder=1)
+            ax.text(
+                len(ordered_keys) - 0.1,
+                thresh + 0.015,
+                f"Tier {label}",
+                fontsize=6,
+                color="#555",
+                va="bottom",
+                ha="right",
+                zorder=5,
+            )
+
+        # ── Compute worst-profile dd_score per model (for annotation) ──────────
+        worst_score_per_model: dict[str, tuple[float, float, int]] = {}
+        for xi, mk in enumerate(ordered_keys):
+            worst_dd_score = 1.1
+            worst_dd_raw = 0.0
+            worst_pidx = 0
+            for pidx, profile in enumerate(profile_order):
+                entry = data.get(mk, {}).get(profile, {}).get(sc_name, {})
+                if not entry:
+                    continue
+                s = entry.get("dd_score", 0.0)
+                if s < worst_dd_score:
+                    worst_dd_score = s
+                    worst_dd_raw = entry.get("max_drawdown", 0.0)
+                    worst_pidx = pidx
+            if worst_dd_score < 1.1:
+                worst_score_per_model[mk] = (worst_dd_score, worst_dd_raw, worst_pidx)
+
+        # ── Plot lollipops: color by profile ───────────────────────────────────
+        for xi, mk in enumerate(ordered_keys):
+            for pidx, profile in enumerate(profile_order):
+                entry = data.get(mk, {}).get(profile, {}).get(sc_name, {})
+                if not entry:
+                    continue
+                score = entry.get("dd_score", 0.0)
+                passed = entry.get("passed", True)
+                color = profile_colors[profile]
+                marker = profile_markers[profile]
+                xpos = x_pos[xi] + offsets[pidx]
+
+                # Lollipop stem
+                ax.plot([xpos, xpos], [0, score], color=color, linewidth=0.8, alpha=0.45, zorder=2)
+
+                if passed:
+                    ax.scatter(
+                        [xpos], [score],
+                        color=color, marker=marker, s=50,
+                        zorder=4,
+                        label="_nolegend_",
+                        edgecolors="white", linewidths=0.5,
+                    )
+                else:
+                    ax.scatter(
+                        [xpos], [score],
+                        facecolors="none", edgecolors=color, marker=marker, s=55,
+                        linewidths=1.4, zorder=4,
+                        label="_nolegend_",
+                    )
+                    ax.scatter(
+                        [xpos], [score],
+                        color=color, marker="x", s=25, linewidths=1.0, zorder=5,
+                        label="_nolegend_",
+                    )
+
+        # ── Annotate worst-profile drawdown % ─────────────────────────────────
+        for xi, mk in enumerate(ordered_keys):
+            if mk not in worst_score_per_model:
+                continue
+            ws, wd, wpidx = worst_score_per_model[mk]
+            xpos = x_pos[xi] + offsets[wpidx]
+            dd_pct = f"{wd * 100:+.1f}%"
+            ax.text(
+                xpos, ws + 0.04, dd_pct,
+                ha="center", va="bottom", fontsize=5.5,
+                color="#444", rotation=0, zorder=6,
+            )
+
+        # Scenario title — full descriptive name
+        _SC_NAMES = {
+            "2015_china_shock": "2015 China Stock Market Crisis",
+            "2020_covid_flash_crash": "2020 COVID-19 Flash Crash",
+            "2022_crypto_collapse": "2022 Crypto Market Collapse",
+        }
+        sc_key = sc_name.removeprefix("stress_")
+        sc_label = _SC_NAMES.get(sc_key, sc_key.replace("_", " ").title())
+        ax.set_title(sc_label, fontsize=9, fontweight="bold")
+        ax.set_xticks(x_pos)
+        ax.set_xticklabels(x_labels, fontsize=7, rotation=35, ha="right")
+        ax.set_ylim(-0.02, 1.12)
+        ax.set_xlim(-0.6, len(ordered_keys) - 0.4)
+
+        if ax_idx == 0:
+            ax.set_ylabel("Drawdown Score  (1 = no loss → 0 = full loss)", fontsize=8)
+
+        # Vertical separator between LLM models and baselines
+        if llm_keys and baseline_keys:
+            sep = len(llm_keys) - 0.5
+            ax.axvline(sep, color="#bdc3c7", linestyle=":", linewidth=1.0)
+
+    # ── Legend: profile colors + failed indicator ──────────────────────────────
+    import matplotlib.lines as mlines
+    import matplotlib.patches as mpatches
+
+    legend_handles = []
+    for profile in profile_order:
+        c = profile_colors[profile]
+        m = profile_markers[profile]
+        legend_handles.append(
+            mlines.Line2D([], [], color=c, marker=m, linestyle="None",
+                          markersize=6, markerfacecolor=c, label=profile)
+        )
+    legend_handles.append(
+        mlines.Line2D([], [], color="gray", marker="o", linestyle="None",
+                      markersize=6, markerfacecolor="none", markeredgewidth=1.2,
+                      label="failed gate")
+    )
+    axes[0].legend(handles=legend_handles, title="Profile", fontsize=7, title_fontsize=7,
+                   loc="upper left", framealpha=0.85)
+
+    fig.tight_layout()
+    return fig
+
+
 def plot_stress_continuous_heatmap(
     data: dict[str, dict[str, dict[str, dict]]],
     title: str = "Stress Test Continuous Score",
     figsize: tuple = (10, 5),
 ) -> Figure:
-    """
-    Heatmap of continuous drawdown scores (direction A) with CEPS tier labels (direction B).
-
-    Args:
-        data: {model_key: {profile: {scenario: {dd_score, ceps_tier, passed, max_drawdown}}}}
-        title:   Figure title.
-        figsize: Figure size.
-
-    Returns:
-        matplotlib Figure. Cell color = dd_score (green=1=safe, red=0=full loss),
-        cell text = CEPS tier (A/B/C/D).
-    """
-    import matplotlib.colors as mcolors
-
-    apply_paper_style()
-
-    # Collect all (profile, scenario) column keys
-    model_keys = list(data.keys())
-    col_keys: list[tuple[str, str]] = []
-    for profile_data in data.values():
-        for profile, sc_data in profile_data.items():
-            for sc in sc_data:
-                if (profile, sc) not in col_keys:
-                    col_keys.append((profile, sc))
-    col_keys.sort()
-
-    n_rows = len(model_keys)
-    n_cols = len(col_keys)
-
-    score_matrix = np.zeros((n_rows, n_cols))
-    tier_matrix: list[list[str]] = [[""] * n_cols for _ in range(n_rows)]
-
-    for i, mk in enumerate(model_keys):
-        for j, (profile, sc) in enumerate(col_keys):
-            entry = data.get(mk, {}).get(profile, {}).get(sc, {})
-            score_matrix[i, j] = entry.get("dd_score", 0.0)
-            tier_matrix[i][j] = entry.get("ceps_tier", "")
-
-    cmap = mcolors.LinearSegmentedColormap.from_list(
-        "dd_score", ["#e74c3c", "#f39c12", "#2ecc71"]
-    )
-
-    fig, ax = plt.subplots(figsize=figsize)
-    im = ax.imshow(score_matrix, cmap=cmap, vmin=0.0, vmax=1.0, aspect="auto")
-
-    # Cell text: CEPS tier
-    for i in range(n_rows):
-        for j in range(n_cols):
-            tier = tier_matrix[i][j]
-            score = score_matrix[i, j]
-            text_color = "black" if 0.3 < score < 0.85 else "white"
-            if tier:
-                ax.text(
-                    j,
-                    i,
-                    tier,
-                    ha="center",
-                    va="center",
-                    fontsize=9,
-                    fontweight="bold",
-                    color=text_color,
-                )
-
-    from .style import abbrev_model_name
-
-    ax.set_yticks(range(n_rows))
-    ax.set_yticklabels([abbrev_model_name(m) for m in model_keys], fontsize=8)
-
-    col_labels = [f"{p[:4]}\n{s}" for p, s in col_keys]
-    ax.set_xticks(range(n_cols))
-    ax.set_xticklabels(col_labels, fontsize=7, rotation=30, ha="right")
-
-    plt.colorbar(im, ax=ax, label="Drawdown Score (1=safe, 0=full loss)", fraction=0.03)
-    ax.set_title(title, fontsize=11, fontweight="bold")
-    ax.set_xlabel("Profile × Scenario", fontsize=9)
-
-    fig.tight_layout()
-    return fig
+    """Alias kept for backward compatibility; delegates to plot_stress_threshold_chart."""
+    return plot_stress_threshold_chart(data, title=title)

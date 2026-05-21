@@ -429,13 +429,19 @@ CATEGORICAL_PALETTE = [
     "#c49c94", "#f7b6d2", "#9edae5", "#393b79", "#637939",
 ]
 
-# Extended palette for NAV LLM lines (vivid, distinguishable)
+# Blue-tone palette for LLM NAV lines — alternates dark/light for maximum separation
 NAV_LLM_PALETTE = [
-    "#1f77b4", "#d62728", "#2ca02c", "#ff7f0e", "#9467bd",
-    "#8c564b", "#e377c2", "#17becf", "#bcbd22", "#1a9850",
+    "#0d2b4e",  # deep navy         (darkest)
+    "#5b9bd5",  # cornflower blue   (big jump up)
+    "#1a4472",  # dark royal        (back down)
+    "#8dc5e8",  # sky blue          (light)
+    "#2e6db4",  # medium royal
+    "#aad4ee",  # pale blue
+    "#3d7ab5",  # steel-royal
+    "#1e3d6e",  # dark steel (AF1 darkened)
 ]
 # Gray shades for NAV baseline dashed lines
-NAV_BASELINE_PALETTE = ["#555555", "#888888", "#aaaaaa", "#cccccc"]
+NAV_BASELINE_PALETTE = ["#252525", "#636363", "#969696", "#bdbdbd", "#d9d9d9"]
 
 
 # ---------------------------------------------------------------------------
