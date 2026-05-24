@@ -75,8 +75,8 @@ Each template computes ground truth from observable data strictly before `decisi
 - **T1**: Future return from `decision_date` to `decision_date + horizon_days` (uses future prices — only the answer uses future data, not the context)
 - **T2**: Historical simulation VaR/CVaR from 252-day return window
 - **T3**: Fixed-fractional: `f* = max_drawdown_limit / |VaR(99%)|`, capped at 1.0. Question no longer names the formula — model must know position sizing methodology.
-- **T4**: Constrained min-variance with return floor `E[r] ≥ μ_floor`. When constraint is binding: `w1 = (μ_floor − μ2) / (μ1 − μ2)`; else: unconstrained analytic solution. ~50% of questions have a binding constraint (alternated by index). Explicit covariance/correlation values are **not** provided in the question — only σ₁, σ₂, and annualized mean returns.
-- **T5**: SLSQP optimizer: `max E[r]ᵀw / sqrt(wᵀΣw)` subject to `Σwᵢ=1, wᵢ≥0`
+- **T4**: Constrained min-variance with return floor `E[r] ≥ μ_floor`. When constraint is binding: `w1 = (μ_floor − μ2) / (μ1 − μ2)`; else: unconstrained analytic solution. ~50% of questions have a binding constraint (alternated by index). The question provides σ₁, σ₂, annualized means, **and** the covariance/correlation values — making T4 solvable by direct formula substitution. Use `info_level: restricted` in the QA config to strip covariance/correlation from T4 prompts for an information-controlled ablation study.
+- **T5**: SLSQP optimizer: `max E[r]ᵀw / sqrt(wᵀΣw)` subject to `Σwᵢ=1, wᵢ≥0`. The full annualised covariance matrix and mean-return vector are passed directly in the prompt, making T5 solvable by any model capable of numerical optimisation. Use `info_level: restricted` to strip the covariance matrix, leaving only per-asset means and standard deviations.
 - **T6**: Decision rule: `max|w_current − w_target| > threshold` → rebalance; else → hold. **50% yes / 50% no by construction** (drift magnitude is calibrated per index parity). Answer format: `"yes; sell/buy X.XXXX of ASSET"` or `"no"` — model must identify the most deviated asset and its trade size. Pre-computed deviation totals are **not** given in the question.
 - **T7**: Regime from trailing returns; allocation direction from `_REGIME_ALLOCATION` lookup
 
@@ -96,7 +96,7 @@ class ContextWindow:
     correlation_matrix: Optional[pd.DataFrame]   # assets × assets, Pearson
 ```
 
-`DataProvider.build_context()` automatically computes the correlation matrix from `returns_history` for any multi-asset context window. Templates T4, T5, and T7 use this matrix in their ground truth computation (min-variance and Sharpe-maximization require the full covariance structure). The correlation matrix is also included in the evaluation context provided to LLMs, enabling the model to reason about cross-asset diversification.
+`DataProvider.build_context()` automatically computes the correlation matrix from `returns_history` for any multi-asset context window. Templates T4, T5, and T7 use this matrix in their ground truth computation (min-variance and Sharpe-maximisation require the full covariance structure). T4 and T5 currently expose covariance/correlation statistics directly in the question prompt. Set `qa.info_level: restricted` in the experiment config to run an ablation where this information is withheld from T4/T5 prompts; results are written to `T4_restricted/` and `T5_restricted/` directories alongside the original full-info results. Run `python -m portbench.experiments --analyze-qa-info-level` to generate comparison figures and a drop-heatmap after the restricted run.
 
 ```python
 ctx = provider.build_context(date(2020, 3, 15), ["SPY", "TLT", "GLD"], lookback_days=60)

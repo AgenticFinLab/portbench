@@ -64,6 +64,7 @@ class ModelSpec:
     mock: bool = False  # MockAgentAdapter
     temperature: Optional[float] = None  # overrides global generation.temperature
     max_tokens: Optional[int] = None  # overrides global generation.max_tokens
+    parallel_questions: Optional[int] = None  # overrides global qa.parallel_questions for this model
 
     def kind(self) -> str:
         if self.baseline:
@@ -98,6 +99,9 @@ class QAConfig:
     max_pairs_per_template: int = 50
     parallel_questions: int = 4
     save_responses: bool = True
+    # "full" = original prompts; "restricted" = T4/T5 prompts with covariance info stripped;
+    # "both" = run full first, then restricted (results stored in T4_restricted/ T5_restricted/)
+    info_level: str = "full"
 
 
 @dataclass
@@ -288,4 +292,5 @@ def _parse_qa_config(raw: dict) -> QAConfig:
         max_pairs_per_template=int(raw.get("max_pairs_per_template", 50)),
         parallel_questions=int(raw.get("parallel_questions", 4)),
         save_responses=bool(raw.get("save_responses", True)),
+        info_level=str(raw.get("info_level", "full")),
     )

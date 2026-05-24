@@ -158,6 +158,14 @@ LLM prompt receives signals and must output a weight allocation with sum=1, all 
 - Commission: 5 bps per trade value
 - Adjusts executed weights for cost drag
 
+**Scoring**: Turnover deviation from ground truth — penalises both under-trading (model never rebalances) and over-trading (model shuffles aggressively) relative to optimal GT turnover.
+
+```text
+S4_score = clip(1 − |actual_turnover − gt_turnover| / max(actual_turnover, gt_turnover, 1e-4), 0, 1)
+```
+
+Score = 1 when actual turnover exactly matches the GT rebalancing volume; score approaches 0 when the model either never trades (e.g. parsing failure) or generates far more turnover than required. This metric is orthogonal to S3 weight accuracy and is computed entirely from stored `trade_history.json` — no LLM re-calls are needed to update it via `--rescore`.
+
 ### S5 — Risk Monitoring (`S5RiskMonitoring`)
 
 **Deterministic** — computes portfolio risk metrics numerically:

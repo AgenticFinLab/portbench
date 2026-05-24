@@ -239,7 +239,7 @@ _THEME_RCPARAMS = {
         "axes.spines.right": False,
         "axes.spines.left": True,
         "axes.spines.bottom": True,
-        "axes.edgecolor": _MM3,
+        "axes.edgecolor": "black",
         "axes.linewidth": 0.8,
         "axes.grid": True,
         "grid.alpha": 0.5,
@@ -252,13 +252,13 @@ _THEME_RCPARAMS = {
         "legend.framealpha": 0.0,
         "legend.edgecolor": "none",
         "legend.borderpad": 0.6,
-        "figure.facecolor": _MM4,
-        "axes.facecolor": _MM4,
-        "text.color": _MM1,
-        "axes.labelcolor": _MM2,
-        "xtick.color": _MM2,
-        "ytick.color": _MM2,
-        "axes.titlecolor": _MM1,
+        "figure.facecolor": "white",
+        "axes.facecolor": "white",
+        "text.color": "black",
+        "axes.labelcolor": "black",
+        "xtick.color": "black",
+        "ytick.color": "black",
+        "axes.titlecolor": "black",
         "axes.titleweight": "bold",
         "axes.titlepad": 10,
     },
@@ -279,7 +279,7 @@ _THEME_RCPARAMS = {
         "axes.spines.right": False,
         "axes.spines.left": True,
         "axes.spines.bottom": True,
-        "axes.edgecolor": _MG3,
+        "axes.edgecolor": "black",
         "axes.linewidth": 0.8,
         "axes.grid": True,
         "grid.alpha": 0.3,
@@ -293,13 +293,13 @@ _THEME_RCPARAMS = {
         "legend.edgecolor": _MG3,
         "legend.facecolor": "#ffffff",
         "legend.borderpad": 0.6,
-        "figure.facecolor": "#ffffff",
-        "axes.facecolor": "#ffffff",
-        "text.color": _MG1,
-        "axes.labelcolor": _MG2,
-        "xtick.color": _MG2,
-        "ytick.color": _MG2,
-        "axes.titlecolor": _MG1,
+        "figure.facecolor": "white",
+        "axes.facecolor": "white",
+        "text.color": "black",
+        "axes.labelcolor": "black",
+        "xtick.color": "black",
+        "ytick.color": "black",
+        "axes.titlecolor": "black",
         "axes.titleweight": "bold",
         "axes.titlepad": 10,
     },
@@ -320,7 +320,7 @@ _THEME_RCPARAMS = {
         "axes.spines.right": False,
         "axes.spines.left": True,
         "axes.spines.bottom": True,
-        "axes.edgecolor": _AF2,
+        "axes.edgecolor": "black",
         "axes.linewidth": 0.8,
         "axes.grid": True,
         "grid.alpha": 0.5,
@@ -332,15 +332,15 @@ _THEME_RCPARAMS = {
         "patch.linewidth": 0,
         "legend.framealpha": 0.85,
         "legend.edgecolor": _AF2,
-        "legend.facecolor": _AF4,
+        "legend.facecolor": "white",
         "legend.borderpad": 0.6,
-        "figure.facecolor": _AF4,
-        "axes.facecolor": _AF4,
-        "text.color": "#1e3d6e",
-        "axes.labelcolor": _AF1,
-        "xtick.color": _AF1,
-        "ytick.color": _AF1,
-        "axes.titlecolor": "#1e3d6e",
+        "figure.facecolor": "white",
+        "axes.facecolor": "white",
+        "text.color": "black",
+        "axes.labelcolor": "black",
+        "xtick.color": "black",
+        "ytick.color": "black",
+        "axes.titlecolor": "black",
         "axes.titleweight": "bold",
         "axes.titlepad": 10,
     },
@@ -429,16 +429,16 @@ CATEGORICAL_PALETTE = [
     "#c49c94", "#f7b6d2", "#9edae5", "#393b79", "#637939",
 ]
 
-# Blue-tone palette for LLM NAV lines — alternates dark/light for maximum separation
+# Dark professional palette for LLM NAV lines — distinct hues at similar saturation
 NAV_LLM_PALETTE = [
-    "#0d2b4e",  # deep navy         (darkest)
-    "#5b9bd5",  # cornflower blue   (big jump up)
-    "#1a4472",  # dark royal        (back down)
-    "#8dc5e8",  # sky blue          (light)
-    "#2e6db4",  # medium royal
-    "#aad4ee",  # pale blue
-    "#3d7ab5",  # steel-royal
-    "#1e3d6e",  # dark steel (AF1 darkened)
+    "#2c3e50",  # deep ink blue
+    "#c0392b",  # deep brick red
+    "#1a6b3c",  # deep forest green
+    "#7d3c98",  # deep purple
+    "#d35400",  # deep amber orange
+    "#2471a3",  # deep water blue
+    "#b8860b",  # dark goldenrod
+    "#16a085",  # deep teal green
 ]
 # Gray shades for NAV baseline dashed lines
 NAV_BASELINE_PALETTE = ["#252525", "#636363", "#969696", "#bdbdbd", "#d9d9d9"]
@@ -472,12 +472,17 @@ def abbrev_model_name(model_key: str) -> str:
     return _MODEL_ABBREVS.get(name, name)
 
 
-def save_figure(fig: plt.Figure, path: str, formats=("pdf", "png")) -> None:
-    """Save figure in one or more formats."""
+def save_figure(fig: plt.Figure, path: str, formats=("pdf", "png"), dpi: int | None = None) -> None:
+    """Save figure in one or more formats.
+
+    Args:
+        dpi: Override the rcParams savefig.dpi for this save. Defaults to None
+             (uses rcParams value, typically 300).
+    """
     import pathlib
 
     base = pathlib.Path(path)
     base.parent.mkdir(parents=True, exist_ok=True)
     for fmt in formats:
-        fig.savefig(base.with_suffix(f".{fmt}"))
+        fig.savefig(base.with_suffix(f".{fmt}"), dpi=dpi)
     plt.close(fig)

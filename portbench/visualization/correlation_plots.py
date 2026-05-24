@@ -25,7 +25,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
-from matplotlib.patches import Rectangle
 
 from .style import apply_paper_style
 
@@ -110,7 +109,6 @@ def plot_correlation_heatmap(
     correlation_matrix: pd.DataFrame,
     asset_class_map: Optional[dict[str, str]] = None,
     *,
-    title: str = "Cross-Asset Correlation (grouped by class)",
     annotate: bool = False,
     figsize: tuple[float, float] = (9.0, 8.0),
 ) -> Figure:
@@ -134,13 +132,17 @@ def plot_correlation_heatmap(
     else:
         cm, spans = correlation_matrix, []
 
+    # Mask upper triangle (keep only lower triangle + diagonal)
+    mask = np.triu(np.ones_like(cm.values, dtype=bool), k=1)
+    masked = np.ma.masked_where(mask, cm.values)
+
     fig, ax = plt.subplots(figsize=figsize)
-    im = ax.imshow(cm.values, cmap="RdBu_r", vmin=-1.0, vmax=1.0, aspect="auto")
+    im = ax.imshow(masked, cmap="RdBu_r", vmin=-1.0, vmax=1.0, aspect="auto")
     ax.set_xticks(np.arange(len(cm.columns)))
     ax.set_yticks(np.arange(len(cm.index)))
-    ax.set_xticklabels(cm.columns, rotation=90, fontsize=7)
-    ax.set_yticklabels(cm.index, fontsize=7)
-    ax.set_title(title)
+    ax.set_xticklabels(cm.columns, rotation=90, fontsize=4)
+    ax.set_yticklabels(cm.index, fontsize=4)
+    ax.tick_params(axis="both", which="major", pad=8)
 
     if annotate and len(cm) <= 20:
         for i in range(len(cm)):
@@ -155,17 +157,21 @@ def plot_correlation_heatmap(
                     fontsize=6,
                 )
 
-    # Box each intra-class block
+    # Draw bottom + left edges only (lower-triangle portion of each class block)
     for ac, start, end in spans:
         n = end - start
-        rect = Rectangle(
-            (start - 0.5, start - 0.5), n, n,
-            fill=False, edgecolor="#1e3d6e", linewidth=1.6,
-        )
-        ax.add_patch(rect)
+        x0, y0 = start - 0.5, start - 0.5
+        x1, y1 = end - 0.5, end - 0.5
+        # Bottom edge
+        ax.plot([x0, x1], [y1, y1], color="#1e3d6e", linewidth=1.6)
+        # Left edge
+        ax.plot([x0, x0], [y0, y1], color="#1e3d6e", linewidth=1.6)
+        # Class label at the midpoint of the diagonal (hypotenuse), offset to the right
+        mid_x = start + n / 2 - 0.5
+        mid_y = start + n / 2 - 0.5
         ax.text(
-            start + n / 2 - 0.5, start - 0.7, ac,
-            ha="center", va="bottom", fontsize=8,
+            mid_x + 0.6, mid_y, ac,
+            ha="left", va="center", fontsize=8,
             color="#1e3d6e", fontweight="bold",
         )
 
@@ -184,7 +190,6 @@ def plot_inter_class_correlation(
     correlation_matrix: pd.DataFrame,
     asset_class_map: dict[str, str],
     *,
-    title: str = "Inter-Class vs Intra-Class Correlation",
     figsize: tuple[float, float] = (11.0, 4.5),
 ) -> Figure:
     """
@@ -210,7 +215,6 @@ def plot_inter_class_correlation(
         ax1.set_yticks(range(len(inter.index)))
         ax1.set_xticklabels(inter.columns, rotation=45, ha="right", fontsize=8)
         ax1.set_yticklabels(inter.index, fontsize=8)
-        ax1.set_title("Inter-class avg correlation\n(drives 15% hedging credit)", fontsize=10)
         for i in range(len(inter)):
             for j in range(len(inter)):
                 v = inter.values[i, j]
@@ -235,12 +239,10 @@ def plot_inter_class_correlation(
         ax2.axvline(0.0, color="#888", linewidth=0.6)
         ax2.set_xlim(-0.2, 1.05)
         ax2.set_xlabel("Avg pairwise correlation", fontsize=9)
-        ax2.set_title("Intra-class avg correlation\n(drives 15% concentration penalty)", fontsize=10)
         for i, v in enumerate(vals):
             ax2.text(v + 0.02, i, f"{v:+.2f}", va="center", fontsize=8)
 
-    fig.suptitle(title, fontsize=12, fontweight="bold")
-    fig.tight_layout(rect=[0, 0, 1, 0.94])
+    fig.tight_layout()
     return fig
 
 

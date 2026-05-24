@@ -37,6 +37,20 @@ def main(argv=None) -> int:
         ),
     )
     p.add_argument(
+        "--analyze-qa",
+        action="store_true",
+        help="Regenerate QA analysis figures and report from existing qa_summary.json.",
+    )
+    p.add_argument(
+        "--analyze-qa-info-level",
+        action="store_true",
+        help=(
+            "Compare full-info vs restricted-info QA accuracy for T4/T5. "
+            "Reads T4/T4_restricted and T5/T5_restricted results from EXPERIMENTS/qa_eval/. "
+            "Generates comparison figures and info_level_comparison.json. No LLM calls required."
+        ),
+    )
+    p.add_argument(
         "--rebalance",
         default="monthly",
         help="Rebalance frequency directory (default: monthly)",
@@ -75,9 +89,24 @@ def main(argv=None) -> int:
         print(f"σ ablation complete: {results_path}")
         return 0
 
+    if getattr(args, "analyze_qa", False):
+        from ..qa_eval.analysis import analyze_qa_results
+
+        report = analyze_qa_results(output_root=args.output_root)
+        print(f"QA analysis complete: {report}")
+        return 0
+
+    if getattr(args, "analyze_qa_info_level", False):
+        from ..qa_eval.analysis import analyze_qa_info_level_comparison
+
+        report = analyze_qa_info_level_comparison(output_root=args.output_root)
+        print(f"QA info-level comparison complete: {report}")
+        return 0
+
     if not args.config:
         p.error(
-            "--config is required (or use --rescore / --sigma-ablation to recompute without LLM calls)"
+            "--config is required (or use --rescore / --sigma-ablation / "
+            "--analyze-qa / --analyze-qa-info-level to recompute without LLM calls)"
         )
 
     cfg_path = Path(args.config)

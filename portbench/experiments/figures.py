@@ -61,6 +61,56 @@ def _load_stress_results(p_dir: Path) -> dict[str, dict]:
     return out
 
 
+def _load_ceps_per_step(
+    run_dir: Path, profile: str, nav_series: pd.Series | None, scenario: str | None = None,
+) -> pd.Series | None:
+    """Load per_step_ceps from run_summary.json and align with NAV rebalance dates.
+
+    Args:
+        run_dir:    Path to the timestamp directory.
+        profile:    Profile name (conservative|balanced|aggressive).
+        nav_series: NAV time series used to extract rebalance dates.
+        scenario:   If provided, load from stress_results.{scenario} instead of normal.
+    """
+    if nav_series is None:
+        return None
+    rs = run_dir / "run_summary.json"
+    if not rs.exists():
+        return None
+    summary = json.loads(rs.read_text(encoding="utf-8"))
+    profile_data = summary.get("profiles", {}).get(profile)
+    if not profile_data:
+        return None
+    if scenario:
+        sr = profile_data.get("stress_results", {})
+        if isinstance(sr, list):
+            steps = next((e.get("per_step_ceps") for e in sr if e.get("scenario") == scenario), None)
+        else:
+            steps = sr.get(scenario, {}).get("per_step_ceps")
+    else:
+        steps = profile_data.get("normal", {}).get("per_step_ceps")
+    if not steps:
+        return None
+    monthly = nav_series.resample("ME").last().dropna()
+    dates = monthly.index
+    n = min(len(dates), len(steps))
+    if n == 0:
+        return None
+    return pd.Series(steps[:n], index=dates[:n])
+
+
+def _load_stress_nav(p_dir: Path) -> dict[str, pd.Series]:
+    """Return {scenario_name: nav_series} for all stress_* dirs in p_dir."""
+    out = {}
+    for child in sorted(p_dir.iterdir()):
+        if child.is_dir() and child.name.startswith("stress_"):
+            nav_csv = child / "nav_curve.csv"
+            if nav_csv.exists():
+                df = pd.read_csv(nav_csv, parse_dates=["date"], index_col="date")
+                out[child.name[len("stress_"):]] = df["nav"]
+    return out
+
+
 def render_experiment_figures(
     profile_dir: Path,
     model_label: str,
@@ -204,9 +254,10 @@ def render_batch_comparison_figures(
         rebalance:      Rebalance frequency string.
 
     Figures generated:
-      nav_comparison_{profile}.png      — NAV curves: all models on one axis per profile
-      metrics_comparison_{profile}.png  — Bar chart metrics: all models per profile
-      stress_drawdown_{safe_model}.png  — Stress heatmap per model (all profiles × scenarios)
+      nav_comparison_{profile}.png              — NAV curves + CEPS twin axis per profile
+      nav_comparison_stress_{scenario}_{profile}.png — Stress NAV curves per scenario/profile
+      metrics_comparison_{profile}.png          — Bar chart metrics: all models per profile
+      stress_drawdown_{safe_model}.png          — Stress heatmap per model (all profiles x scenarios)
     """
     from . import paths as _paths
 
@@ -253,11 +304,13 @@ def render_batch_comparison_figures(
             nav = _load_normal_nav(profile_dir_path)
             normal = _load_normal_result(profile_dir_path)
             stress = _load_stress_results(profile_dir_path)
+            stress_nav = _load_stress_nav(profile_dir_path)
             if nav is not None or normal is not None or stress:
                 profiles_data[profile_name] = {
                     "nav": nav,
                     "normal": normal,
                     "stress": stress,
+                    "stress_nav": stress_nav,
                 }
         if profiles_data:
             model_data[model_key] = profiles_data
@@ -289,22 +342,74 @@ def render_batch_comparison_figures(
 
     sorted_model_keys = sorted(model_data.keys(), key=_nav_sort_key)
 
-    # Fig A: NAV comparison per profile
+    # Fig A: NAV comparison per profile (with CEPS twin axis for LLM models)
     for profile in all_profiles:
         nav_map: dict[str, pd.Series] = {}
+        ceps_map: dict[str, pd.Series] = {}
         for mlabel in sorted_model_keys:
             entry = model_data[mlabel].get(profile)
             if entry and entry.get("nav") is not None:
                 nav_map[mlabel] = entry["nav"]
+            # Load per-step CEPS for LLM models
+            if not mlabel.startswith("baseline/") and entry and entry.get("nav") is not None:
+                prov_name, model_name = mlabel.split("/", 1)
+                ts = run_timestamps.get(mlabel)
+                if ts:
+                    r_dir = _paths.run_dir(output_root, rebalance, prov_name, model_name, ts)
+                    ceps_series = _load_ceps_per_step(r_dir, profile, entry["nav"])
+                    if ceps_series is not None:
+                        ceps_map[mlabel] = ceps_series
         if nav_map:
             fig = plot_sandbox_nav(
                 nav_map,
                 title=f"NAV Comparison — {profile.capitalize()} Profile",
+                ceps_data=ceps_map if ceps_map else None,
             )
             save_figure(
                 fig, str(out_dir / f"nav_comparison_{profile}.png"), formats=("png",)
             )
             log(f"figure: nav_comparison_{profile}.png")
+
+    # Fig A2: Stress NAV comparison per scenario x profile (with CEPS twin axis)
+    stress_scenarios: set[str] = set()
+    for profiles in model_data.values():
+        for p_data in profiles.values():
+            sn = p_data.get("stress_nav")
+            if sn:
+                stress_scenarios.update(sn.keys())
+    for scenario in sorted(stress_scenarios):
+        for profile in all_profiles:
+            nav_map: dict[str, pd.Series] = {}
+            ceps_map: dict[str, pd.Series] = {}
+            for mlabel in sorted_model_keys:
+                entry = model_data[mlabel].get(profile)
+                sn = entry.get("stress_nav") if entry else None
+                if sn and scenario in sn:
+                    nav_map[mlabel] = sn[scenario]
+                    if not mlabel.startswith("baseline/"):
+                        prov_name, model_name = mlabel.split("/", 1)
+                        ts = run_timestamps.get(mlabel)
+                        if ts:
+                            r_dir = _paths.run_dir(output_root, rebalance, prov_name, model_name, ts)
+                            ceps_series = _load_ceps_per_step(
+                                r_dir, profile, sn[scenario], scenario=scenario
+                            )
+                            if ceps_series is not None:
+                                ceps_map[mlabel] = ceps_series
+            if nav_map:
+                scenario_label = scenario.replace("_", " ").title()
+                fig = plot_sandbox_nav(
+                    nav_map,
+                    title=f"NAV Comparison — {profile.capitalize()} Profile — Stress: {scenario_label}",
+                    ceps_data=ceps_map if ceps_map else None,
+                )
+                safe_scenario = scenario.replace(" ", "_")
+                save_figure(
+                    fig,
+                    str(out_dir / f"nav_comparison_stress_{safe_scenario}_{profile}.png"),
+                    formats=("png",),
+                )
+                log(f"figure: nav_comparison_stress_{safe_scenario}_{profile}.png")
 
     # Fig B: Metrics comparison per profile  (LLM models only — baselines have CEPS=0)
     for profile in all_profiles:

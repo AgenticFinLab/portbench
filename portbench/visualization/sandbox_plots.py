@@ -22,65 +22,118 @@ from .style import apply_paper_style, MODEL_PALETTE, PAPER_COLORS, LINE_STYLES, 
 def plot_sandbox_nav(
     nav_results: dict[str, pd.Series],
     title: str = "Portfolio NAV Curves",
-    figsize: tuple = (8, 4),
+    figsize: tuple = (10, 6),
+    ceps_data: dict[str, pd.Series] | None = None,
 ) -> Figure:
     """
-    Line chart of NAV curves for multiple models/baselines.
+    Two-panel figure: top = NAV curves, bottom = per-model CEPS bar chart.
 
-    LLM models: solid lines, top section of legend, colored from NAV_LLM_PALETTE.
-    Baselines:  dashed lines, bottom section of legend, colored from NAV_BASELINE_PALETTE.
-    All lines carry distinct markers (spaced) to aid identification when colors are similar.
+    Visual link between panels: when the cross-model mean CEPS at a rebalance
+    step falls below `ceps_low_threshold`, a shared light-red background band
+    is painted in *both* panels for that time interval, so readers can
+    immediately trace "low-quality period → NAV impact" without switching focus.
 
-    Args:
-        nav_results: {label: pd.Series(index=DatetimeIndex, values=NAV)}
-                     Keys are expected in sorted order (best model first within each group).
-        title:       Figure title.
-        figsize:     Figure dimensions.
+    LLM models: solid lines, NAV_LLM_PALETTE.
+    Baselines:  dashed lines, NAV_BASELINE_PALETTE.
     """
     apply_paper_style()
-    fig, ax = plt.subplots(figsize=figsize)
+    import matplotlib.lines as mlines
+
+    has_ceps = bool(ceps_data)
+    if has_ceps:
+        fig, (ax_nav, ax_ceps) = plt.subplots(
+            2, 1, figsize=figsize, sharex=True,
+            gridspec_kw={"height_ratios": [3, 1], "hspace": 0.06},
+            constrained_layout=True,
+        )
+    else:
+        fig, ax_nav = plt.subplots(figsize=(figsize[0], figsize[1] * 0.75))
+        ax_ceps = None
 
     llm_items  = [(n, s) for n, s in nav_results.items() if not n.startswith("baseline/")]
     base_items = [(n, s) for n, s in nav_results.items() if     n.startswith("baseline/")]
+    _MARKERS   = ["o", "s", "^", "D", "v", "P", "h", "*"]
 
-    _MARKERS = ["o", "s", "^", "D", "v", "P", "h", "*"]
+    # ── NAV curves ────────────────────────────────────────────────────────────
+    llm_handles, llm_colors = [], {}
+    for i, (name, nav) in enumerate(llm_items):
+        color    = NAV_LLM_PALETTE[i % len(NAV_LLM_PALETTE)]
+        nav_norm = nav / nav.iloc[0] * 100
+        every    = max(1, len(nav_norm) // 8)
+        line, = ax_nav.plot(
+            nav_norm.index, nav_norm.values,
+            color=color, linewidth=1.8, linestyle="-",
+            marker=_MARKERS[i % len(_MARKERS)], markevery=every, markersize=4,
+            markerfacecolor=color, markeredgewidth=0.5, markeredgecolor="white",
+            label=abbrev_model_name(name),
+        )
+        llm_handles.append(line)
+        llm_colors[name] = color
 
-    def _plot_group(items, palette, linestyle, lw_base):
-        handles = []
-        for i, (name, nav) in enumerate(items):
-            color    = palette[i % len(palette)]
-            marker   = _MARKERS[i % len(_MARKERS)]
-            nav_norm = nav / nav.iloc[0] * 100
-            every    = max(1, len(nav_norm) // 10)
-            line, = ax.plot(
-                nav_norm.index, nav_norm.values,
-                label=abbrev_model_name(name),
-                color=color, linewidth=lw_base,
-                linestyle=linestyle,
-                marker=marker, markevery=every, markersize=4,
-                markerfacecolor=color, markeredgewidth=0.5, markeredgecolor="white",
-            )
-            handles.append(line)
-        return handles
+    base_handles = []
+    for i, (name, nav) in enumerate(base_items):
+        color    = NAV_BASELINE_PALETTE[i % len(NAV_BASELINE_PALETTE)]
+        nav_norm = nav / nav.iloc[0] * 100
+        every    = max(1, len(nav_norm) // 8)
+        line, = ax_nav.plot(
+            nav_norm.index, nav_norm.values,
+            color=color, linewidth=1.2, linestyle="--",
+            marker=_MARKERS[i % len(_MARKERS)], markevery=every, markersize=4,
+            markerfacecolor=color, markeredgewidth=0.5, markeredgecolor="white",
+            label=abbrev_model_name(name),
+        )
+        base_handles.append(line)
 
-    llm_handles  = _plot_group(llm_items,  NAV_LLM_PALETTE,      "-",  1.8)
-    base_handles = _plot_group(base_items, NAV_BASELINE_PALETTE,  "--", 1.2)
+    ax_nav.axhline(100, color="#aaaaaa", linestyle=":", linewidth=0.8, alpha=0.6)
+    ax_nav.set_ylabel("Normalized NAV (base=100)", fontsize=9)
 
-    ax.axhline(100, color="#aaaaaa", linestyle=":", linewidth=0.8, alpha=0.6)
-    ax.set_xlabel("Date")
-    ax.set_ylabel("Normalized NAV (base=100)")
+    # ── Two-column legend ─────────────────────────────────────────────────────
+    spacer     = mlines.Line2D([], [], color="none", label="")
+    llm_title  = mlines.Line2D([], [], color="none", label="LLMs")
+    base_title = mlines.Line2D([], [], color="none", label="Baselines")
+    ax_nav.legend(
+        handles=[llm_title] + llm_handles + [spacer, base_title] + base_handles,
+        fontsize=8, loc="upper left", framealpha=0.9, edgecolor="0.8", ncols=2,
+    )
 
-    # Two-section legend: LLM at top, baselines below, separated by a title row
-    import matplotlib.lines as mlines
-    spacer = mlines.Line2D([], [], color="none", label="")
-    llm_title    = mlines.Line2D([], [], color="none", label="── LLM Models ──")
-    base_title   = mlines.Line2D([], [], color="none", label="── Baselines ──")
-    legend_handles = [llm_title] + llm_handles + [spacer, base_title] + base_handles
-    ax.legend(handles=legend_handles, fontsize=7, loc="upper left",
-              framealpha=0.85, edgecolor="0.8")
+    # ── CEPS bar chart (no background band — no meaningful CEPS→NAV relationship) ─
+    if has_ceps and ax_ceps is not None:
+        all_dates = sorted(set(
+            d for s in ceps_data.values() if s is not None for d in s.index
+        ))
+        n_llm = len([n for n, _ in llm_items if n in ceps_data])
+
+        if all_dates and n_llm:
+            span_days  = max(1, (all_dates[-1] - all_dates[0]).days)
+            bar_w_days = span_days / max(1, len(all_dates)) * 0.7 / n_llm
+
+            for i, (name, _) in enumerate(llm_items):
+                if name not in ceps_data or ceps_data[name] is None:
+                    continue
+                color  = llm_colors[name]
+                offset = (i - (n_llm - 1) / 2) * bar_w_days
+                for date, val in ceps_data[name].items():
+                    x_pos = date + pd.Timedelta(days=offset)
+                    ax_ceps.bar(x_pos, val,
+                                width=pd.Timedelta(days=bar_w_days),
+                                color=color, alpha=0.80, edgecolor="none")
+
+        # Auto-scale Y axis to data range
+        y_max = max(
+            (max(ceps_data[n].dropna().values) for n, _ in llm_items
+             if n in ceps_data and ceps_data[n] is not None and len(ceps_data[n].dropna()) > 0),
+            default=0.5,
+        )
+        ax_ceps.set_ylim(0, y_max * 1.15 if y_max > 0 else 1.0)
+        ax_ceps.set_ylabel("CEPS", fontsize=8)
+        ax_ceps.set_xlabel("Date", fontsize=9)
+        ax_ceps.tick_params(axis="both", labelsize=8)
+    else:
+        ax_nav.set_xlabel("Date", fontsize=9)
 
     fig.autofmt_xdate()
-    fig.tight_layout()
+    if not has_ceps:
+        fig.tight_layout()
     return fig
 
 

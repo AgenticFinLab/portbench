@@ -127,7 +127,7 @@ MarketSnapshot (price/return data, macro context, news_text, correlation_matrix)
 | S1    | LLM           | `clip(trailing_return / 0.10, -1, 1)` per asset | `1 − MAE(views, gt) / 2`                          |
 | S2    | LLM           | `view > 0.2 → buy`, `< -0.2 → sell`, else hold | Fraction of assets with correct signal direction |
 | S3    | LLM           | **max-Sharpe weights** over buy-signal assets (computed from realized future returns; never shown to LLM) | **σ × weight accuracy + (1−σ) × correlation awareness** (default σ=0.5). Correlation awareness = 50% intra-class concentration penalty + 50% inter-class hedging credit when `asset_class_map` is available; variance-ratio fallback otherwise. σ is configurable: σ=1 → pure return optimality, σ=0 → pure risk diversification. |
-| S4    | Deterministic | Execute S3 GT weights at zero slippage | Weight MAE vs GT executed weights                |
+| S4    | Deterministic | Execute S3 GT weights at zero slippage | Turnover deviation: `1 − abs(actual − gt_turnover) / max(actual, gt, ε)` — penalises under- and over-trading vs optimal GT volume |
 | S5    | Deterministic | Risk metrics from S4 GT weights | 50% rebalance decision + 50% VaR/drawdown accuracy; thresholds adapt to investor profile (`var_limit`, `max_drawdown_tolerance`) |
 
 Three stages call the LLM (S1, S2, S3) per rebalance; S4 and S5 are deterministic numerical layers.

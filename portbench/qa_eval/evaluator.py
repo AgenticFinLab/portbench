@@ -118,6 +118,31 @@ def _load_qa_pairs(dataset_path: str, split: str) -> list[dict]:
     return pairs
 
 
+def _strip_covariance_from_pair(pair: dict, base_tid: str) -> dict:
+    """Return a shallow-copy of pair with covariance/correlation info removed from question.
+
+    T4: removes the "Covariance(A,B) = X, Correlation = Y" line.
+    T5: removes the "Covariance matrix (annualized):" header line and the matrix line that follows.
+    """
+    question = pair.get("question", "")
+    if base_tid == "T4":
+        lines = question.split("\n")
+        question = "\n".join(l for l in lines if not l.startswith("Covariance("))
+    elif base_tid == "T5":
+        lines = question.split("\n")
+        result, skip_next = [], False
+        for line in lines:
+            if skip_next:
+                skip_next = False
+                continue
+            if line.startswith("Covariance matrix"):
+                skip_next = True
+                continue
+            result.append(line)
+        question = "\n".join(result)
+    return {**pair, "question": question}
+
+
 def _build_eval_prompt(pair: dict) -> str:
     context = pair.get("context_summary", "")
     question = pair.get("question", "")
@@ -158,6 +183,19 @@ class QAEvaluator:
             if len(self._pairs_by_template[tid]) < cfg.qa.max_pairs_per_template:
                 self._pairs_by_template[tid].append(p)
 
+        # Restricted-info variants: duplicate T4/T5 under T4_restricted/T5_restricted
+        info_level = cfg.qa.info_level
+        if info_level in ("restricted", "both"):
+            for base_tid in ("T4", "T5"):
+                if base_tid in self._pairs_by_template:
+                    self._pairs_by_template[f"{base_tid}_restricted"] = list(
+                        self._pairs_by_template[base_tid]
+                    )
+        if info_level == "restricted":
+            # Drop full-info T4/T5 so only restricted variants run
+            for base_tid in ("T4", "T5"):
+                self._pairs_by_template.pop(base_tid, None)
+
         # Filter models to LLM-only (skip baseline / mock)
         self._llm_specs = [s for s in cfg.models if s.kind() == "llm"]
 
@@ -186,20 +224,28 @@ class QAEvaluator:
             for pairs in self._pairs_by_template.values()
         ) * len(self._llm_specs)
 
+        n_models = len(self._llm_specs)
+        templates_order = sorted(self._pairs_by_template.keys())
+
         pbar = tqdm(total=n_total, desc="qa_eval", unit="q", dynamic_ncols=True)
 
-        for spec in self._llm_specs:
+        for i, spec in enumerate(self._llm_specs):
             provider = spec_provider_name(spec)
             model_name = spec_model_name(spec)
             label = _spec_display_label(spec)
+
+            tqdm.write(f"\n[QA] ── Model {i+1}/{n_models}: {label} ──")
+            tqdm.write(f"      templates: {', '.join(templates_order)}")
+
             try:
                 adapter = build_adapter(
                     spec.provider, spec.model,
                     temperature=spec.temperature if spec.temperature is not None else self.cfg.generation.temperature,
                     max_tokens=spec.max_tokens if spec.max_tokens is not None else self.cfg.generation.max_tokens,
+                    timeout=self.cfg.timeout,
                 )
             except Exception as exc:
-                print(f"[QA] adapter build failed for {label}: {exc}")
+                tqdm.write(f"[QA] adapter build failed for {label}: {exc}")
                 pbar.update(sum(len(p) for p in self._pairs_by_template.values()))
                 continue
 
@@ -207,6 +253,10 @@ class QAEvaluator:
                 spec, adapter, provider, model_name, label, pbar,
             )
             model_summaries[label] = model_summary
+
+            mean_acc = model_summary.get("mean_accuracy", 0.0)
+            n_done = model_summary.get("n_total", 0)
+            tqdm.write(f"[QA] ✓ {label}  mean_accuracy={mean_acc:.3f}  n={n_done}")
 
         pbar.close()
 
@@ -238,16 +288,30 @@ class QAEvaluator:
 
         for tid in sorted(self._pairs_by_template.keys()):
             pairs = self._pairs_by_template[tid]
+            model_parallel = (
+                spec.parallel_questions
+                if spec.parallel_questions is not None
+                else cfg.qa.parallel_questions
+            )
+            pbar.set_description(f"{label.split('/')[-1]} {tid}")
+            tqdm.write(f"  → {tid}  ({len(pairs)} questions, parallel={model_parallel})")
             t_summary = self._run_template(
                 adapter, provider, model_name, label, tid, pairs,
                 completed_keys, ckpt_lock, ckpt_path, pbar,
+                parallel_questions=model_parallel,
             )
             template_summaries[tid] = t_summary
+            acc = t_summary.get("accuracy", 0.0)
+            n = t_summary.get("n_total", 0)
+            tqdm.write(f"     {tid} done  accuracy={acc:.3f}  n={n}")
 
         # Write model-level summary
+        # Aggregate scores — exclude _restricted variants from the mean_accuracy
+        # so the primary summary reflects full-info performance only.
         all_scores = []
-        for ts in template_summaries.values():
-            all_scores.extend(ts.get("scores", []))
+        for tid, ts in template_summaries.items():
+            if not tid.endswith("_restricted"):
+                all_scores.extend(ts.get("scores", []))
 
         model_summary = {
             "provider": provider,
@@ -263,7 +327,14 @@ class QAEvaluator:
 
         m_dir = qpaths.qa_model_dir(cfg.output_root, provider, model_name)
         m_dir.mkdir(parents=True, exist_ok=True)
-        (m_dir / "qa_model_summary.json").write_text(
+        # Use a separate file for restricted runs to avoid overwriting full-info summary
+        info_level = cfg.qa.info_level
+        summary_fname = (
+            "qa_model_summary_restricted.json"
+            if info_level == "restricted"
+            else "qa_model_summary.json"
+        )
+        (m_dir / summary_fname).write_text(
             json.dumps(model_summary, indent=2, default=str), encoding="utf-8"
         )
 
@@ -288,12 +359,16 @@ class QAEvaluator:
         ckpt_lock: threading.Lock,
         ckpt_path: Path,
         pbar,
+        parallel_questions: int = 4,
     ) -> dict:
         cfg = self.cfg
         t_dir = qpaths.qa_template_dir(
             cfg.output_root, provider, model_name, template_id
         )
         t_dir.mkdir(parents=True, exist_ok=True)
+
+        is_restricted = template_id.endswith("_restricted")
+        base_tid = template_id.replace("_restricted", "") if is_restricted else template_id
 
         # Fast path: all pairs already evaluated → rebuild summary from results.jsonl
         # (avoids stale zero-value summaries written by earlier broken resume runs).
@@ -308,6 +383,7 @@ class QAEvaluator:
                     json.dumps(summary, indent=2), encoding="utf-8"
                 )
                 pbar.update(len(pairs))
+                tqdm.write(f"     {template_id} skipped (all {len(pairs)} cached)  accuracy={summary.get('accuracy', 0):.3f}")
                 return summary
 
         scores: list[float] = []
@@ -324,12 +400,15 @@ class QAEvaluator:
 
             t0 = time.time()
             try:
-                prompt = _build_eval_prompt(pair)
+                eval_pair = (
+                    _strip_covariance_from_pair(pair, base_tid) if is_restricted else pair
+                )
+                prompt = _build_eval_prompt(eval_pair)
                 response = adapter.complete(prompt)
                 latency = time.time() - t0
 
                 sc = score_response(
-                    template_id=template_id,
+                    template_id=base_tid,
                     gt_answer=pair.get("answer", ""),
                     llm_response=response or "",
                     answer_numeric=pair.get("answer_numeric"),
@@ -380,7 +459,7 @@ class QAEvaluator:
 
             pbar.update(1)
 
-        max_workers = max(1, cfg.qa.parallel_questions)
+        max_workers = max(1, parallel_questions)
         with ThreadPoolExecutor(max_workers=max_workers) as ex:
             futs = {ex.submit(_eval_one, p): p for p in pairs}
             for fut in as_completed(futs):

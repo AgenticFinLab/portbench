@@ -43,17 +43,30 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 
 
+class EmptyResponseError(RuntimeError):
+    """
+    Raised when the LLM API returns an empty response after a single retry.
+
+    Empty responses from investment-related prompts are typically content-safety
+    refusals, not transient network issues — retrying more than once wastes quota.
+    Callers should catch this and apply refusal fallback logic.
+    """
+
+
 def _retry(fn, max_retries: int = 3, base_delay: float = 2.0):
     """
     Retry fn() with exponential backoff on transient API errors.
 
     Retries on: RateLimitError, APIConnectionError, ServiceUnavailableError.
-    Raises on: AuthenticationError, InvalidRequestError (non-retryable).
+    Raises immediately on: AuthenticationError, InvalidRequestError (non-retryable),
+                            EmptyResponseError (handled by caller as refusal).
     """
     delay = base_delay
     for attempt in range(max_retries):
         try:
             return fn()
+        except EmptyResponseError:
+            raise  # Don't retry — caller handles as refusal fallback
         except Exception as e:
             err_str = str(type(e).__name__).lower()
             # Non-retryable errors — fail immediately
@@ -288,19 +301,34 @@ class OpenAIAdapter(AgentAdapter):
     def complete(self, prompt: str) -> str:
         """Call the OpenAI Chat Completions API and return the response text."""
 
-        def _call():
-            response = self._client.chat.completions.create(
-                model=self._model,
-                max_tokens=self._max_tokens,
-                temperature=self._temperature,
-                messages=[
-                    {"role": "system", "content": self._system_prompt},
-                    {"role": "user", "content": prompt},
-                ],
-            )
-            return response.choices[0].message.content
+        for empty_attempt in range(2):  # 2 attempts total (initial + 1 retry)
+            # Re-define _call each iteration so the closure is fresh
+            def _call():
+                response = self._client.chat.completions.create(
+                    model=self._model,
+                    max_tokens=self._max_tokens,
+                    temperature=self._temperature,
+                    messages=[
+                        {"role": "system", "content": self._system_prompt},
+                        {"role": "user", "content": prompt},
+                    ],
+                )
+                content = response.choices[0].message.content
+                if not content or not content.strip():
+                    raise EmptyResponseError("Empty response from API")
+                return content
 
-        return _retry(_call, max_retries=self._max_retries)
+            try:
+                return _retry(_call, max_retries=self._max_retries)
+            except EmptyResponseError:
+                if empty_attempt == 0:
+                    print(
+                        "  Empty response from API — retrying once "
+                        "(may be content filtering)"
+                    )
+                    time.sleep(1.0)
+                    continue
+                raise
 
     def complete_with_tools(self, prompt: str, tools: list) -> str:
         """
@@ -442,11 +470,26 @@ class LiteLLMAdapter(AgentAdapter):
         if self._api_base:
             kwargs["api_base"] = self._api_base
 
-        def _call():
-            response = self._litellm.completion(**kwargs)
-            return response.choices[0].message.content
+        for empty_attempt in range(2):  # 2 attempts total (initial + 1 retry)
+            # Re-define _call each iteration so the closure is fresh
+            def _call():
+                response = self._litellm.completion(**kwargs)
+                content = response.choices[0].message.content
+                if not content or not content.strip():
+                    raise EmptyResponseError("Empty response from API")
+                return content
 
-        return _retry(_call, max_retries=self._max_retries)
+            try:
+                return _retry(_call, max_retries=self._max_retries)
+            except EmptyResponseError:
+                if empty_attempt == 0:
+                    print(
+                        "  Empty response from API — retrying once "
+                        "(may be content filtering)"
+                    )
+                    time.sleep(1.0)
+                    continue
+                raise
 
     def complete_with_tools(self, prompt: str, tools: list) -> str:
         """

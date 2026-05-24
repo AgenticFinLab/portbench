@@ -70,7 +70,6 @@ def plot_dataset_overview(
     """
     apply_paper_style()
     fig, axes = plt.subplots(3, 2, figsize=figsize)
-    fig.suptitle(title, fontsize=13, fontweight="bold", y=1.01)
 
     templates = [t for t in _TEMPLATE_IDS if t in stats]
 
@@ -102,7 +101,6 @@ def plot_dataset_overview(
             fontweight="bold",
         )
     ax.set_ylabel("Number of QA Pairs")
-    ax.set_title("(a) Sample Count by Template & Split", fontsize=10)
     ax.legend(fontsize=8, loc="upper right")
     ax.set_xticks(range(len(templates)))
     ax.set_xticklabels(templates)
@@ -127,7 +125,6 @@ def plot_dataset_overview(
     ax.set_xticks(x)
     ax.set_xticklabels(templates)
     ax.set_ylabel("Number of QA Pairs")
-    ax.set_title("(b) Sample Count by Template & Market Regime", fontsize=10)
     ax.legend(fontsize=8)
 
     # ----------------------------------------------------------------
@@ -149,7 +146,6 @@ def plot_dataset_overview(
     ax.set_xticks(range(len(levels)))
     ax.set_xticklabels(level_labels, fontsize=8.5)
     ax.set_ylabel("Total QA Pairs")
-    ax.set_title("(c) Pairs by Complexity Level", fontsize=10)
     for bar, n in zip(bars, level_n_pairs):
         ax.text(
             bar.get_x() + bar.get_width() / 2,
@@ -183,7 +179,6 @@ def plot_dataset_overview(
     )
     for at in autotexts:
         at.set_fontsize(8)
-    ax.set_title("(d) Overall Regime Distribution", fontsize=10)
 
     # ----------------------------------------------------------------
     # (e) Bar: % samples with news text + avg context length
@@ -194,9 +189,9 @@ def plot_dataset_overview(
     bars = ax.bar(
         templates, pct_text, color=color_pct, alpha=0.80, label="% with news/filing"
     )
-    ax.set_ylabel("% Samples with News / Filing Text", color=color_pct)
+    ax.set_ylabel("% Samples with News / Filing Text", color="black")
     ax.set_ylim(0, 115)
-    ax.tick_params(axis="y", labelcolor=color_pct)
+    ax.tick_params(axis="y", labelcolor="black")
     for bar, pct in zip(bars, pct_text):
         ax.text(
             bar.get_x() + bar.get_width() / 2,
@@ -230,7 +225,6 @@ def plot_dataset_overview(
         )
     ]
     ax.legend(handles=lines1 + lines2, fontsize=8, loc="upper left")
-    ax.set_title("(e) Text Richness per Template", fontsize=10)
 
     # ----------------------------------------------------------------
     # (f) Split time range annotation
@@ -276,7 +270,6 @@ def plot_dataset_overview(
     ax.set_yticklabels([s.capitalize() for s in split_list])
     ax.set_xlabel("Year")
     ax.set_xlim(2014, 2027)
-    ax.set_title("(f) Temporal Data Split", fontsize=10)
     overall = meta.get("text_overall", {})
     if overall:
         info = (
@@ -339,7 +332,6 @@ def plot_regime_heatmap(
     ax.set_xticklabels([r.capitalize() for r in regimes])
     ax.set_yticks(range(len(templates)))
     ax.set_yticklabels(templates)
-    ax.set_title(title, fontsize=11, fontweight="bold")
 
     cbar = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.04)
     cbar.set_label("Sample Count", fontsize=9)
@@ -367,10 +359,17 @@ _RAW_ASSET_LABELS = {
     "cash": "Cash — Fed Funds",
 }
 
+_RATE_COLORS = {
+    "bonds": "#c44e52",
+    "cash": "#d9744a",
+}
+
+_NEWS_CHARS_COLOR = "#8b5cf6"
+
 _CRISES = [
     ("2015-08-01", "2015-09-30", "2015 China Shock"),
-    ("2020-02-15", "2020-04-20", "2020 COVID Crash"),
-    ("2022-01-01", "2022-12-31", "2022 Bear Market"),
+    ("2020-02-15", "2020-04-20", "2020 COVID Crash   "),
+    ("2022-01-01", "2022-12-31", "   2022 Crypto Collapse"),
 ]
 
 
@@ -438,7 +437,7 @@ def _monthly_char_count(text_col: pd.Series) -> pd.Series:
 
 def plot_rawdata_overview(
     csv_path: str = "datasets/processed/portbench.csv",
-    figsize: tuple = (11, 5),
+    figsize: tuple = (8, 4.0),
 ) -> Figure:
     """
     Single-panel figure showing portbench.csv raw data at a glance.
@@ -516,13 +515,13 @@ def plot_rawdata_overview(
         )
 
     # ── Rate lines (right axis, dashed) ─────────────────────────────────
-    _RATE_LS = ["--", ":"]
+    _RATE_LS = ["--", "--"]
     for idx, (key, series) in enumerate(rate_series.items()):
         ax_rate.plot(
             series.index,
             series.values,
             label=_RAW_ASSET_LABELS[key],
-            color=_RAW_ASSET_COLORS[key],
+            color=_RATE_COLORS[key],
             linestyle=_RATE_LS[idx % len(_RATE_LS)],
             linewidth=1.2,
             alpha=0.85,
@@ -531,8 +530,8 @@ def plot_rawdata_overview(
 
     ax_top.axhline(100, color="#c0c0c0", linestyle=":", linewidth=0.7, alpha=0.5)
     ax_top.set_ylabel("Normalized Index  (base = 100)", fontsize=10)
-    ax_rate.set_ylabel("Interest Rate  (%)", fontsize=10, color="#4a6fa5")
-    ax_rate.tick_params(axis="y", colors="#4a6fa5", labelsize=9)
+    ax_rate.set_ylabel("Interest Rate  (%)", fontsize=10, color="#c44e52")
+    ax_rate.tick_params(axis="y", colors="#c44e52", labelsize=9)
     ax_top.set_xlim(df.index.min(), df.index.max())
 
     # ── ylim: positive region only ───────────────────────────────────────
@@ -542,44 +541,28 @@ def plot_rawdata_overview(
     ax_top.set_ylim(0, price_top)
     ax_rate.set_ylim(0, 9.0)
 
-    # ── News character count curve (second right axis) ────────────────────
+    # ── News text coverage background (height = % of max chars) ─────────
+    ax_chars.set_visible(False)
     chars_idx = chars_eq.index.union(chars_cry.index)
     chars_total = chars_eq.reindex(chars_idx, fill_value=0) + chars_cry.reindex(
         chars_idx, fill_value=0
     )
 
     if len(chars_idx) > 0 and chars_total.max() > 0:
-        chars_max = float(chars_total.max())
-        ax_chars.set_ylim(0, chars_max * 1.08)
-
-        ax_chars.spines["right"].set_position(("outward", 58))
-        ax_chars.spines["right"].set_visible(True)
-        for sp in ["left", "top", "bottom"]:
-            ax_chars.spines[sp].set_visible(False)
-        ax_chars.yaxis.set_label_position("right")
-        ax_chars.yaxis.tick_right()
-        ax_chars.tick_params(axis="y", colors="#7a9fc5", labelsize=9)
-        ax_chars.set_ylabel("News chars / month", fontsize=10, color="#7a9fc5")
-        ax_chars.yaxis.set_major_formatter(
-            plt.FuncFormatter(lambda x, _: f"{x/1000:.0f}k")
-        )
-
-        ax_chars.plot(
+        chars_frac = chars_total / chars_total.max()
+        ax_top.fill_between(
             chars_idx,
-            chars_total.values,
-            color="#7a9fc5",
-            linewidth=1.4,
-            linestyle="-.",
-            alpha=0.85,
-            zorder=4,
+            0,
+            chars_frac * price_top,
+            color="#d4e4f7",
+            alpha=0.35,
+            zorder=0,
         )
-    else:
-        ax_chars.set_visible(False)
 
-    # ── Crisis shading ───────────────────────────────────────────────────
+    # ── Crisis shading (deep blue) ──────────────────────────────────────
     for start_s, end_s, label in _CRISES:
         start, end = pd.Timestamp(start_s), pd.Timestamp(end_s)
-        ax_top.axvspan(start, end, color="#d4e4f7", alpha=0.45, zorder=0)
+        ax_top.axvspan(start, end, color="#1e3d6e", alpha=0.15, zorder=0)
         ax_top.text(
             start + (end - start) / 2,
             1.01,
@@ -610,7 +593,7 @@ def plot_rawdata_overview(
         mlines.Line2D(
             [],
             [],
-            color=_RAW_ASSET_COLORS[k],
+            color=_RATE_COLORS[k],
             linestyle=_RATE_LS[i % len(_RATE_LS)],
             linewidth=1.3,
             label=_RAW_ASSET_LABELS[k],
@@ -618,59 +601,17 @@ def plot_rawdata_overview(
         for i, k in enumerate(rate_series)
     ]
     crisis_patch = mpatches.Patch(
-        color="#d4e4f7", alpha=0.7, label="Market Stress Window"
+        color="#1e3d6e", alpha=0.15, label="Market Stress Window"
     )
-    news_chars_line = mlines.Line2D(
-        [],
-        [],
-        color="#7a9fc5",
-        linestyle="-.",
-        linewidth=1.4,
-        label="News chars / month",
+    news_bg_patch = mpatches.Patch(
+        color="#d4e4f7", alpha=0.25, label="News Text Coverage"
     )
     ax_top.legend(
-        handles=price_handles + rate_handles + [crisis_patch, news_chars_line],
+        handles=price_handles + rate_handles + [crisis_patch, news_bg_patch],
         fontsize=9,
         loc="upper left",
         framealpha=0.9,
         ncols=2,
-    )
-
-    # ── Dataset stats — below legend (left side) ─────────────────────────
-    n_rows = len(df)
-    n_cols = len(df.columns)
-    date_min = df.index.min().strftime("%Y-%m")
-    date_max = df.index.max().strftime("%Y-%m")
-    has_news = (
-        df.get("equities_text_json", pd.Series(dtype=str)).notna()
-        | df.get("cryptocurrency_text_json", pd.Series(dtype=str)).notna()
-    )
-    pct_news = has_news.mean() * 100
-    stats_text = (
-        f"  {n_rows:,} trading days\n"
-        f"  {n_cols:,} features\n"
-        f"  {date_min} – {date_max}\n"
-        f"  6 asset classes\n"
-        f"  {pct_news:.0f}% days with news"
-    )
-    ax_top.text(
-        0.013,
-        0.73,
-        stats_text,
-        transform=ax_top.transAxes,
-        ha="left",
-        va="top",
-        fontsize=9,
-        color="#1e3d6e",
-        linespacing=1.6,
-        bbox=dict(
-            boxstyle="round,pad=0.5",
-            facecolor="white",
-            edgecolor="#8ab8e0",
-            linewidth=0.8,
-            alpha=0.90,
-        ),
-        zorder=7,
     )
 
     ax_top.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
@@ -1029,4 +970,892 @@ def plot_qa_capability_overview(
             zorder=5,
         )
 
+    return fig
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Single-panel statistics figures for raw dataset (portbench.csv)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Source colors
+_SOURCE_COLORS = {
+    "Yahoo Finance": "#1e3d6e",
+    "FRED": "#4a6fa5",
+    "Kaggle": "#7a9fc5",
+    "SEC": "#d4e4f7",
+}
+
+# Asset class colors (consistent with existing _RAW_ASSET_COLORS)
+_ASSET_CLASS_COLORS = {
+    "equities": "#1e3d6e",
+    "bonds": "#4a6fa5",
+    "commodities": "#7a9fc5",
+    "cryptocurrency": "#c0c0c0",
+    "real_estate": "#d4e4f7",
+    "cash": "#8a8a8a",
+}
+
+_ASSET_CLASS_LABELS = {
+    "equities": "Equities",
+    "bonds": "Bonds",
+    "commodities": "Commodities",
+    "cryptocurrency": "Crypto",
+    "real_estate": "Real Estate",
+    "cash": "Cash",
+}
+
+_ASSET_CLASS_ORDER = ["equities", "bonds", "commodities", "cryptocurrency", "real_estate", "cash"]
+
+
+def _infer_source(col_name: str) -> str:
+    """Infer data source from column name."""
+    if col_name == "date":
+        return "meta"
+    if col_name.endswith("_text_json"):
+        return "SEC"
+    if "_fred_" in col_name:
+        return "FRED"
+    if "_kaggle_" in col_name:
+        return "Kaggle"
+    return "Yahoo Finance"
+
+
+def _infer_asset_class(col_name: str) -> str | None:
+    """Infer asset class from column name. Returns None for 'date'."""
+    if col_name == "date":
+        return None
+    # Handle multi-word prefixes: real_estate_*, cryptocurrency_*
+    for prefix in ("real_estate", "cryptocurrency"):
+        if col_name.startswith(prefix + "_"):
+            return prefix
+    return col_name.split("_")[0]
+
+
+def _classify_columns(columns: list[str]) -> dict:
+    """
+    Classify each column by source and asset class.
+
+    Returns dict with keys: by_source, by_class, source_class_matrix,
+    ticker_set, n_numeric, n_text, n_total.
+    """
+    by_source: dict[str, list[str]] = {}
+    by_class: dict[str, list[str]] = {}
+    ticker_set: dict[str, set[str]] = {}
+    n_numeric = 0
+    n_text = 0
+
+    for col in columns:
+        if col == "date":
+            continue
+        src = _infer_source(col)
+        cls = _infer_asset_class(col)
+        by_source.setdefault(src, []).append(col)
+        if cls:
+            by_class.setdefault(cls, []).append(col)
+            ticker_raw = col[len(cls) + 1:]
+            if src == "SEC":
+                ticker_set.setdefault(cls, set()).add(f"{cls}_text")
+            else:
+                if src == "Yahoo Finance":
+                    # ticker_raw e.g. "AAPL_close" or "XRP_USD_close" — chop known suffixes
+                    for s in ("_close", "_high", "_low", "_open", "_return", "_volume"):
+                        if ticker_raw.endswith(s):
+                            ticker = ticker_raw[: -len(s)]
+                            break
+                    else:
+                        ticker = ticker_raw
+                elif src == "FRED":
+                    ticker = ticker_raw.replace("fred_", "", 1)
+                else:
+                    ticker = ticker_raw.replace("kaggle_", "", 1)
+                ticker_set.setdefault(cls, set()).add(ticker)
+        if col.endswith("_text_json"):
+            n_text += 1
+        else:
+            n_numeric += 1
+
+    source_class_matrix: dict[str, dict[str, int]] = {}
+    for src, cols in by_source.items():
+        class_counts: dict[str, int] = {}
+        for col in cols:
+            cls = _infer_asset_class(col)
+            if cls:
+                class_counts[cls] = class_counts.get(cls, 0) + 1
+        source_class_matrix[src] = class_counts
+
+    return {
+        "by_source": by_source,
+        "by_class": by_class,
+        "source_class_matrix": source_class_matrix,
+        "ticker_set": ticker_set,
+        "n_numeric": n_numeric,
+        "n_text": n_text,
+        "n_total": len(columns) - 1,
+    }
+
+
+def plot_data_sources_pie(
+    classification: dict,
+    title: str = "Data Sources by Column Count",
+    figsize: tuple = (7, 5),
+) -> Figure:
+    """Pie chart: proportion of columns from each data source."""
+    apply_paper_style()
+    fig, ax = plt.subplots(figsize=figsize)
+
+    by_source = classification["by_source"]
+    sources = sorted(by_source.keys(), key=lambda s: len(by_source[s]), reverse=True)
+    counts = [len(by_source[s]) for s in sources]
+    colors = [_SOURCE_COLORS.get(s, "#cccccc") for s in sources]
+
+    wedges, texts, autotexts = ax.pie(
+        counts,
+        labels=sources,
+        colors=colors,
+        autopct="%1.1f%%",
+        startangle=140,
+        pctdistance=0.75,
+        textprops={"fontsize": 10},
+    )
+    for at in autotexts:
+        at.set_fontsize(9)
+        at.set_fontweight("bold")
+
+    legend_labels = [f"{s}  ({c:,} cols)" for s, c in zip(sources, counts)]
+    ax.legend(wedges, legend_labels, fontsize=9, loc="lower center", ncols=2)
+    fig.tight_layout()
+    return fig
+
+
+def plot_data_sources_tickers_pie(
+    classification: dict,
+    title: str = "Data Sources by Unique Ticker Count",
+    figsize: tuple = (7, 5),
+) -> Figure:
+    """Pie chart: proportion of unique tickers from each data source."""
+    apply_paper_style()
+    fig, ax = plt.subplots(figsize=figsize)
+
+    ticker_set = classification["ticker_set"]
+    source_ticker_count: dict[str, int] = {}
+    for cls, tickers in ticker_set.items():
+        for t in tickers:
+            if "_fred_" in t or t.startswith("fred_"):
+                src = "FRED"
+            elif "_kaggle_" in t or t.startswith("kaggle_"):
+                src = "Kaggle"
+            elif t.endswith("_text"):
+                src = "SEC"
+            else:
+                src = "Yahoo Finance"
+            source_ticker_count[src] = source_ticker_count.get(src, 0) + 1
+
+    sources = sorted(source_ticker_count.keys(), key=lambda s: source_ticker_count[s], reverse=True)
+    counts = [source_ticker_count[s] for s in sources]
+    colors = [_SOURCE_COLORS.get(s, "#cccccc") for s in sources]
+
+    wedges, texts, autotexts = ax.pie(
+        counts,
+        labels=sources,
+        colors=colors,
+        autopct="%1.1f%%",
+        startangle=140,
+        pctdistance=0.75,
+        textprops={"fontsize": 10},
+    )
+    for at in autotexts:
+        at.set_fontsize(9)
+        at.set_fontweight("bold")
+
+    legend_labels = [f"{s}  ({c:,} tickers)" for s, c in zip(sources, counts)]
+    ax.legend(wedges, legend_labels, fontsize=9, loc="lower center", ncols=2)
+    fig.tight_layout()
+    return fig
+
+
+def plot_asset_class_tickers_bar(
+    classification: dict,
+    title: str = "Number of Tickers per Asset Class",
+    figsize: tuple = (8, 5),
+) -> Figure:
+    """Horizontal bar chart: unique ticker count per asset class."""
+    apply_paper_style()
+    fig, ax = plt.subplots(figsize=figsize)
+
+    ticker_set = classification["ticker_set"]
+    classes = [c for c in _ASSET_CLASS_ORDER if c in ticker_set]
+    counts = [len(ticker_set[c]) for c in classes]
+    labels = [_ASSET_CLASS_LABELS.get(c, c) for c in classes]
+    colors = [_ASSET_CLASS_COLORS.get(c, "#cccccc") for c in classes]
+
+    bars = ax.barh(range(len(classes)), counts, color=colors, alpha=0.88, height=0.6)
+    ax.set_yticks(range(len(classes)))
+    ax.set_yticklabels(labels)
+    ax.invert_yaxis()
+    ax.set_xlabel("Number of Unique Tickers")
+
+    for bar, n in zip(bars, counts):
+        ax.text(
+            bar.get_width() + max(counts) * 0.01,
+            bar.get_y() + bar.get_height() / 2,
+            str(n),
+            va="center",
+            fontsize=10,
+            fontweight="bold",
+            color="#1e3d6e",
+        )
+
+    fig.tight_layout()
+    return fig
+
+
+def plot_asset_class_columns_bar(
+    classification: dict,
+    title: str = "Number of Columns per Asset Class",
+    figsize: tuple = (8, 5),
+) -> Figure:
+    """Horizontal bar chart: total column count per asset class."""
+    apply_paper_style()
+    fig, ax = plt.subplots(figsize=figsize)
+
+    by_class = classification["by_class"]
+    classes = [c for c in _ASSET_CLASS_ORDER if c in by_class]
+    counts = [len(by_class[c]) for c in classes]
+    labels = [_ASSET_CLASS_LABELS.get(c, c) for c in classes]
+    colors = [_ASSET_CLASS_COLORS.get(c, "#cccccc") for c in classes]
+
+    bars = ax.barh(range(len(classes)), counts, color=colors, alpha=0.88, height=0.6)
+    ax.set_yticks(range(len(classes)))
+    ax.set_yticklabels(labels)
+    ax.invert_yaxis()
+    ax.set_xlabel("Number of Columns")
+
+    for bar, n in zip(bars, counts):
+        ax.text(
+            bar.get_width() + max(counts) * 0.01,
+            bar.get_y() + bar.get_height() / 2,
+            str(n),
+            va="center",
+            fontsize=10,
+            fontweight="bold",
+            color="#1e3d6e",
+        )
+
+    fig.tight_layout()
+    return fig
+
+
+def plot_numeric_vs_text_pie(
+    classification: dict,
+    title: str = "Numeric vs Text Columns",
+    figsize: tuple = (6, 5),
+) -> Figure:
+    """Pie chart: proportion of numeric vs text columns."""
+    apply_paper_style()
+    fig, ax = plt.subplots(figsize=figsize)
+
+    labels = ["Numeric", "Text (News/Filings)"]
+    counts = [classification["n_numeric"], classification["n_text"]]
+    colors = ["#1e3d6e", "#d4e4f7"]
+
+    wedges, texts, autotexts = ax.pie(
+        counts,
+        labels=labels,
+        colors=colors,
+        autopct="%1.1f%%",
+        startangle=140,
+        pctdistance=0.70,
+        textprops={"fontsize": 10},
+    )
+    for at in autotexts:
+        at.set_fontsize(9)
+        at.set_fontweight("bold")
+
+    legend_labels = [f"{l}  ({c:,} cols)" for l, c in zip(labels, counts)]
+    ax.legend(wedges, legend_labels, fontsize=9)
+    fig.tight_layout()
+    return fig
+
+
+def plot_source_by_asset_class_stacked(
+    classification: dict,
+    title: str = "Data Sources per Asset Class",
+    figsize: tuple = (10, 5),
+) -> Figure:
+    """Stacked bar chart: number of columns from each source per asset class."""
+    apply_paper_style()
+    fig, ax = plt.subplots(figsize=figsize)
+
+    matrix = classification["source_class_matrix"]
+    class_order = [c for c in _ASSET_CLASS_ORDER if c in classification["by_class"]]
+    sources = sorted(
+        {s for m in matrix.values() for s in m},
+        key=lambda s: sum(m.get(s, 0) for m in matrix.values()),
+        reverse=True,
+    )
+
+    x = np.arange(len(class_order))
+    width = 0.55
+    bottoms = np.zeros(len(class_order))
+
+    for src in sources:
+        counts = [matrix.get(src, {}).get(cls, 0) for cls in class_order]
+        color = _SOURCE_COLORS.get(src, "#cccccc")
+        bars = ax.bar(
+            x, counts, width, bottom=bottoms, label=src, color=color, alpha=0.85
+        )
+        for bar, c in zip(bars, counts):
+            if c > 0:
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    bar.get_y() + bar.get_height() / 2,
+                    str(c),
+                    ha="center",
+                    va="center",
+                    fontsize=7,
+                    fontweight="bold",
+                    color="white" if src in ("Yahoo Finance", "FRED") else "#1e3d6e",
+                )
+        bottoms += np.array(counts)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels([_ASSET_CLASS_LABELS.get(c, c) for c in class_order])
+    ax.set_ylabel("Number of Columns")
+    ax.legend(fontsize=9, loc="upper right")
+    fig.tight_layout()
+    return fig
+
+
+def plot_raw_time_coverage(
+    df: pd.DataFrame,
+    classification: dict,
+    title: str = "Time Range Coverage per Asset Class",
+    figsize: tuple = (10, 5),
+) -> Figure:
+    """Horizontal bar chart: date range coverage for each asset class."""
+    apply_paper_style()
+    fig, ax = plt.subplots(figsize=figsize)
+
+    class_order = [c for c in _ASSET_CLASS_ORDER if c in classification["by_class"]]
+
+    ranges = []
+    for cls in class_order:
+        cols = classification["by_class"][cls]
+        numeric_cols = [c for c in cols if not c.endswith("_text_json")]
+        if numeric_cols:
+            cls_df = df[numeric_cols].dropna(how="all")
+            if not cls_df.empty:
+                start = cls_df.index.min()
+                end = cls_df.index.max()
+                ranges.append((cls, start, end, len(numeric_cols)))
+            else:
+                ranges.append((cls, pd.NaT, pd.NaT, 0))
+        else:
+            ranges.append((cls, pd.NaT, pd.NaT, 0))
+
+    ys = range(len(class_order))
+    for i, (cls, start, end, n_cols) in enumerate(ranges):
+        color = _ASSET_CLASS_COLORS.get(cls, "#cccccc")
+        if pd.notna(start) and pd.notna(end):
+            ax.barh(
+                i, (end - start).days, left=start, height=0.55, color=color, alpha=0.85
+            )
+            ax.text(
+                start + (end - start) / 2,
+                i,
+                f"{start.strftime('%Y-%m')}  →  {end.strftime('%Y-%m')}  ({n_cols} cols)",
+                ha="center",
+                va="center",
+                fontsize=8,
+                fontweight="bold",
+                color="white",
+            )
+
+    ax.set_yticks(range(len(class_order)))
+    ax.set_yticklabels([_ASSET_CLASS_LABELS.get(c, c) for c in class_order])
+    ax.set_xlabel("Date")
+    fig.tight_layout()
+    return fig
+
+
+def plot_raw_missing_pct(
+    df: pd.DataFrame,
+    classification: dict,
+    title: str = "Data Completeness per Asset Class",
+    figsize: tuple = (8, 5),
+) -> Figure:
+    """Horizontal bar chart: percentage of non-null values per asset class."""
+    apply_paper_style()
+    fig, ax = plt.subplots(figsize=figsize)
+
+    class_order = [c for c in _ASSET_CLASS_ORDER if c in classification["by_class"]]
+
+    completeness = []
+    for cls in class_order:
+        cols = classification["by_class"][cls]
+        numeric_cols = [c for c in cols if not c.endswith("_text_json")]
+        if numeric_cols:
+            pct = df[numeric_cols].notna().mean().mean() * 100
+            completeness.append((cls, pct, len(numeric_cols)))
+
+    classes = [c for c, _, _ in completeness]
+    pcts = [p for _, p, _ in completeness]
+    n_cols = [n for _, _, n in completeness]
+    colors = [_ASSET_CLASS_COLORS.get(c, "#cccccc") for c in classes]
+
+    bars = ax.barh(range(len(classes)), pcts, color=colors, alpha=0.88, height=0.6)
+    ax.set_yticks(range(len(classes)))
+    ax.set_yticklabels([_ASSET_CLASS_LABELS.get(c, c) for c in classes])
+    ax.invert_yaxis()
+    ax.set_xlabel("Data Completeness (%)")
+    ax.set_xlim(0, 105)
+
+    for bar, p, n in zip(bars, pcts, n_cols):
+        ax.text(
+            bar.get_width() + 0.5,
+            bar.get_y() + bar.get_height() / 2,
+            f"{p:.1f}%  ({n} cols)",
+            va="center",
+            fontsize=9,
+            fontweight="bold",
+            color="#1e3d6e",
+        )
+
+    fig.tight_layout()
+    return fig
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Single-panel statistics figures for QA dataset
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_QA_REGIME_COLORS_BAR = {
+    "sideways": "#c0c0c0",
+    "bull": "#4a6fa5",
+    "bear": "#1e3d6e",
+}
+_QA_SPLIT_COLORS_BAR = {
+    "train": "#1e3d6e",
+    "val": "#4a6fa5",
+    "test": "#7a9fc5",
+}
+
+
+def plot_qa_template_counts_bar(
+    stats: dict,
+    title: str = "QA Sample Count per Template",
+    figsize: tuple = (8, 4.5),
+) -> Figure:
+    """Bar chart: number of QA pairs per template."""
+    apply_paper_style()
+    fig, ax = plt.subplots(figsize=figsize)
+
+    templates = [t for t in _TEMPLATE_IDS if t in stats]
+    counts = [stats[t]["n_total"] for t in templates]
+    complexity = [_COMPLEXITY.get(t, 1) for t in templates]
+    bar_colors = [_LEVEL_COLORS.get(c, "#cccccc") for c in complexity]
+
+    bars = ax.bar(templates, counts, color=bar_colors, alpha=0.88)
+    for bar, n in zip(bars, counts):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + max(counts) * 0.015,
+            str(n),
+            ha="center",
+            fontsize=10,
+            fontweight="bold",
+            color="#1e3d6e",
+        )
+
+    ax.set_ylabel("Number of QA Pairs")
+    fig.tight_layout()
+    return fig
+
+
+def plot_qa_template_by_split_bar(
+    stats: dict,
+    title: str = "QA Sample Count by Template and Split",
+    figsize: tuple = (9, 4.5),
+) -> Figure:
+    """Grouped bar chart: QA pairs per template, colored by train/val/test."""
+    apply_paper_style()
+    fig, ax = plt.subplots(figsize=figsize)
+
+    templates = [t for t in _TEMPLATE_IDS if t in stats]
+    x = np.arange(len(templates))
+    width = 0.25
+
+    for i, split in enumerate(_SPLITS):
+        counts = [stats[t]["by_split"].get(split, 0) for t in templates]
+        bars = ax.bar(
+            x + (i - 1) * width,
+            counts,
+            width,
+            color=_QA_SPLIT_COLORS_BAR[split],
+            label=split.capitalize(),
+            alpha=0.88,
+        )
+        for bar, c in zip(bars, counts):
+            if c > 0:
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    bar.get_height() + 5,
+                    str(c),
+                    ha="center",
+                    fontsize=7,
+                    fontweight="bold",
+                    color="#1e3d6e",
+                )
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(templates)
+    ax.set_ylabel("Number of QA Pairs")
+    ax.legend(fontsize=9)
+    fig.tight_layout()
+    return fig
+
+
+def plot_qa_template_by_regime_bar(
+    stats: dict,
+    title: str = "QA Sample Count by Template and Market Regime",
+    figsize: tuple = (9, 4.5),
+) -> Figure:
+    """Grouped bar chart: QA pairs per template, colored by market regime."""
+    apply_paper_style()
+    fig, ax = plt.subplots(figsize=figsize)
+
+    templates = [t for t in _TEMPLATE_IDS if t in stats]
+    x = np.arange(len(templates))
+    width = 0.25
+
+    for i, regime in enumerate(_REGIMES):
+        counts = [stats[t]["by_regime"].get(regime, 0) for t in templates]
+        bars = ax.bar(
+            x + (i - 1) * width,
+            counts,
+            width,
+            color=_QA_REGIME_COLORS_BAR[regime],
+            label=regime.capitalize(),
+            alpha=0.88,
+        )
+        for bar, c in zip(bars, counts):
+            if c > 0:
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    bar.get_height() + 5,
+                    str(c),
+                    ha="center",
+                    fontsize=7,
+                    fontweight="bold",
+                    color="#1e3d6e",
+                )
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(templates)
+    ax.set_ylabel("Number of QA Pairs")
+    ax.legend(fontsize=9)
+    fig.tight_layout()
+    return fig
+
+
+def plot_qa_regime_pie(
+    stats: dict,
+    title: str = "Overall Market Regime Distribution",
+    figsize: tuple = (6, 5),
+) -> Figure:
+    """Pie chart: overall market regime distribution across all QA pairs."""
+    apply_paper_style()
+    fig, ax = plt.subplots(figsize=figsize)
+
+    regime_totals: dict[str, int] = {}
+    for t in _TEMPLATE_IDS:
+        if t not in stats:
+            continue
+        for r, cnt in stats[t]["by_regime"].items():
+            regime_totals[r] = regime_totals.get(r, 0) + cnt
+
+    labels = list(regime_totals.keys())
+    counts = list(regime_totals.values())
+    colors = [_QA_REGIME_COLORS_BAR.get(l, "#cccccc") for l in labels]
+    sorted_idx = np.argsort(counts)[::-1]
+    labels = [labels[i] for i in sorted_idx]
+    counts = [counts[i] for i in sorted_idx]
+    colors = [colors[i] for i in sorted_idx]
+
+    wedges, texts, autotexts = ax.pie(
+        counts,
+        labels=[l.capitalize() for l in labels],
+        colors=colors,
+        autopct="%1.1f%%",
+        startangle=140,
+        pctdistance=0.75,
+        textprops={"fontsize": 10},
+    )
+    for at in autotexts:
+        at.set_fontsize(9)
+        at.set_fontweight("bold")
+
+    legend_labels = [f"{l.capitalize()}  ({c:,} pairs)" for l, c in zip(labels, counts)]
+    ax.legend(wedges, legend_labels, fontsize=9, loc="lower center", ncols=2)
+    fig.tight_layout()
+    return fig
+
+
+def plot_qa_complexity_bar(
+    stats: dict,
+    title: str = "QA Pairs by Complexity Level",
+    figsize: tuple = (7, 4.5),
+) -> Figure:
+    """Bar chart: total QA pairs per complexity level (L1–L4)."""
+    apply_paper_style()
+    fig, ax = plt.subplots(figsize=figsize)
+
+    level_totals: dict[int, int] = {}
+    for t in _TEMPLATE_IDS:
+        if t not in stats:
+            continue
+        lvl = _COMPLEXITY.get(t, 1)
+        level_totals[lvl] = level_totals.get(lvl, 0) + stats[t]["n_total"]
+
+    levels = sorted(level_totals.keys())
+    counts = [level_totals[l] for l in levels]
+    labels = [_COMPLEXITY_LABEL.get(l, f"L{l}") for l in levels]
+    colors = [_LEVEL_COLORS.get(l, "#cccccc") for l in levels]
+
+    bars = ax.bar(range(len(levels)), counts, color=colors, alpha=0.88)
+    ax.set_xticks(range(len(levels)))
+    ax.set_xticklabels(labels, fontsize=9)
+    ax.set_ylabel("Total QA Pairs")
+
+    for bar, n, lvl in zip(bars, counts, levels):
+        n_tmpl = len([t for t in _TEMPLATE_IDS if t in stats and _COMPLEXITY.get(t, 1) == lvl])
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + max(counts) * 0.015,
+            f"{n:,}  ({n_tmpl} templates)",
+            ha="center",
+            fontsize=9,
+            fontweight="bold",
+            color="#1e3d6e",
+        )
+
+    fig.tight_layout()
+    return fig
+
+
+def plot_qa_text_coverage_bar(
+    stats: dict,
+    title: str = "Text Context Coverage per Template",
+    figsize: tuple = (8, 4.5),
+) -> Figure:
+    """Bar chart: percentage of QA pairs with news/filing text per template."""
+    apply_paper_style()
+    fig, ax = plt.subplots(figsize=figsize)
+
+    templates = [t for t in _TEMPLATE_IDS if t in stats]
+    pcts = [stats[t]["text"]["pct_with_text"] for t in templates]
+    bar_colors = ["#4a6fa5"] * len(templates)
+
+    bars = ax.bar(templates, pcts, color=bar_colors, alpha=0.85)
+    ax.set_ylabel("% with News / Filing Text")
+    ax.set_ylim(0, 110)
+
+    for bar, pct in zip(bars, pcts):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + 1.5,
+            f"{pct:.1f}%",
+            ha="center",
+            fontsize=9,
+            fontweight="bold",
+            color="#1e3d6e",
+        )
+
+    overall = stats.get("_meta", {}).get("text_overall", {})
+    if overall:
+        overall_pct = overall.get("pct_with_text", 0)
+        ax.axhline(overall_pct, color="#7a9fc5", linestyle="--", linewidth=1.2, alpha=0.7)
+        ax.text(
+            len(templates) - 0.3,
+            overall_pct + 1.5,
+            f"Overall: {overall_pct:.1f}%",
+            fontsize=8,
+            color="#7a9fc5",
+            ha="right",
+        )
+
+    fig.tight_layout()
+    return fig
+
+
+def plot_qa_context_length_bar(
+    stats: dict,
+    title: str = "Average Context Length per Template",
+    figsize: tuple = (8, 4.5),
+) -> Figure:
+    """Bar chart: average context length (chars) per template."""
+    apply_paper_style()
+    fig, ax = plt.subplots(figsize=figsize)
+
+    templates = [t for t in _TEMPLATE_IDS if t in stats]
+    avg_chars = [stats[t]["text"]["avg_chars"] for t in templates]
+    bar_colors = ["#1e3d6e"] * len(templates)
+
+    bars = ax.bar(templates, avg_chars, color=bar_colors, alpha=0.85)
+    ax.set_ylabel("Average Context Length (chars)")
+
+    for bar, n in zip(bars, avg_chars):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + max(avg_chars) * 0.015,
+            f"{n:,.0f}",
+            ha="center",
+            fontsize=8.5,
+            fontweight="bold",
+            color="#1e3d6e",
+        )
+
+    overall = stats.get("_meta", {}).get("text_overall", {})
+    if overall:
+        overall_avg = overall.get("avg_chars", 0)
+        ax.axhline(overall_avg, color="#7a9fc5", linestyle="--", linewidth=1.2, alpha=0.7)
+        ax.text(
+            len(templates) - 0.3,
+            overall_avg + max(avg_chars) * 0.015,
+            f"Overall: {overall_avg:,.0f}",
+            fontsize=8,
+            color="#7a9fc5",
+            ha="right",
+        )
+
+    fig.tight_layout()
+    return fig
+
+
+def plot_qa_split_pie(
+    stats: dict,
+    title: str = "Train / Val / Test Split Distribution",
+    figsize: tuple = (6, 5),
+) -> Figure:
+    """Pie chart: overall train/val/test split distribution."""
+    apply_paper_style()
+    fig, ax = plt.subplots(figsize=figsize)
+
+    split_totals: dict[str, int] = {}
+    for t in _TEMPLATE_IDS:
+        if t not in stats:
+            continue
+        for s, cnt in stats[t]["by_split"].items():
+            split_totals[s] = split_totals.get(s, 0) + cnt
+
+    labels = list(split_totals.keys())
+    counts = list(split_totals.values())
+    colors = [_QA_SPLIT_COLORS_BAR.get(l, "#cccccc") for l in labels]
+
+    wedges, texts, autotexts = ax.pie(
+        counts,
+        labels=[l.capitalize() for l in labels],
+        colors=colors,
+        autopct="%1.1f%%",
+        startangle=140,
+        pctdistance=0.75,
+        textprops={"fontsize": 10},
+    )
+    for at in autotexts:
+        at.set_fontsize(9)
+        at.set_fontweight("bold")
+
+    legend_labels = [f"{l.capitalize()}  ({c:,} pairs)" for l, c in zip(labels, counts)]
+    ax.legend(wedges, legend_labels, fontsize=9)
+    fig.tight_layout()
+    return fig
+
+
+def plot_qa_template_by_split_stacked(
+    stats: dict,
+    figsize: tuple = (8, 5),
+) -> Figure:
+    """Stacked bar chart: QA pairs per template, colored by train/val/test."""
+    apply_paper_style()
+    fig, ax = plt.subplots(figsize=figsize)
+
+    templates = [t for t in _TEMPLATE_IDS if t in stats]
+    bottoms = np.zeros(len(templates))
+    for i, split in enumerate(_SPLITS):
+        counts = [stats[t]["by_split"].get(split, 0) for t in templates]
+        ax.bar(
+            templates,
+            counts,
+            bottom=bottoms,
+            color=_SPLIT_COLORS[i],
+            label=split.capitalize(),
+            alpha=0.88,
+        )
+        bottoms += np.array(counts)
+
+    totals = [stats[t]["n_total"] for t in templates]
+    for j, (_, tot) in enumerate(zip(templates, totals)):
+        ax.text(
+            j, tot + 10, str(tot),
+            ha="center", va="bottom", fontsize=9, fontweight="bold",
+            color="#1e3d6e",
+        )
+
+    ax.set_ylabel("Number of QA Pairs")
+    ax.legend(fontsize=9, loc="upper right")
+    fig.tight_layout()
+    return fig
+
+
+def plot_qa_text_richness(
+    stats: dict,
+    figsize: tuple = (8, 5),
+) -> Figure:
+    """Dual-axis chart: % with news/filing text (bars) + avg context length (line)."""
+    apply_paper_style()
+    fig, ax = plt.subplots(figsize=figsize)
+
+    templates = [t for t in _TEMPLATE_IDS if t in stats]
+    pct_text = [stats[t]["text"]["pct_with_text"] for t in templates]
+    avg_chars = [stats[t]["text"]["avg_chars"] for t in templates]
+
+    bars = ax.bar(
+        templates, pct_text, color=_AF1, alpha=0.80, label="% with news/filing"
+    )
+    ax.set_ylabel("% Samples with News / Filing Text")
+    ax.set_ylim(0, 115)
+    for bar, pct in zip(bars, pct_text):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + 1,
+            f"{pct:.0f}%",
+            ha="center", va="bottom", fontsize=8, color="#1e3d6e",
+        )
+
+    ax2 = ax.twinx()
+    ax2.plot(
+        templates, avg_chars, "o--",
+        color="#1e3d6e", linewidth=1.8, markersize=6,
+        label="Avg context length (chars)",
+    )
+    ax2.set_ylabel("Avg Context Length (chars)", color="#1e3d6e")
+    ax2.tick_params(axis="y", labelcolor="#1e3d6e")
+
+    lines1 = [mpatches.Patch(color=_AF1, label="% with news")]
+    lines2 = [mlines.Line2D([0], [0], color="#1e3d6e", marker="o", linestyle="--", label="Avg chars")]
+    ax.legend(handles=lines1 + lines2, fontsize=9, loc="upper left")
+
+    overall = stats.get("_meta", {}).get("text_overall", {})
+    if overall:
+        info = (
+            f"Overall: {overall.get('pct_with_text', 0):.0f}% text, "
+            f"{overall.get('avg_chars', 0):,.0f} avg chars"
+        )
+        ax.text(
+            0.98, 0.05, info,
+            transform=ax.transAxes, ha="right", va="bottom", fontsize=8,
+            bbox=dict(boxstyle="round,pad=0.4", fc="white", ec="gray", alpha=0.85),
+        )
+
+    fig.tight_layout()
     return fig

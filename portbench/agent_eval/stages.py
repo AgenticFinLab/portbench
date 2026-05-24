@@ -35,6 +35,7 @@ from .base import (
     S1Output, S2Output, S3Output, S4Output, S5Output, TradeOrder,
     StageID,
 )
+from .llm_adapters import EmptyResponseError
 from .mock_agent import MockAgentAdapter
 from .prompts import (
     build_s1_prompt,
@@ -312,8 +313,9 @@ def _call_with_json_retry(adapter, prompt: str, use_tools: bool, stage_name: str
     Only LLM-format errors trigger retries. Network / API / HTTP errors
     propagate immediately so the experiment fails loudly.
     Raises StageRefusalError (a subclass of RuntimeError) if the model output
-    matches a content-safety refusal pattern — callers should catch this
-    separately from generic RuntimeError to apply fallback logic.
+    matches a content-safety refusal pattern or the API returns an empty response
+    — callers should catch this separately from generic RuntimeError to apply
+    fallback logic.
     """
     last_err: Optional[Exception] = None
     last_raw: str = ""
@@ -322,10 +324,16 @@ def _call_with_json_retry(adapter, prompt: str, use_tools: bool, stage_name: str
             full_prompt = prompt
         else:
             full_prompt = prompt + build_format_correction_suffix(str(last_err))
-        if use_tools:
-            raw = adapter.complete_with_tools(full_prompt, get_tools())
-        else:
-            raw = adapter.complete(full_prompt)
+        try:
+            if use_tools:
+                raw = adapter.complete_with_tools(full_prompt, get_tools())
+            else:
+                raw = adapter.complete(full_prompt)
+        except EmptyResponseError:
+            raise StageRefusalError(
+                f"{stage_name} API returned empty response after retry — "
+                f"likely content-safety refusal for investment-related prompt."
+            )
         last_raw = raw
         # Detect content-safety refusals immediately — no point retrying
         if _is_refusal(raw):
@@ -1059,10 +1067,17 @@ class S4ExecutionSimulation(PipelineStage):
         return self._execute(s3, snapshot)
 
     def score(self, actual: S4Output, ground_truth: S4Output) -> float:
-        """Score based on how closely executed weights match ground truth."""
-        from ..metrics.allocation_metrics import weight_mae
-        mae = weight_mae(actual.executed_weights, ground_truth.executed_weights)
-        return float(np.clip(1.0 - mae / 2.0, 0.0, 1.0))
+        """Score based on turnover deviation from ground truth.
+
+        Penalises both under-trading (e.g. model never rebalances) and
+        over-trading (e.g. model shuffles aggressively) relative to the
+        optimal GT turnover.  Score = 1 when actual_turnover == gt_turnover.
+        """
+        actual_to = actual.turnover
+        gt_to = ground_truth.turnover
+        denom = max(actual_to, gt_to, 1e-4)
+        deviation = abs(actual_to - gt_to) / denom
+        return float(np.clip(1.0 - deviation, 0.0, 1.0))
 
 
 # ---------------------------------------------------------------------------

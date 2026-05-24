@@ -370,3 +370,100 @@ def plot_qa_model_comparison(
     ax.invert_yaxis()
     fig.tight_layout()
     return fig
+
+
+# ---------------------------------------------------------------------------
+# Info-level comparison — Full vs Restricted (T4/T5)
+# ---------------------------------------------------------------------------
+
+def plot_info_level_comparison(
+    full_data: dict[str, dict[str, float]],
+    restricted_data: dict[str, dict[str, float]],
+    figsize: tuple = (10, 5),
+) -> Figure:
+    """Grouped bar chart: for each model, show full vs restricted accuracy for T4 and T5.
+
+    Args:
+        full_data: {model_label: {template_id: accuracy}} for full-info run.
+        restricted_data: {model_label: {template_id: accuracy}} for restricted run.
+    """
+    apply_paper_style()
+    fig, axes = plt.subplots(1, 2, figsize=figsize, sharey=False)
+
+    compare_templates = ["T4", "T5"]
+    template_titles = {"T4": "T4 – Pairwise Allocation", "T5": "T5 – Multi-Asset Opt."}
+
+    common_models = sorted(
+        set(full_data) & set(restricted_data),
+        key=lambda m: -full_data.get(m, {}).get("T4", 0.0),
+    )
+    labels = [abbrev_model_name(m) for m in common_models]
+    x = np.arange(len(common_models))
+    width = 0.38
+
+    for ax, tid in zip(axes, compare_templates):
+        full_vals = [full_data.get(m, {}).get(tid, 0.0) for m in common_models]
+        rest_vals = [restricted_data.get(m, {}).get(tid, 0.0) for m in common_models]
+
+        bars_full = ax.bar(x - width / 2, full_vals, width, label="Full info",
+                           color="#4C72B0", alpha=0.85, edgecolor="white")
+        bars_rest = ax.bar(x + width / 2, rest_vals, width, label="Restricted",
+                           color="#DD8452", alpha=0.85, edgecolor="white")
+
+        for bar in bars_full:
+            h = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width() / 2, h + 0.01,
+                    f"{h:.2f}", ha="center", va="bottom", fontsize=7)
+        for bar in bars_rest:
+            h = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width() / 2, h + 0.01,
+                    f"{h:.2f}", ha="center", va="bottom", fontsize=7)
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=30, ha="right", fontsize=8)
+        ax.set_ylabel("Accuracy")
+        ax.set_ylim(0, 1.15)
+        ax.set_title(template_titles[tid], fontsize=10)
+        ax.legend(fontsize=8)
+        ax.axhline(0.5, color="gray", linestyle="--", linewidth=0.8, alpha=0.4)
+
+    fig.tight_layout()
+    return fig
+
+
+def plot_info_level_drop_heatmap(
+    drop_data: dict[str, dict[str, float]],
+    figsize: tuple = (6, 4),
+) -> Figure:
+    """Heatmap of accuracy drop (full − restricted) for T4 and T5 across models.
+
+    Args:
+        drop_data: {model_label: {"T4": drop, "T5": drop}}  (positive = drop, negative = gain)
+    """
+    apply_paper_style()
+
+    compare_templates = ["T4", "T5"]
+    models = sorted(drop_data, key=lambda m: -(drop_data[m].get("T4", 0) + drop_data[m].get("T5", 0)))
+    labels = [abbrev_model_name(m) for m in models]
+
+    matrix = np.array([[drop_data[m].get(t, 0.0) for t in compare_templates] for m in models])
+
+    fig, ax = plt.subplots(figsize=figsize)
+    im = ax.imshow(matrix, cmap="RdBu_r", vmin=-0.5, vmax=0.5, aspect="auto")
+    plt.colorbar(im, ax=ax, label="Accuracy drop (full − restricted)")
+
+    ax.set_xticks(range(len(compare_templates)))
+    ax.set_xticklabels(
+        [_TEMPLATE_NAMES_SHORT[t] for t in compare_templates], fontsize=9
+    )
+    ax.set_yticks(range(len(models)))
+    ax.set_yticklabels(labels, fontsize=9)
+
+    for i, m in enumerate(models):
+        for j, t in enumerate(compare_templates):
+            val = matrix[i, j]
+            ax.text(j, i, f"{val:+.3f}", ha="center", va="center",
+                    fontsize=8, color="white" if abs(val) > 0.25 else "black")
+
+    fig.tight_layout()
+    return fig

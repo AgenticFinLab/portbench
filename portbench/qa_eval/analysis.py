@@ -297,3 +297,111 @@ def _write_qa_report(
 # Deprecated alias
 def analyze_qa_batch(batch_id: str, output_root: str = "EXPERIMENTS", logger=None) -> Path:
     return analyze_qa_results(output_root=output_root, logger=logger)
+
+
+# ---------------------------------------------------------------------------
+# Info-level comparison: full vs restricted
+# ---------------------------------------------------------------------------
+
+def analyze_qa_info_level_comparison(
+    output_root: str = "EXPERIMENTS",
+    logger=None,
+) -> Path:
+    """Compare full-info vs restricted-info QA accuracy for T4 and T5.
+
+    Reads T4/summary.json and T4_restricted/summary.json (and T5 equivalents)
+    for each model, computes accuracy drops, generates comparison figures, and
+    writes a JSON report.
+
+    Returns path to the written JSON report.
+    """
+    from ..visualization.qa_accuracy_plots import (
+        plot_info_level_comparison,
+        plot_info_level_drop_heatmap,
+    )
+    from ..visualization.style import save_figure
+    from . import paths as qpaths
+
+    log = logger.info if logger else print
+
+    root = qpaths.qa_root(output_root)
+    comp_dir = root / "comparison_figures"
+    comp_dir.mkdir(parents=True, exist_ok=True)
+
+    compare_templates = ["T4", "T5"]
+    full_data: dict[str, dict[str, float]] = {}
+    restricted_data: dict[str, dict[str, float]] = {}
+
+    for provider_dir in sorted(root.iterdir()):
+        if not provider_dir.is_dir() or provider_dir.name == "comparison_figures":
+            continue
+        for model_dir in sorted(provider_dir.iterdir()):
+            if not model_dir.is_dir():
+                continue
+            label = f"{provider_dir.name}/{model_dir.name}"
+            full_data[label] = {}
+            restricted_data[label] = {}
+            for tid in compare_templates:
+                full_summary = model_dir / tid / "summary.json"
+                rest_summary = model_dir / f"{tid}_restricted" / "summary.json"
+                if full_summary.exists():
+                    d = json.loads(full_summary.read_text(encoding="utf-8"))
+                    full_data[label][tid] = float(d.get("accuracy", 0.0))
+                if rest_summary.exists():
+                    d = json.loads(rest_summary.read_text(encoding="utf-8"))
+                    restricted_data[label][tid] = float(d.get("accuracy", 0.0))
+
+    # Keep only models that have at least one restricted result
+    models_with_restricted = [
+        m for m in full_data
+        if any(t in restricted_data.get(m, {}) for t in compare_templates)
+    ]
+    if not models_with_restricted:
+        log("analyze_qa_info_level_comparison: no restricted results found — run with info_level=restricted first")
+        return comp_dir / "info_level_comparison.json"
+
+    full_data = {m: full_data[m] for m in models_with_restricted}
+    restricted_data = {m: restricted_data.get(m, {}) for m in models_with_restricted}
+
+    drop_data = {
+        m: {
+            t: round(full_data[m].get(t, 0.0) - restricted_data[m].get(t, 0.0), 4)
+            for t in compare_templates
+        }
+        for m in models_with_restricted
+    }
+
+    # Figures
+    try:
+        fig = plot_info_level_comparison(full_data, restricted_data)
+        save_figure(fig, str(comp_dir / "info_level_comparison_bars.png"), formats=("png",))
+        log("qa info-level: info_level_comparison_bars.png")
+    except Exception as exc:
+        log(f"qa info-level: comparison bars skipped ({exc})")
+
+    try:
+        fig = plot_info_level_drop_heatmap(drop_data)
+        save_figure(fig, str(comp_dir / "info_level_drop_heatmap.png"), formats=("png",))
+        log("qa info-level: info_level_drop_heatmap.png")
+    except Exception as exc:
+        log(f"qa info-level: drop heatmap skipped ({exc})")
+
+    # JSON report
+    report = {
+        "generated": datetime.now().isoformat(),
+        "models": {
+            m: {
+                t: {
+                    "full": full_data[m].get(t),
+                    "restricted": restricted_data[m].get(t),
+                    "drop": drop_data[m].get(t),
+                }
+                for t in compare_templates
+            }
+            for m in models_with_restricted
+        },
+    }
+    report_path = comp_dir / "info_level_comparison.json"
+    report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    log(f"qa info-level comparison report: {report_path}")
+    return report_path

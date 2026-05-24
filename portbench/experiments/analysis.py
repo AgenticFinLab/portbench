@@ -65,7 +65,9 @@ def _flatten_rows(summaries: list[dict]) -> list[dict]:
                 "profile": profile_name,
                 "stress_gate_passed": payload.get("stress_gate_passed", False),
             }
-            for sr in payload.get("stress_results", []):
+            raw_stress = payload.get("stress_results", [])
+            stress_iter = raw_stress.values() if isinstance(raw_stress, dict) else raw_stress
+            for sr in stress_iter:
                 rows.append({**base, "phase": "stress", **sr})
             if payload.get("normal") is not None:
                 import numpy as np
@@ -81,8 +83,11 @@ def _flatten_rows(summaries: list[dict]) -> list[dict]:
 
 def _load_stage_scores(output_root: str, rebalance: str) -> dict[str, dict[str, float]]:
     """
-    Read pipeline_logs episode files for each LLM model and return
-    averaged per-stage scores: {model_key: {"S1": float, ..., "S5": float}}.
+    Return averaged per-stage scores: {model_key: {"S1": float, ..., "S5": float}}.
+
+    Priority: if run_summary.json contains `mean_stage_scores` (written by rescore),
+    use those values (reflect the latest scoring logic including the new S4 metric).
+    Otherwise fall back to reading episode JSON files (original un-rescored scores).
     Baselines are skipped (no pipeline logs).
     """
     import numpy as np
@@ -110,6 +115,32 @@ def _load_stage_scores(output_root: str, rebalance: str) -> dict[str, dict[str, 
                 continue
             r_dir = paths.run_dir(output_root, rebalance, prov_dir.name, m_dir.name, ts)
 
+            # --- Fast path: use rescored mean_stage_scores from run_summary.json ---
+            summary_path = r_dir / "run_summary.json"
+            if summary_path.exists():
+                try:
+                    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+                    stage_accum_summary: dict[str, list[float]] = {}
+                    for profile_name in ("conservative", "balanced", "aggressive"):
+                        normal = (
+                            summary.get("profiles", {})
+                            .get(profile_name, {})
+                            .get("normal", {})
+                        )
+                        cached = normal.get("mean_stage_scores")
+                        if cached:
+                            for sid, sc in cached.items():
+                                stage_accum_summary.setdefault(sid, []).append(float(sc))
+                    if stage_accum_summary:
+                        results[model_key] = {
+                            sid: round(float(np.mean(scores)), 4)
+                            for sid, scores in stage_accum_summary.items()
+                        }
+                        continue  # skip episode-file fallback
+                except Exception:
+                    pass
+
+            # --- Fallback: read individual episode JSON files ---
             stage_accum: dict[str, list[float]] = {}
             for profile_dir in sorted(r_dir.iterdir()):
                 if not profile_dir.is_dir() or profile_dir.name not in (
