@@ -16,7 +16,32 @@ import pandas as pd
 import numpy as np
 from matplotlib.figure import Figure
 
-from .style import apply_paper_style, MODEL_PALETTE, PAPER_COLORS, LINE_STYLES, LINE_MARKERS, abbrev_model_name, NAV_LLM_PALETTE, NAV_BASELINE_PALETTE
+from .style import (
+    apply_paper_style,
+    MODEL_PALETTE,
+    PAPER_COLORS,
+    LINE_STYLES,
+    LINE_MARKERS,
+    abbrev_model_name,
+    NAV_LLM_PALETTE,
+    NAV_BASELINE_PALETTE,
+)
+from .risk_return_plots import _MODEL_COLOURS
+import matplotlib.colors as mcolors
+
+
+def _desaturate(hex_color: str, sat_delta: float = -0.1, val_delta: float = 0.1) -> str:
+    rgb = mcolors.hex2color(hex_color)
+    hsv = list(mcolors.rgb_to_hsv(rgb))
+
+    hsv[1] = max(0.0, min(1.0, hsv[1] + sat_delta))
+
+    hsv[2] = max(0.0, min(1.0, hsv[2] + val_delta))
+
+    return mcolors.to_hex(mcolors.hsv_to_rgb(hsv))
+
+
+_MODEL_COLOURS_SOFT = [_desaturate(c) for c in _MODEL_COLOURS]
 
 
 def plot_sandbox_nav(
@@ -42,7 +67,10 @@ def plot_sandbox_nav(
     has_ceps = bool(ceps_data)
     if has_ceps:
         fig, (ax_nav, ax_ceps) = plt.subplots(
-            2, 1, figsize=figsize, sharex=True,
+            2,
+            1,
+            figsize=figsize,
+            sharex=True,
             gridspec_kw={"height_ratios": [3, 1], "hspace": 0.06},
             constrained_layout=True,
         )
@@ -50,21 +78,39 @@ def plot_sandbox_nav(
         fig, ax_nav = plt.subplots(figsize=(figsize[0], figsize[1] * 0.75))
         ax_ceps = None
 
-    llm_items  = [(n, s) for n, s in nav_results.items() if not n.startswith("baseline/")]
-    base_items = [(n, s) for n, s in nav_results.items() if     n.startswith("baseline/")]
-    _MARKERS   = ["o", "s", "^", "D", "v", "P", "h", "*"]
+    llm_items = [
+        (n, s) for n, s in nav_results.items() if not n.startswith("baseline/")
+    ]
+    base_items = [(n, s) for n, s in nav_results.items() if n.startswith("baseline/")]
+    _MARKERS = ["o", "s", "^", "D", "v", "P", "h", "*"]
+
+    # Per-model color mapping (sorted keys, same as scatter plots)
+    _llm_keys = sorted(n for n, _ in llm_items)
+    _llm_color_map = {
+        k: _MODEL_COLOURS_SOFT[i % len(_MODEL_COLOURS_SOFT)]
+        for i, k in enumerate(_llm_keys)
+    }
 
     # ── NAV curves ────────────────────────────────────────────────────────────
     llm_handles, llm_colors = [], {}
     for i, (name, nav) in enumerate(llm_items):
-        color    = NAV_LLM_PALETTE[i % len(NAV_LLM_PALETTE)]
+        color = _llm_color_map.get(
+            name, _MODEL_COLOURS_SOFT[i % len(_MODEL_COLOURS_SOFT)]
+        )
         nav_norm = nav / nav.iloc[0] * 100
-        every    = max(1, len(nav_norm) // 8)
-        line, = ax_nav.plot(
-            nav_norm.index, nav_norm.values,
-            color=color, linewidth=1.8, linestyle="-",
-            marker=_MARKERS[i % len(_MARKERS)], markevery=every, markersize=4,
-            markerfacecolor=color, markeredgewidth=0.5, markeredgecolor="white",
+        every = max(1, len(nav_norm) // 8)
+        (line,) = ax_nav.plot(
+            nav_norm.index,
+            nav_norm.values,
+            color=color,
+            linewidth=1.8,
+            linestyle="-",
+            marker=_MARKERS[i % len(_MARKERS)],
+            markevery=every,
+            markersize=4,
+            markerfacecolor=color,
+            markeredgewidth=0.5,
+            markeredgecolor="white",
             label=abbrev_model_name(name),
         )
         llm_handles.append(line)
@@ -72,14 +118,21 @@ def plot_sandbox_nav(
 
     base_handles = []
     for i, (name, nav) in enumerate(base_items):
-        color    = NAV_BASELINE_PALETTE[i % len(NAV_BASELINE_PALETTE)]
+        color = NAV_BASELINE_PALETTE[i % len(NAV_BASELINE_PALETTE)]
         nav_norm = nav / nav.iloc[0] * 100
-        every    = max(1, len(nav_norm) // 8)
-        line, = ax_nav.plot(
-            nav_norm.index, nav_norm.values,
-            color=color, linewidth=1.2, linestyle="--",
-            marker=_MARKERS[i % len(_MARKERS)], markevery=every, markersize=4,
-            markerfacecolor=color, markeredgewidth=0.5, markeredgecolor="white",
+        every = max(1, len(nav_norm) // 8)
+        (line,) = ax_nav.plot(
+            nav_norm.index,
+            nav_norm.values,
+            color=color,
+            linewidth=1.2,
+            linestyle="--",
+            marker=_MARKERS[i % len(_MARKERS)],
+            markevery=every,
+            markersize=4,
+            markerfacecolor=color,
+            markeredgewidth=0.5,
+            markeredgecolor="white",
             label=abbrev_model_name(name),
         )
         base_handles.append(line)
@@ -88,40 +141,54 @@ def plot_sandbox_nav(
     ax_nav.set_ylabel("Normalized NAV (base=100)", fontsize=9)
 
     # ── Two-column legend ─────────────────────────────────────────────────────
-    spacer     = mlines.Line2D([], [], color="none", label="")
-    llm_title  = mlines.Line2D([], [], color="none", label="LLMs")
+    spacer = mlines.Line2D([], [], color="none", label="")
+    llm_title = mlines.Line2D([], [], color="none", label="LLMs")
     base_title = mlines.Line2D([], [], color="none", label="Baselines")
     ax_nav.legend(
         handles=[llm_title] + llm_handles + [spacer, base_title] + base_handles,
-        fontsize=8, loc="upper left", framealpha=0.9, edgecolor="0.8", ncols=2,
+        fontsize=8,
+        loc="upper left",
+        framealpha=0.9,
+        edgecolor="0.8",
+        ncols=2,
     )
 
     # ── CEPS bar chart (no background band — no meaningful CEPS→NAV relationship) ─
     if has_ceps and ax_ceps is not None:
-        all_dates = sorted(set(
-            d for s in ceps_data.values() if s is not None for d in s.index
-        ))
+        all_dates = sorted(
+            set(d for s in ceps_data.values() if s is not None for d in s.index)
+        )
         n_llm = len([n for n, _ in llm_items if n in ceps_data])
 
         if all_dates and n_llm:
-            span_days  = max(1, (all_dates[-1] - all_dates[0]).days)
+            span_days = max(1, (all_dates[-1] - all_dates[0]).days)
             bar_w_days = span_days / max(1, len(all_dates)) * 0.7 / n_llm
 
             for i, (name, _) in enumerate(llm_items):
                 if name not in ceps_data or ceps_data[name] is None:
                     continue
-                color  = llm_colors[name]
+                color = llm_colors[name]
                 offset = (i - (n_llm - 1) / 2) * bar_w_days
                 for date, val in ceps_data[name].items():
                     x_pos = date + pd.Timedelta(days=offset)
-                    ax_ceps.bar(x_pos, val,
-                                width=pd.Timedelta(days=bar_w_days),
-                                color=color, alpha=0.80, edgecolor="none")
+                    ax_ceps.bar(
+                        x_pos,
+                        val,
+                        width=pd.Timedelta(days=bar_w_days),
+                        color=color,
+                        alpha=0.80,
+                        edgecolor="none",
+                    )
 
         # Auto-scale Y axis to data range
         y_max = max(
-            (max(ceps_data[n].dropna().values) for n, _ in llm_items
-             if n in ceps_data and ceps_data[n] is not None and len(ceps_data[n].dropna()) > 0),
+            (
+                max(ceps_data[n].dropna().values)
+                for n, _ in llm_items
+                if n in ceps_data
+                and ceps_data[n] is not None
+                and len(ceps_data[n].dropna()) > 0
+            ),
             default=0.5,
         )
         ax_ceps.set_ylim(0, y_max * 1.15 if y_max > 0 else 1.0)
@@ -170,12 +237,21 @@ def plot_sandbox_metrics(
     }
 
     models = list(metrics_data.keys())
+    sorted_models = sorted(models)
+    _metrics_color_map = {
+        m: _MODEL_COLOURS_SOFT[i % len(_MODEL_COLOURS_SOFT)]
+        for i, m in enumerate(sorted_models)
+    }
     n_models = len(models)
     n_metrics = len(metric_keys)
 
+    # Wider figure + bar spacing for readability
+    figsize = (max(figsize[0], n_models * 1.1), figsize[1])
     fig, axes = plt.subplots(1, n_metrics, figsize=figsize)
     if n_metrics == 1:
         axes = [axes]
+
+    bar_width = 0.65
 
     for ax, key in zip(axes, metric_keys):
         values = [metrics_data[m].get(key, 0.0) for m in models]
@@ -183,29 +259,29 @@ def plot_sandbox_metrics(
             (
                 PAPER_COLORS["failed"]
                 if (key == "max_drawdown" and v < -0.20)
-                else MODEL_PALETTE[i % len(MODEL_PALETTE)]
+                else _metrics_color_map.get(
+                    models[i], _MODEL_COLOURS_SOFT[i % len(_MODEL_COLOURS_SOFT)]
+                )
             )
             for i, v in enumerate(values)
         ]
-        bars = ax.bar(
-            range(n_models), values, color=colors, alpha=0.85, edgecolor="white"
+        x_positions = [i * 1.15 for i in range(n_models)]
+        ax.bar(
+            x_positions,
+            values,
+            width=bar_width,
+            color=colors,
+            alpha=0.85,
+            edgecolor="white",
         )
 
-        for bar, v in zip(bars, values):
-            fmt = (
-                f"{v:+.1%}"
-                if key in ("total_return", "cagr", "max_drawdown", "volatility")
-                else f"{v:.2f}"
-            )
-            # For positive bars: label just above the top.
-            # For negative bars: label just below the bottom (bar.get_y()+bar.get_height()).
-            tip = bar.get_y() + bar.get_height()  # top for positive, bottom for negative
-            va = "bottom" if v >= 0 else "top"
-            ax.text(bar.get_x() + bar.get_width() / 2, tip, fmt,
-                    ha="center", va=va, fontsize=7)
-
-        ax.set_xticks(range(n_models))
-        ax.set_xticklabels([abbrev_model_name(m) for m in models], rotation=30, ha="right", fontsize=8)
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels(
+            [abbrev_model_name(m) for m in models],
+            rotation=30,
+            ha="right",
+            fontsize=6.5,
+        )
         ax.set_title(metric_labels.get(key, key), fontsize=9)
         ax.axhline(0, color="black", linewidth=0.6, alpha=0.5)
 
@@ -378,9 +454,9 @@ def plot_profile_nav(
     }
 
     profile_styles = {
-        "conservative": ("-",  "o"),
-        "balanced":     ("--", "s"),
-        "aggressive":   ("-.", "^"),
+        "conservative": ("-", "o"),
+        "balanced": ("--", "s"),
+        "aggressive": ("-.", "^"),
     }
 
     fig, ax = plt.subplots(figsize=figsize)
@@ -392,10 +468,17 @@ def plot_profile_nav(
         ls, mk = profile_styles.get(profile, ("-", "o"))
         nav_norm = nav / nav.iloc[0] * 100
         every = max(1, len(nav_norm) // 8)
-        ax.plot(nav_norm.index, nav_norm.values,
-                label=profile.capitalize(), color=color,
-                linewidth=1.8, linestyle=ls,
-                marker=mk, markevery=every, markersize=5)
+        ax.plot(
+            nav_norm.index,
+            nav_norm.values,
+            label=profile.capitalize(),
+            color=color,
+            linewidth=1.8,
+            linestyle=ls,
+            marker=mk,
+            markevery=every,
+            markersize=5,
+        )
 
     ax.axhline(100, color="black", linestyle="--", linewidth=0.8, alpha=0.4)
     ax.set_xlabel("Date")

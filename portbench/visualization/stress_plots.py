@@ -389,8 +389,6 @@ def plot_stress_continuous_heatmap(
     Each cell shows the worst-case (min across profiles) drawdown score, color-coded
     blue (low) → red (high). Failed cells show ✗ with actual max-drawdown %.
     """
-    from matplotlib.colors import LinearSegmentedColormap
-
     apply_paper_style()
 
     _SC_NAMES = {
@@ -447,18 +445,13 @@ def plot_stress_continuous_heatmap(
             dd_mat[ri, ci]     = worst_dd
             passed_mat[ri, ci] = not any_fail
 
-    # ── Colormap: smooth blue→red via desaturated gray midpoint ──────────────
-    cmap = LinearSegmentedColormap.from_list(
-        "stress_hm",
-        [(0.0,  "#2166ac"),   # deep blue
-         (0.3,  "#6baed6"),   # medium blue
-         (0.5,  "#e8e8e8"),   # light neutral gray (no flesh, no purple)
-         (0.7,  "#d6604d"),   # medium red
-         (1.0,  "#8b1a1a")],  # deep red
-    )
+    # ── Colormap: matplotlib Blues (same as ceps_breakdown) ─────────────────
+    cmap = plt.get_cmap("Blues").copy()
 
     # ── Figure layout ─────────────────────────────────────────────────────────
-    fig, ax = plt.subplots(figsize=figsize)
+    # Cap figsize width to avoid renderer MemoryError at 300 DPI save
+    w, h = figsize
+    fig, ax = plt.subplots(figsize=(min(w, 8), h))
     im = ax.imshow(score_mat, cmap=cmap, vmin=0.0, vmax=1.0,
                    aspect="auto", interpolation="nearest")
 
@@ -468,7 +461,7 @@ def plot_stress_continuous_heatmap(
             sc_val = score_mat[ri, ci]
             dd_val = dd_mat[ri, ci]
             passed = passed_mat[ri, ci]
-            txt_color = "white" if sc_val < 0.25 or sc_val > 0.75 else "#111"
+            txt_color = "#111" if sc_val < 0.55 else "white"
             if passed:
                 label = f"{sc_val:.2f}  ({dd_val*100:+.1f}%)"
             else:
@@ -488,12 +481,12 @@ def plot_stress_continuous_heatmap(
     # ── LLMs / Baselines separator + labels on the LEFT ──────────────────────
     if llm_keys and baseline_keys:
         sep = len(llm_keys) - 0.5
-        ax.axhline(sep, color="#444", linestyle="--", linewidth=1.0)
+        ax.axhline(sep, color="#ccc", linestyle="--", linewidth=1.0)
         ax.text(-0.48, sep - 0.18, "LLMs",
-                fontsize=8, color="#444", ha="left", va="bottom",
+                fontsize=8, color="#111", ha="left", va="bottom",
                 style="italic", transform=ax.transData)
         ax.text(-0.48, sep + 0.18, "Baselines",
-                fontsize=8, color="#444", ha="left", va="top",
+                fontsize=8, color="#111", ha="left", va="top",
                 style="italic", transform=ax.transData)
 
     # ── Colorbar: title on top, Tier lines + labels inside ────────────────────

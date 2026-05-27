@@ -19,7 +19,8 @@ import matplotlib.patches as mpatches
 import matplotlib.lines as mlines
 from matplotlib.figure import Figure
 
-from .style import apply_paper_style, REGIME_COLORS, STAGE_COLORS
+from .style import apply_paper_style, REGIME_COLORS, STAGE_COLORS, save_figure
+from .risk_return_plots import _MODEL_COLOURS, _MODEL_MARKERS
 
 # Arctic Frost source values used directly for split encoding
 _AF1 = "#4a6fa5"  # steel blue
@@ -1859,3 +1860,309 @@ def plot_qa_text_richness(
 
     fig.tight_layout()
     return fig
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Per-asset-class raw data overview
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_PER_CLASS_META = {
+    "equities": {"title": "Equities — Normalized Price Indices", "ylabel": "Normalized Index  (base = 100)"},
+    "bonds": {"title": "Bonds — Price Indices & Yield Curve", "ylabel": "Normalized Index  (base = 100)"},
+    "commodities": {"title": "Commodities — Normalized Price Indices", "ylabel": "Normalized Index  (base = 100)"},
+    "cryptocurrency": {"title": "Cryptocurrency — Normalized Price Indices", "ylabel": "Normalized Index  (base = 100)"},
+    "real_estate": {"title": "Real Estate — Normalized Price Indices", "ylabel": "Normalized Index  (base = 100)"},
+    "cash": {"title": "Cash — Interest Rates & Macro Indicators", "ylabel": "Rate  (%)"},
+}
+
+_SKIP_SUFFIXES = ("_15M_", "_1H_", "_5M_", "_kaggle_crypto_dataset_", "_kaggle_crypto50_metada_")
+
+_BOND_RATE_COLS = {
+    "bonds_fred_DGS2": "2Y Treasury",
+    "bonds_fred_DGS10": "10Y Treasury",
+    "bonds_fred_DGS30": "30Y Treasury",
+}
+
+_BOND_SPREAD_COLS = {}
+
+_CASH_RATE_COLS = {
+    "cash_fred_DFF": "Fed Funds Rate",
+    "cash_fred_SOFR": "SOFR",
+}
+
+_CASH_MACRO_COLS = {
+    "cash_fred_UNRATE": "Unemployment Rate",
+}
+
+_MAX_PRICE_PER_CLASS = {
+    "equities": 5,
+    "bonds": 3,
+    "commodities": 5,
+    "cryptocurrency": 5,
+    "real_estate": 4,
+    "cash": 3,
+}
+
+# Per-class preferred _close columns (picked first, then filled by completeness)
+_PREFERRED_PRICE_COLS: dict[str, list[str]] = {
+    "bonds": [
+        "bonds_TLT_close",   # long-term Treasury
+        "bonds_IEF_close",   # intermediate Treasury
+        "bonds_LQD_close",   # investment grade corporate
+    ],
+    "commodities": [
+        "commodities_GLD_close",   # gold
+        "commodities_SLV_close",   # silver
+        "commodities_USO_close",   # oil
+        "commodities_DBC_close",   # broad basket
+        "commodities_UNG_close",   # natural gas
+    ],
+    "cryptocurrency": [
+        "cryptocurrency_BTC_USD_close",
+        "cryptocurrency_ETH_USD_close",
+        "cryptocurrency_SOL_USD_close",
+        "cryptocurrency_XRP_USD_close",
+        "cryptocurrency_ADA_USD_close",
+    ],
+    "real_estate": [
+        "real_estate_VNQ_close",   # US REITs
+        "real_estate_IYR_close",   # US Real Estate
+        "real_estate_SCHH_close",  # US REITs
+        "real_estate_VNQI_close",  # International REITs
+    ],
+}
+
+
+def _ticker_label(col_name: str) -> str:
+    """Derive a compact display label from a column name."""
+    rest = col_name
+    # Strip known multi-word asset class prefixes
+    for prefix in ("real_estate_", "cryptocurrency_"):
+        if rest.startswith(prefix):
+            rest = rest[len(prefix):]
+            break
+    else:
+        parts = col_name.split("_", 1)
+        rest = parts[1] if len(parts) > 1 else col_name
+    for suffix in ("_close", "_return", "_high", "_low", "_open", "_volume"):
+        if rest.endswith(suffix):
+            rest = rest[: -len(suffix)]
+            break
+    if rest.startswith("fred_"):
+        rest = rest[5:]
+    if rest.startswith("kaggle_"):
+        rest = rest[7:]
+    return rest
+
+
+def _should_skip_column(col: str) -> bool:
+    return any(s in col for s in _SKIP_SUFFIXES)
+
+
+def plot_per_asset_class_overview(
+    csv_path: str = "datasets/processed/portbench.csv",
+    asset_class: str = "equities",
+    max_price_series: int = 6,
+    figsize: tuple = (8, 4.0),
+) -> Figure:
+    """
+    Single-asset-class overview figure showing normalized price indices
+    for the top-N most complete tickers, plus yield/rate curves and
+    crisis shading when applicable.
+
+    Args:
+        csv_path: Path to portbench.csv.
+        asset_class: One of 'equities', 'bonds', 'commodities',
+                     'cryptocurrency', 'real_estate', 'cash'.
+        max_price_series: Max number of price/index lines to draw.
+        figsize: Figure size.
+    """
+    if asset_class not in _PER_CLASS_META:
+        raise ValueError(
+            f"Unknown asset class {asset_class!r}. "
+            f"Choose from: {list(_PER_CLASS_META)}"
+        )
+
+    apply_paper_style()
+    meta = _PER_CLASS_META[asset_class]
+
+    df = pd.read_csv(csv_path, parse_dates=["date"], low_memory=False)
+    df = df.sort_values("date").reset_index(drop=True).set_index("date")
+
+    # ── Collect columns for this asset class ───────────────────────────────
+    all_cols = [c for c in df.columns if c != "date"]
+    class_cols: list[str] = []
+    text_col: str | None = None
+    for c in all_cols:
+        if _infer_asset_class(c) != asset_class:
+            continue
+        if _should_skip_column(c):
+            continue
+        if c.endswith("_text_json"):
+            text_col = c
+            continue
+        if c.endswith("_return"):
+            continue
+        class_cols.append(c)
+
+    # ── Separate price columns from rate columns ───────────────────────────
+    price_cols: list[str] = []
+    rate_cols: list[tuple[str, str]] = []
+
+    if asset_class == "bonds":
+        for c in class_cols:
+            if c.endswith("_close"):
+                price_cols.append(c)
+        for c, label in {**_BOND_RATE_COLS, **_BOND_SPREAD_COLS}.items():
+            if c in df.columns:
+                rate_cols.append((c, label))
+    elif asset_class == "cash":
+        for c, label in _CASH_RATE_COLS.items():
+            if c in df.columns:
+                rate_cols.append((c, label))
+        for c, label in _CASH_MACRO_COLS.items():
+            if c in df.columns:
+                price_cols.append(c)
+    else:
+        price_cols = [c for c in class_cols if c.endswith("_close")]
+        for c in class_cols:
+            if c not in price_cols and "close" in c.lower():
+                price_cols.append(c)
+
+    # ── Pick top-N price series: preferred columns first, then by completeness ─
+    if price_cols:
+        n = min(max_price_series, _MAX_PRICE_PER_CLASS.get(asset_class, max_price_series))
+        preferred = _PREFERRED_PRICE_COLS.get(asset_class, [])
+        selected = [c for c in preferred if c in price_cols][:n]
+        if len(selected) < n:
+            remaining = [c for c in price_cols if c not in selected]
+            remaining = [c for _, c in sorted(
+                [(df[c].notna().sum(), c) for c in remaining], reverse=True
+            )]
+            selected += remaining[: n - len(selected)]
+        price_cols = selected
+
+    # ── Build figure ──────────────────────────────────────────────────────
+    is_rate_only = asset_class == "cash" and not price_cols
+    fig, ax_price = plt.subplots(1, 1, figsize=figsize)
+    ax_rate = ax_price if is_rate_only else ax_price.twinx()
+
+    charted_series: list[tuple[str, str, int]] = []
+    charted_rates: list[tuple[str, str, int]] = []
+
+    # Price / index lines
+    if price_cols and not is_rate_only:
+        for i, col in enumerate(price_cols):
+            series = df[col].dropna()
+            if len(series) < 30:
+                continue
+            normed = _normalize_series(series)
+            label = _ticker_label(col)
+            color = _MODEL_COLOURS[i % len(_MODEL_COLOURS)]
+            every = max(1, len(normed) // 12)
+            ax_price.plot(
+                normed.index, normed.values, label=label, color=color,
+                linewidth=1.6,
+                marker=_MODEL_MARKERS[i % len(_MODEL_MARKERS)],
+                markevery=every, markersize=3.5,
+                markerfacecolor=color, markeredgewidth=0.4, markeredgecolor="white",
+                zorder=3,
+            )
+            charted_series.append((label, color, i))
+        ax_price.axhline(100, color="#c0c0c0", linestyle=":", linewidth=0.7, alpha=0.5)
+        ax_price.set_ylabel(meta["ylabel"], fontsize=10)
+
+    # Rate lines
+    _RATE_LS = ["--", "--", "--", "--"]
+    if rate_cols:
+        for i, (col, label) in enumerate(rate_cols):
+            series = df[col].dropna()
+            if len(series) < 30:
+                continue
+            ci = len(price_cols) + i
+            color = _MODEL_COLOURS[ci % len(_MODEL_COLOURS)]
+            ax_rate.plot(
+                series.index, series.values, label=label, color=color,
+                linestyle=_RATE_LS[i % len(_RATE_LS)], linewidth=1.2, alpha=0.85, zorder=2,
+            )
+            charted_rates.append((label, color, ci))
+        ax_rate.set_ylabel("Interest Rate  (%)", fontsize=10, color="#c44e52")
+        ax_rate.tick_params(axis="y", colors="#c44e52", labelsize=9)
+
+    # ── News text coverage background ──────────────────────────────────────
+    if text_col and not is_rate_only:
+        chars = _monthly_char_count(df[text_col])
+        if len(chars) > 0 and chars.max() > 0:
+            chars_frac = chars / chars.max()
+            y_lim = ax_price.get_ylim()
+            y_max = y_lim[1] if y_lim[1] > 50 else 400
+            ax_price.fill_between(
+                chars.index, 0, chars_frac * y_max,
+                color="#d4e4f7", alpha=0.35, zorder=0,
+            )
+
+    # ── Crisis shading ─────────────────────────────────────────────────────
+    for start_s, end_s, label in _CRISES:
+        start, end = pd.Timestamp(start_s), pd.Timestamp(end_s)
+        ax_price.axvspan(start, end, color="#1e3d6e", alpha=0.15, zorder=0)
+        ax_price.text(
+            start + (end - start) / 2, 1.01, label.strip(),
+            ha="center", va="bottom", fontsize=8, color="#1e3d6e",
+            fontweight="bold", transform=ax_price.get_xaxis_transform(), zorder=5,
+        )
+
+    # ── Legend ──────────────────────────────────────────────────────────────
+    price_handles = [
+        mlines.Line2D([], [], color=color, marker=_MODEL_MARKERS[i % len(_MODEL_MARKERS)],
+                       linestyle="-", markersize=5, label=label)
+        for label, color, i in charted_series
+    ]
+    rate_handles = [
+        mlines.Line2D([], [], color=color, linestyle="--", linewidth=1.3, label=label)
+        for label, color, _ in charted_rates
+    ]
+    all_handles = price_handles + rate_handles
+    if text_col and not is_rate_only:
+        all_handles.append(mpatches.Patch(color="#d4e4f7", alpha=0.25, label="News Text Coverage"))
+    all_handles.append(mpatches.Patch(color="#1e3d6e", alpha=0.15, label="Market Stress Window"))
+
+    ax_price.legend(
+        handles=all_handles, fontsize=8, loc="upper left",
+        framealpha=0.9, ncols=min(2, max(1, len(all_handles) // 8 + 1)),
+    )
+
+    ax_price.set_xlim(df.index.min(), df.index.max())
+    ax_price.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+    ax_price.xaxis.set_major_locator(mdates.YearLocator())
+    ax_price.set_xlabel("Year", fontsize=10)
+    ax_price.tick_params(axis="both", labelsize=9)
+    fig.tight_layout()
+    return fig
+
+
+def plot_all_asset_class_overviews(
+    csv_path: str = "datasets/processed/portbench.csv",
+    output_dir: str = "datasets/processed",
+    formats: tuple = ("png",),
+    max_price_series: int = 6,
+) -> list[str]:
+    """Save one overview figure per asset class to *output_dir*."""
+    from pathlib import Path
+
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    saved: list[str] = []
+    for cls in _PER_CLASS_META:
+        try:
+            fig = plot_per_asset_class_overview(
+                csv_path=csv_path, asset_class=cls, max_price_series=max_price_series,
+            )
+            fname = str(out / f"dataset_overview_{cls}")
+            save_figure(fig, fname, formats=formats)
+            saved.append(f"{fname}.{formats[0]}")
+        except Exception as exc:
+            import sys
+            print(f"  WARNING: {cls} skipped — {exc}", file=sys.stderr)
+
+    return saved

@@ -190,6 +190,19 @@ def _write_figure_index(comp_dir: Path, rebalance: str) -> None:
             "Background bands mark tier thresholds D/C/B/A. "
             "Use this to compare model resilience across all three crisis scenarios and investor profiles."
         ),
+        "s2_s4_quadrant.png": (
+            "**S2 vs S4 Quadrant** — Scatter plot of S2 (Signal Generation) vs S4 (Execution) "
+            "scores per model. Median-based crosshairs divide the plane into four quadrants: "
+            "Signal-rich Execution-poor (top-left), Balanced (top-right), Weak on both (bottom-left), "
+            "Execution-leaning (bottom-right). Quadrants are shaded for visual grouping. "
+            "Use this to identify signal-execution dissociation patterns across models."
+        ),
+        "normal_vs_stress.png": (
+            "**Normal-vs-Stress CEPS Scatter** — X=CEPS_normal, Y=CEPS_2022_Crypto_Collapse "
+            "(balanced profile). y=x diagonal separates models that improve (above) vs degrade "
+            "(below) under stress. Key models annotated: HY3-Preview (largest drop below diagonal), "
+            "GLM-5.1 & DS-V4-Flash (CEPS gain but gate fail), Qwen3.6-Plus (stable, near diagonal)."
+        ),
         "ceps_breakdown.png": (
             "**CEPS Stage Breakdown** — Heatmap of per-stage scores (S1–S5) and CEPS total per model. "
             "Red cells indicate stages with high error propagation. "
@@ -285,6 +298,8 @@ def analyze_runs(
     """
     from ..visualization.ranking_plots import plot_risk_ranking
     from ..visualization.ceps_plots import plot_ceps_heatmap
+    from ..visualization.quadrant_plots import plot_s2_s4_quadrant
+    from ..visualization.normal_vs_stress_plots import plot_normal_vs_stress_scatter
     from ..visualization.risk_return_plots import plot_risk_return_scatter
     from ..visualization.profile_plots import plot_profile_alignment
     from ..visualization.style import save_figure
@@ -338,6 +353,57 @@ def analyze_runs(
             figures_written.append("rankings.png")
         except Exception as exc:
             log(f"analysis: rankings.png skipped ({exc})")
+
+    # Fig 2: S2 vs S4 quadrant  (LLM models only)
+    try:
+        stage_scores = _load_stage_scores(output_root, rebalance)
+        if stage_scores:
+            fig = plot_s2_s4_quadrant(
+                stage_scores,
+                title=f"S2 vs S4 — {rebalance}",
+            )
+            save_figure(fig, str(fig_dir / "s2_s4_quadrant.png"), formats=("png",))
+            figures_written.append("s2_s4_quadrant.png")
+    except Exception as exc:
+        log(f"analysis: s2_s4_quadrant.png skipped ({exc})")
+
+    # Fig 2b: Normal-vs-Stress CEPS scatter (conservative profile, 2022 crypto)
+    try:
+        ns_points: list[dict] = []
+        for summary in summaries:
+            model_key = f"{summary['provider']}/{summary['model_name']}"
+            if model_key.startswith("baseline/"):
+                continue
+            profile_data = summary.get("profiles", {}).get("conservative", {})
+            normal = profile_data.get("normal", {})
+            ceps_normal = normal.get("mean_ceps", 0.0)
+            if ceps_normal <= 0:
+                continue
+            stress = profile_data.get("stress_results", {})
+            if isinstance(stress, dict):
+                crypto = stress.get("2022_crypto_collapse", {})
+            else:
+                crypto = {}
+            ceps_crypto = crypto.get("mean_ceps", 0.0)
+            if ceps_crypto <= 0:
+                continue
+            ns_points.append({
+                "model": model_key,
+                "ceps_normal": ceps_normal,
+                "ceps_crypto": ceps_crypto,
+                "crypto_passed": crypto.get("stress_passed", True),
+                "stress_gate_passed": profile_data.get("stress_gate_passed", True),
+                "delta": round(ceps_crypto - ceps_normal, 4),
+            })
+        if ns_points:
+            fig = plot_normal_vs_stress_scatter(
+                ns_points,
+                title=f"Normal vs Stress CEPS — {rebalance}",
+            )
+            save_figure(fig, str(fig_dir / "normal_vs_stress.png"), formats=("png",))
+            figures_written.append("normal_vs_stress.png")
+    except Exception as exc:
+        log(f"analysis: normal_vs_stress.png skipped ({exc})")
 
     # Fig 3: CEPS heatmap  (LLM models only, with per-stage scores from pipeline_logs)
     if model_normal:
