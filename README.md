@@ -6,6 +6,11 @@
 2. **Full pipeline evaluation with error propagation measurement**: a five-stage sequential decision pipeline (market interpretation -> signal generation -> weight optimization -> execution -> risk monitoring) quantifies how errors compound across stages via the CEPS (Cross-stage Error Propagation Score) metric.
 3. **Stress regime and investor profile evaluation**: models are evaluated under three historical stress regimes (2015 China Shock, 2020 COVID Crash, 2022 Crypto Collapse) and three investor profiles (conservative, balanced, aggressive), testing both robustness under correlation shocks and alignment with investor-specific risk constraints.
 
+<p align="center">
+  <img src="figures/intro_overview.png" width="100%" alt="PortBench Overview"/>
+</p>
+<p align="center"><b>Figure 1.</b> Overview of PortBench: Market Base Dataset across six asset classes (Jan 2015–Dec 2025), dual evaluation layer (static QA + dynamic pipeline), robustness evaluation under three stress regimes, and investor task profiles with distinct risk constraints.</p>
+
 ## Evaluation Architecture
 
 PortBench evaluates LLMs through two complementary layers:
@@ -16,6 +21,13 @@ PortBench evaluates LLMs through two complementary layers:
 | Dynamic | **Five-Stage Sandbox Pipeline** | Yes | Realized PnL + CEPS + profile alignment, under 3 profiles × 3 stress regimes |
 
 The **QA layer** probes isolated financial reasoning — from single-asset return prediction (T1) to regime-driven portfolio rebalancing (T7). The **dynamic layer** replays market data point-in-time and measures how well models sustain decision quality across the full sequential pipeline.
+
+<p align="center">
+  <img src="figures/method_framework.png" width="100%" alt="Evaluation Framework"/>
+</p>
+<p align="center"><b>Figure 2.</b> Evaluation framework. <b>Top:</b> Static QA evaluation with representative QA pairs from seven task templates (T1–T7). <b>Bottom:</b> Dynamic five-stage pipeline evaluation under three investor profiles and three historical stress regimes.</p>
+
+For additional visualizations, including Market Base Dataset time-series slices, QA template examples, pipeline evaluation input snapshots, and per-model result breakdowns, please refer to the paper appendix.
 
 ## Setup
 
