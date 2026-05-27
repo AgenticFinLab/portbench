@@ -1,6 +1,6 @@
-# PortBench
+# PortBench: A Correlation-Aware, Full-Pipeline Benchmark for LLM-Driven Portfolio Management
 
-**PortBench** is a benchmark for evaluating LLMs on multi-asset portfolio management. It addresses three gaps in existing financial benchmarks:
+Existing financial benchmarks are limited because they either focus on single assets or evaluate multi-assets in isolation, thereby ignoring asset correlations. Furthermore, they lack a full-pipeline assessment that mirrors real-world portfolio management workflows. To address these gaps, our contributions include:
 
 1. **Multi-asset Market Base Dataset**: we collect and release a ten-year (Jan 2015–Dec 2025) dataset covering 183 financial instruments across six heterogeneous asset classes (Equities, Bonds, Commodities, Real Estate, Cryptocurrency, Cash), with associated news text, macroeconomic indicators, and cross-asset correlation structures. Both evaluation layers are built on top of this dataset.
 2. **Dual-layer evaluation**: a static QA layer (6,269 pairs across 7 templates T1–T7) probes correlation-based financial reasoning, paired with a dynamic five-stage sandbox pipeline (market interpretation -> signal generation -> weight optimization -> execution -> risk monitoring) that evaluates the full sequential decision cycle under realistic market replay.
