@@ -2,9 +2,10 @@
 
 **PortBench** is a benchmark for evaluating LLMs on multi-asset portfolio management. It addresses three gaps in existing financial benchmarks:
 
-1. **Multi-asset coverage with correlation awareness**: the evaluation unit is a portfolio weight allocation across six heterogeneous asset classes (Equities, Bonds, Commodities, Real Estate, Cryptocurrency, Cash), with explicit two-layer correlation scoring that penalizes intra-class concentration and rewards inter-class hedging.
-2. **Full pipeline evaluation with error propagation measurement**: a five-stage sequential decision pipeline (market interpretation -> signal generation -> weight optimization -> execution -> risk monitoring) quantifies how errors compound across stages via the CEPS (Cross-stage Error Propagation Score) metric.
-3. **Stress regime and investor profile evaluation**: models are evaluated under three historical stress regimes (2015 China Shock, 2020 COVID Crash, 2022 Crypto Collapse) and three investor profiles (conservative, balanced, aggressive), testing both robustness under correlation shocks and alignment with investor-specific risk constraints.
+1. **Multi-asset Market Base Dataset**: we collect and release a ten-year (Jan 2015–Dec 2025) dataset covering 183 financial instruments across six heterogeneous asset classes (Equities, Bonds, Commodities, Real Estate, Cryptocurrency, Cash), with associated news text, macroeconomic indicators, and cross-asset correlation structures. Both evaluation layers are built on top of this dataset.
+2. **Dual-layer evaluation**: a static QA layer (6,269 pairs across 7 templates T1–T7) probes correlation-based financial reasoning, paired with a dynamic five-stage sandbox pipeline (market interpretation -> signal generation -> weight optimization -> execution -> risk monitoring) that evaluates the full sequential decision cycle under realistic market replay.
+3. **Novel evaluation metrics**: a two-layer correlation scoring criterion that penalizes intra-class concentration and rewards inter-class hedging in portfolio weights, together with CEPS (Cross-stage Error Propagation Score) that quantifies how errors compound across pipeline stages.
+4. **Stress regime and investor profile evaluation**: models are evaluated under three historical stress regimes (2015 China Shock, 2020 COVID Crash, 2022 Crypto Collapse) and three investor profiles (conservative, balanced, aggressive), testing both robustness under correlation shocks and alignment with investor-specific risk constraints.
 
 <p align="center">
   <img src="figures/intro_overview.png" width="100%" alt="PortBench Overview"/>
