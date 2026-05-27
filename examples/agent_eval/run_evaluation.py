@@ -20,7 +20,7 @@ Output:
         summary.txt              — human-readable summary
 
 The evaluation workflow:
-  1. Stress gate:  Agent must pass all three stress scenarios (2008, 2020, 2022).
+  1. Stress gate:  Agent must pass all three stress scenarios (2015, 2020, 2022).
   2. Performance:  CEPS computed over normal market episodes (2024 test set).
   3. Risk-first ranking: Models that failed stress gate are shown but marked FAILED.
 """

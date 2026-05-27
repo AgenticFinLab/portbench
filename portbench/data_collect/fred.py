@@ -30,7 +30,7 @@ class FREDSeries:
 # Selection criteria:
 #   - Directly relevant to multi-asset portfolio allocation decisions
 #   - Available with reasonable history back to 2015
-#   - Covers the three stress periods: 2008-09 crisis, 2020 COVID, 2022 crypto/rate
+#   - Covers the three stress periods: 2015 China shock, 2020 COVID, 2022 crypto/rate
 #
 # Organization:
 #   BONDS       — yield curve, credit spreads, real rates
