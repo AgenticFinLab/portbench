@@ -81,7 +81,7 @@ config = QualityConfig(
     min_coverage=0.85,          # FAIL below this
     warn_coverage=0.95,         # WARN below this
     stress_periods=[            # Must have good coverage in all three
-        ("2008-09-01", "2009-03-31"),
+        ("2015-08-01", "2016-02-29"),
         ("2020-02-01", "2020-05-31"),
         ("2022-05-01", "2022-12-31"),
     ],

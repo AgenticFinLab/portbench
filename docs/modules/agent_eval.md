@@ -390,7 +390,7 @@ Predefined scenarios:
 
 | Scenario | Period | Min pass score |
 |----------|--------|---------------|
-| 2008 Global Financial Crisis | 2008-09 – 2009-03 | 0.40 |
+| 2015 China Shock | 2015-08 – 2016-02 | 0.40 |
 | 2020 COVID Flash Crash | 2020-02 – 2020-05 | 0.45 |
 | 2022 Crypto Collapse | 2022-05 – 2022-12 | 0.50 |
 
@@ -444,7 +444,7 @@ The `--data-provider` flag chooses between:
 | `mock` (default) | Synthetic GBM, deterministic | Always empty | CI, agent debugging, no setup |
 | `processed` | `datasets/processed/*.csv` | SEC + Kaggle (where available) | Real-world benchmark runs |
 
-`processed` requires `examples/data_collect/get_all.py` and `examples/data_preprocess/preprocess_all.py` to have been run. It also requires `datasets/processed/` to span the stress-test windows (2008/2020/2022); if it doesn't, those stress tests will return zero snapshots and fail the gate.
+`processed` requires `examples/data_collect/get_all.py` and `examples/data_preprocess/preprocess_all.py` to have been run. It also requires `datasets/processed/` to span the stress-test windows (2015/2020/2022); if it doesn't, those stress tests will return zero snapshots and fail the gate.
 
 Output: `outputs/evaluation_results/eval_results/{run_id}/`
 - `per_stage_scores.json` — per-episode and mean stage scores

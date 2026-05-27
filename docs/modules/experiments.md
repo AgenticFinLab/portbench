@@ -59,7 +59,8 @@ PROVIDER_REGISTRY = {
 
 Built-in baseline keys (used in YAML as `- baseline: <key>`):
 `equal_weight`, `sixty_forty`, `risk_parity` (naive inverse-vol),
-`cov_risk_parity` (Equal-Risk-Contribution using full covariance).
+`cov_risk_parity` (Equal-Risk-Contribution using full covariance),
+`min_variance` (long-only minimum variance).
 
 For each provider key, `build_adapter()` reads three env vars:
 

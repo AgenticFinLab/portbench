@@ -17,7 +17,7 @@ Collects raw financial data from four sources across all six asset classes. Each
 
 ## Collectors
 
-### `YahooCollector` — 72 tickers
+### `YahooCollector` — 83 tickers
 
 Downloads OHLCV daily price data via `yfinance`. Tickers are defined in `YAHOO_TICKERS` and cover:
 

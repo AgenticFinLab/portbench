@@ -32,9 +32,9 @@ Profile drawdown tolerances:
 
 | Profile | `max_drawdown_tolerance` | `max_equity_weight` | `var_limit` |
 |---------|--------------------------|---------------------|-------------|
-| Conservative | 10% | 40% | 5% |
-| Balanced | 20% | 65% | 10% |
-| Aggressive | 35% | 90% | 20% |
+| Conservative | 10% | 40% | −1% |
+| Balanced | 20% | 65% | −2% |
+| Aggressive | 35% | 90% | −4% |
 
 ---
 
