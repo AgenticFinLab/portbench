@@ -144,3 +144,14 @@ outputs/                  # All generated artifacts (gitignored)
 - **Market state partitioning**: test data is labeled bull/bear/sideways/crisis to enable per-state performance decomposition.
 - **Profile-sensitive stress thresholds**: stress gates are tied to each investor profile's drawdown tolerance, not fixed CEPS cutoffs.
 - **Same pipeline for everyone**: baselines and LLM agents flow through identical S1–S5 stages, ensuring a controlled comparison.
+
+## Citation
+
+```bibtex
+@article{zhao2026portbench,
+  title={PortBench: A Correlation-Aware, Full-Pipeline Benchmark for LLM-Driven Portfolio Management},
+  author={Zhao, Yuxuan and Chen, Sijia and Su, Ningxin},
+  journal={arXiv preprint arXiv:2605.27887},
+  year={2026}
+}
+```
