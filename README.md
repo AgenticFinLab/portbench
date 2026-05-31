@@ -2,6 +2,7 @@
 
 [![Paper](https://img.shields.io/badge/arXiv-2605.27887-b31b1b)](https://arxiv.org/abs/2605.27887)
 [![Dataset](https://img.shields.io/badge/🤗_HuggingFace-Dataset-yellow)](https://huggingface.co/collections/AgenticFinLab/portbench)
+[![Homepage](https://img.shields.io/badge/🌐_Homepage-portbench.github.io-blue)](https://portbench.github.io/)
 
 Existing financial benchmarks are limited because they either focus on single assets or evaluate multi-assets in isolation, thereby ignoring asset correlations. Furthermore, they lack a full-pipeline assessment that mirrors real-world portfolio management workflows. To address these gaps, our contributions include:
 
