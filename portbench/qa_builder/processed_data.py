@@ -183,6 +183,42 @@ class ProcessedDataProvider(DataProvider):
         "SGOV": "cash",
         "CSHI": "cash",
         "ICSH": "cash",
+        # FF49 Industries (for datasets/processed_ff49/ dataset)
+        "Agric": "equities", "Food": "equities", "Soda": "equities",
+        "Beer": "equities", "Smoke": "equities", "Toys": "equities",
+        "Fun": "equities", "Books": "equities", "Hshld": "equities",
+        "Clths": "equities", "Hlth": "equities", "MedEq": "equities",
+        "Drugs": "equities", "Chems": "equities", "Rubbr": "equities",
+        "Txtls": "equities", "BldMt": "equities", "Cnstr": "equities",
+        "Steel": "equities", "FabPr": "equities", "Mach": "equities",
+        "ElcEq": "equities", "Autos": "equities", "Aero": "equities",
+        "Ships": "equities", "Guns": "equities", "Gold": "equities",
+        "Mines": "equities", "Coal": "equities", "Oil": "equities",
+        "Util": "equities", "Telcm": "equities", "PerSv": "equities",
+        "BusSv": "equities", "Hardw": "equities", "Softw": "equities",
+        "Chips": "equities", "LabEq": "equities", "Paper": "equities",
+        "Boxes": "equities", "Trans": "equities", "Whlsl": "equities",
+        "Rtail": "equities", "Meals": "equities", "Banks": "equities",
+        "Insur": "equities", "RlEst": "equities", "Fin": "equities",
+        "Other": "equities",
+        # SP500 Top-50 (for datasets/processed_sp500/ dataset)
+        "AAPL": "equities", "MSFT": "equities", "NVDA": "equities",
+        "AVGO": "equities", "ORCL": "equities", "CRM": "equities",
+        "AMD": "equities", "ADBE": "equities", "QCOM": "equities",
+        "TXN": "equities", "IBM": "equities", "NOW": "equities",
+        "AMAT": "equities", "MU": "equities", "BRK-B": "equities",
+        "JPM": "equities", "V": "equities", "MA": "equities",
+        "BAC": "equities", "WFC": "equities", "GS": "equities",
+        "BLK": "equities", "LLY": "equities", "UNH": "equities",
+        "JNJ": "equities", "ABBV": "equities", "MRK": "equities",
+        "TMO": "equities", "ABT": "equities", "AMZN": "equities",
+        "TSLA": "equities", "HD": "equities", "MCD": "equities",
+        "NKE": "equities", "PG": "equities", "KO": "equities",
+        "PEP": "equities", "COST": "equities", "GE": "equities",
+        "CAT": "equities", "UNP": "equities", "RTX": "equities",
+        "HON": "equities", "GOOGL": "equities", "META": "equities",
+        "NFLX": "equities", "XOM": "equities", "CVX": "equities",
+        "NEE": "equities", "PLD": "equities",
     }
 
     # Paths to Kaggle text datasets (relative to repo root, same level as datasets/)
@@ -611,7 +647,16 @@ class ProcessedDataProvider(DataProvider):
     # -----------------------------------------------------------------------
 
     def _load_all(self) -> None:
-        """Load all per-asset-class CSVs into self._frames."""
+        """Load all per-asset-class CSVs into self._frames.
+
+        After loading, filters _ASSET_CLASS_MAP to only include tickers
+        whose columns actually exist in the loaded data. This ensures
+        dataset isolation: loading FF49 data won't advertise PortBench
+        tickers that aren't present.
+        """
+        # Instance-level copy so filtering doesn't affect other instances
+        self._ASSET_CLASS_MAP = dict(self.__class__._ASSET_CLASS_MAP)
+
         for cls, filename in self._CLASS_TO_FILE.items():
             df = self._load_asset_frame(cls, filename)
             if df is not None:
@@ -625,6 +670,31 @@ class ProcessedDataProvider(DataProvider):
                     UserWarning,
                     stacklevel=2,
                 )
+
+        # Filter asset map: keep only tickers with actual column data
+        all_columns = set()
+        for frame in self._frames.values():
+            all_columns.update(frame.columns)
+
+        self._ASSET_CLASS_MAP = {
+            ticker: cls
+            for ticker, cls in self._ASSET_CLASS_MAP.items()
+            if self._ticker_has_columns(ticker, cls, all_columns)
+        }
+
+    def _ticker_has_columns(
+        self, ticker: str, cls: str, all_columns: set
+    ) -> bool:
+        """Check if a ticker has matching columns in the loaded data."""
+        for suffix in ["_close", "_return"]:
+            # Check with each source prefix
+            for prefix in _SOURCE_PREFIXES:
+                if f"{prefix}_{ticker}{suffix}" in all_columns:
+                    return True
+            # Check bare name (for FF49/SP500 isolated datasets)
+            if f"{ticker}{suffix}" in all_columns:
+                return True
+        return False
 
     def _load_asset_frame(self, cls: str, filename: str) -> Optional[pd.DataFrame]:
         """
