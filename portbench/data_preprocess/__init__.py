@@ -15,6 +15,8 @@ from .commodities import CommoditiesPreprocessor
 from .real_estate import RealEstatePreprocessor
 from .cryptocurrency import CryptocurrencyPreprocessor
 from .cash import CashPreprocessor
+from .ff49 import FF49Preprocessor
+from .sp500 import SP500Preprocessor
 
 __all__ = [
     # Base classes
@@ -32,6 +34,9 @@ __all__ = [
     "RealEstatePreprocessor",
     "CryptocurrencyPreprocessor",
     "CashPreprocessor",
+    # External dataset preprocessors
+    "FF49Preprocessor",
+    "SP500Preprocessor",
 ]
 
 
@@ -52,6 +57,8 @@ def get_all_preprocessors(config: PreprocessConfig) -> list[AssetPreprocessor]:
         RealEstatePreprocessor(config),
         CryptocurrencyPreprocessor(config),
         CashPreprocessor(config),
+        FF49Preprocessor(config),
+        SP500Preprocessor(config),
     ]
 
 
