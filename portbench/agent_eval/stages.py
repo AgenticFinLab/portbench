@@ -32,7 +32,12 @@ from .base import (
     MarketSnapshot,
     PipelineStage,
     RiskAlert,
-    S1Output, S2Output, S3Output, S4Output, S5Output, TradeOrder,
+    S1Output,
+    S2Output,
+    S3Output,
+    S4Output,
+    S5Output,
+    TradeOrder,
     StageID,
 )
 from .llm_adapters import EmptyResponseError
@@ -47,10 +52,10 @@ from .tools import get_tools
 from ..metrics.risk_metrics import var, max_drawdown
 from ..metrics.base import MetricsConfig
 
-
 # ---------------------------------------------------------------------------
 # Shared prompt utilities
 # ---------------------------------------------------------------------------
+
 
 def _recover_truncated_json(text: str) -> Optional[dict]:
     """
@@ -63,7 +68,7 @@ def _recover_truncated_json(text: str) -> Optional[dict]:
     # Find each named sub-dict: "fieldname": {  ...
     for m in re.finditer(r'"(\w+)"\s*:\s*\{', text):
         field = m.group(1)
-        sub = text[m.end():]
+        sub = text[m.end() :]
         # Extract complete pairs only: "KEY":"val" or "KEY":number
         pairs: dict = {}
         for pm in re.finditer(r'"([^"\\]+)"\s*:\s*(?:"([^"\\]*)"|([-\d.]+))', sub):
@@ -166,14 +171,20 @@ def _extract_json(text: str) -> dict:
 _JSON_RETRY_LIMIT = 2  # additional attempts after the first parse failure
 
 
-def _max_sharpe_weights(assets: list[str], future_return_data: dict) -> dict[str, float]:
+def _max_sharpe_weights(
+    assets: list[str], future_return_data: dict
+) -> dict[str, float]:
     """
     Compute max-Sharpe weights for the given assets using realized future returns.
     Falls back to equal-weight if optimization fails or data is insufficient.
     """
     from scipy.optimize import minimize
 
-    data = {a: future_return_data[a] for a in assets if a in future_return_data and not future_return_data[a].empty}
+    data = {
+        a: future_return_data[a]
+        for a in assets
+        if a in future_return_data and not future_return_data[a].empty
+    }
     eq = {a: round(1.0 / len(assets), 4) for a in assets}
     if len(data) < 2:
         return eq
@@ -220,7 +231,11 @@ def _min_variance_weights(assets: list[str], return_data: dict) -> dict[str, flo
     """
     from scipy.optimize import minimize
 
-    data = {a: return_data[a] for a in assets if a in return_data and not return_data[a].empty}
+    data = {
+        a: return_data[a]
+        for a in assets
+        if a in return_data and not return_data[a].empty
+    }
     eq = {a: round(1.0 / len(assets), 4) for a in assets}
     if len(data) < 2:
         return eq
@@ -281,7 +296,10 @@ _REFUSAL_PATTERNS: list[re.Pattern] = [
     re.compile(r"对不起.*无法", re.IGNORECASE),
     re.compile(r"抱歉.*无法", re.IGNORECASE),
     # English refusals
-    re.compile(r"i('m|\s+am)?\s+(not\s+able|unable)\s+to\s+(provide|answer|respond|assist)", re.IGNORECASE),
+    re.compile(
+        r"i('m|\s+am)?\s+(not\s+able|unable)\s+to\s+(provide|answer|respond|assist)",
+        re.IGNORECASE,
+    ),
     re.compile(r"i\s+can'?t\s+(provide|answer|respond|give|assist)", re.IGNORECASE),
     re.compile(r"i\s+cannot\s+(provide|answer|respond|give|assist)", re.IGNORECASE),
     re.compile(r"i\s+(?:must\s+)?decline", re.IGNORECASE),
@@ -306,7 +324,9 @@ def _is_refusal(raw: str) -> bool:
     return False
 
 
-def _call_with_json_retry(adapter, prompt: str, use_tools: bool, stage_name: str) -> tuple:
+def _call_with_json_retry(
+    adapter, prompt: str, use_tools: bool, stage_name: str
+) -> tuple:
     """
     Call the LLM and parse a JSON object, retrying on parse failure.
 
@@ -338,8 +358,7 @@ def _call_with_json_retry(adapter, prompt: str, use_tools: bool, stage_name: str
         # Detect content-safety refusals immediately — no point retrying
         if _is_refusal(raw):
             raise StageRefusalError(
-                f"{stage_name} model refused to respond. "
-                f"Last raw output: {raw!r}"
+                f"{stage_name} model refused to respond. " f"Last raw output: {raw!r}"
             )
         try:
             return _extract_json(raw), raw
@@ -364,9 +383,12 @@ def _format_price_context(snapshot: MarketSnapshot, max_assets: int = 8) -> str:
         if r.empty:
             continue
         trailing_ret = float((1 + r).prod() - 1)
-        vol = float(r.std() * (252 ** 0.5))
-        last_price = float(snapshot.price_data[asset].dropna().iloc[-1]) \
-            if asset in snapshot.price_data and not snapshot.price_data[asset].empty else 0.0
+        vol = float(r.std() * (252**0.5))
+        last_price = (
+            float(snapshot.price_data[asset].dropna().iloc[-1])
+            if asset in snapshot.price_data and not snapshot.price_data[asset].empty
+            else 0.0
+        )
         lines.append(
             f"  {asset}: price={last_price:.2f}, trailing_return={trailing_ret:+.2%}, "
             f"ann_vol={vol:.2%}"
@@ -375,23 +397,29 @@ def _format_price_context(snapshot: MarketSnapshot, max_assets: int = 8) -> str:
     macro_str = ", ".join(f"{k}={v:.3f}" for k, v in list(macro.items())[:5])
     return "\n".join(lines) + f"\nMacro: {macro_str}"
 
+
 def _format_macro_context(snapshot: MarketSnapshot) -> str:
     """Format all macro indicators as a human-readable section for LLM prompts."""
     if not snapshot.macro_data:
         return ""
     labels = {
         "fed_funds_rate": "Fed Funds Rate (%)",
-        "cpi_yoy":        "CPI YoY index",
-        "unemployment":   "Unemployment (%)",
+        "cpi_yoy": "CPI YoY index",
+        "unemployment": "Unemployment (%)",
         "gdp_growth_qoq": "GDP growth QoQ (%)",
-        "t10y2y_spread":  "10Y-2Y spread (pp)",
-        "t10y3m_spread":  "10Y-3M spread (pp)",
-        "breakeven_10y":  "10Y breakeven inflation (%)",
-        "hy_oas":         "HY OAS (pp)",
-        "ig_oas":         "IG OAS (pp)",
-        "ted_spread":     "TED spread (pp)",
-        "mortgage_30y":   "30Y mortgage rate (%)",
-        "vix":            "VIX",
+        "t10y2y_spread": "10Y-2Y spread (pp)",
+        "t10y3m_spread": "10Y-3M spread (pp)",
+        "breakeven_10y": "10Y breakeven inflation (%)",
+        "hy_oas": "HY OAS (pp)",
+        "ig_oas": "IG OAS (pp)",
+        "ted_spread": "TED spread (pp)",
+        "mortgage_30y": "30Y mortgage rate (%)",
+        "dgs_3m": "3M Treasury yield (%)",
+        "dgs_2y": "2Y Treasury yield (%)",
+        "dgs_10y": "10Y Treasury yield (%)",
+        "dgs_30y": "30Y Treasury yield (%)",
+        "real_yield_10y": "10Y real (TIPS) yield (%)",
+        "vix": "VIX",
     }
     lines = ["MACRO INDICATORS:"]
     for key, label in labels.items():
@@ -432,15 +460,21 @@ def _format_correlation(snapshot: MarketSnapshot, max_assets: int = 6) -> str:
         intra = snapshot.get_intra_class_correlation()
         if intra:
             lines.append("")
-            lines.append("INTRA-CLASS AVERAGE CORRELATION (concentration risk per class):")
+            lines.append(
+                "INTRA-CLASS AVERAGE CORRELATION (concentration risk per class):"
+            )
             for ac, sub in sorted(intra.items()):
                 vals = sub.values[~np.eye(len(sub), dtype=bool)]
                 if len(vals):
-                    lines.append(f"  {ac:<14}: mean={float(np.mean(vals)):+.2f}  n={len(sub)}")
+                    lines.append(
+                        f"  {ac:<14}: mean={float(np.mean(vals)):+.2f}  n={len(sub)}"
+                    )
         inter = snapshot.get_inter_class_correlation()
         if not inter.empty:
             lines.append("")
-            lines.append("INTER-CLASS CORRELATION (hedging/diversification across classes):")
+            lines.append(
+                "INTER-CLASS CORRELATION (hedging/diversification across classes):"
+            )
             classes = list(inter.columns)
             lines.append("         " + "".join(f"{c[:8]:>10}" for c in classes))
             for ci in classes:
@@ -449,8 +483,6 @@ def _format_correlation(snapshot: MarketSnapshot, max_assets: int = 6) -> str:
                 )
                 lines.append(row)
     return "\n".join(lines)
-
-
 
 
 class S1MarketInterpretation(PipelineStage):
@@ -479,7 +511,7 @@ class S1MarketInterpretation(PipelineStage):
             if r.empty:
                 views[asset] = 0.0
                 continue
-            trailing = float((1 + r).prod() - 1)   # Cumulative return over window
+            trailing = float((1 + r).prod() - 1)  # Cumulative return over window
             # Normalize: ±10% trailing return → ±1.0 view
             views[asset] = float(np.clip(trailing / 0.10, -1.0, 1.0))
 
@@ -496,7 +528,11 @@ class S1MarketInterpretation(PipelineStage):
         if isinstance(self.adapter, MockAgentAdapter):
             # Add Gaussian noise to ground-truth views
             noisy_views = {
-                a: float(np.clip(v + self.adapter._rng.normal(0, self.adapter.noise_level), -1, 1))
+                a: float(
+                    np.clip(
+                        v + self.adapter._rng.normal(0, self.adapter.noise_level), -1, 1
+                    )
+                )
                 for a, v in gt.asset_views.items()
             }
             return S1Output(
@@ -526,7 +562,9 @@ class S1MarketInterpretation(PipelineStage):
 
         self._last_prompt = prompt
         try:
-            parsed, raw = _call_with_json_retry(self.adapter, prompt, self.use_tools, "S1")
+            parsed, raw = _call_with_json_retry(
+                self.adapter, prompt, self.use_tools, "S1"
+            )
         except StageRefusalError as exc:
             return S1Output(
                 asset_views={a: 0.0 for a in assets},
@@ -545,7 +583,9 @@ class S1MarketInterpretation(PipelineStage):
                 except (TypeError, ValueError):
                     return 0.0
 
-            def _safe_float(v, default: float = 0.0, lo: float = 0.0, hi: float = 1.0) -> float:
+            def _safe_float(
+                v, default: float = 0.0, lo: float = 0.0, hi: float = 1.0
+            ) -> float:
                 try:
                     return float(np.clip(float(v), lo, hi))
                 except (TypeError, ValueError):
@@ -571,13 +611,14 @@ class S1MarketInterpretation(PipelineStage):
             abs(actual.asset_views.get(a, 0.0) - v)
             for a, v in ground_truth.asset_views.items()
         ]
-        mae = np.mean(errors) / 2.0   # Normalize by max possible error (2.0)
+        mae = np.mean(errors) / 2.0  # Normalize by max possible error (2.0)
         return float(np.clip(1.0 - mae, 0.0, 1.0))
 
 
 # ---------------------------------------------------------------------------
 # S2 – Signal Generation
 # ---------------------------------------------------------------------------
+
 
 class S2SignalGeneration(PipelineStage):
     """
@@ -618,17 +659,29 @@ class S2SignalGeneration(PipelineStage):
         return S2Output(signals=signals, strengths=strengths)
 
     def run(self, snapshot: MarketSnapshot, prior_output: S1Output = None) -> S2Output:
-        s1 = prior_output if prior_output is not None else S1MarketInterpretation(self.adapter).run(snapshot)
+        s1 = (
+            prior_output
+            if prior_output is not None
+            else S1MarketInterpretation(self.adapter).run(snapshot)
+        )
         if isinstance(self.adapter, MockAgentAdapter):
-            gt = self._views_to_signals(S1MarketInterpretation().compute_ground_truth(snapshot))
+            gt = self._views_to_signals(
+                S1MarketInterpretation().compute_ground_truth(snapshot)
+            )
             # Randomly flip some signals based on noise_level
             noisy_signals = {}
             for asset, sig in gt.signals.items():
                 if self.adapter._rng.random() < self.adapter.noise_level:
-                    noisy_signals[asset] = self.adapter._rng.choice(["buy", "hold", "sell"])
+                    noisy_signals[asset] = self.adapter._rng.choice(
+                        ["buy", "hold", "sell"]
+                    )
                 else:
                     noisy_signals[asset] = sig
-            return S2Output(signals=noisy_signals, strengths=gt.strengths, raw_llm_output=self.adapter.complete(""))
+            return S2Output(
+                signals=noisy_signals,
+                strengths=gt.strengths,
+                raw_llm_output=self.adapter.complete(""),
+            )
 
         # ----------------------------------------------------------------
         # Real LLM path
@@ -638,7 +691,9 @@ class S2SignalGeneration(PipelineStage):
 
         self._last_prompt = prompt
         try:
-            parsed, raw = _call_with_json_retry(self.adapter, prompt, self.use_tools, "S2")
+            parsed, raw = _call_with_json_retry(
+                self.adapter, prompt, self.use_tools, "S2"
+            )
         except StageRefusalError as exc:
             return S2Output(
                 signals={a: "hold" for a in assets},
@@ -653,16 +708,18 @@ class S2SignalGeneration(PipelineStage):
             if not isinstance(raw_signals, dict):
                 raw_signals = {}
             signals = {
-                a: (raw_signals.get(a, "hold")
-                    if raw_signals.get(a, "hold") in valid_signals else "hold")
+                a: (
+                    raw_signals.get(a, "hold")
+                    if raw_signals.get(a, "hold") in valid_signals
+                    else "hold"
+                )
                 for a in assets
             }
             raw_strengths = parsed.get("strengths")
             if not isinstance(raw_strengths, dict):
                 raw_strengths = {}
             strengths = {
-                a: float(np.clip(raw_strengths.get(a, 0.5), 0, 1))
-                for a in assets
+                a: float(np.clip(raw_strengths.get(a, 0.5), 0, 1)) for a in assets
             }
             return S2Output(
                 signals=signals,
@@ -680,8 +737,7 @@ class S2SignalGeneration(PipelineStage):
         if not ground_truth.signals:
             return 1.0
         correct = sum(
-            1 for a, sig in ground_truth.signals.items()
-            if actual.signals.get(a) == sig
+            1 for a, sig in ground_truth.signals.items() if actual.signals.get(a) == sig
         )
         return float(correct / len(ground_truth.signals))
 
@@ -689,6 +745,7 @@ class S2SignalGeneration(PipelineStage):
 # ---------------------------------------------------------------------------
 # S3 – Weight Optimization
 # ---------------------------------------------------------------------------
+
 
 class S3WeightOptimization(PipelineStage):
     """
@@ -760,14 +817,24 @@ class S3WeightOptimization(PipelineStage):
 
     def run(self, snapshot: MarketSnapshot, prior_output: S2Output = None) -> S3Output:
         self._last_snapshot = snapshot  # cache for correlation-awareness scoring
-        s2 = prior_output if prior_output is not None else S2SignalGeneration(self.adapter).run(snapshot)
+        s2 = (
+            prior_output
+            if prior_output is not None
+            else S2SignalGeneration(self.adapter).run(snapshot)
+        )
         if isinstance(self.adapter, MockAgentAdapter):
             gt = self._signals_to_weights(
                 S2SignalGeneration().compute_ground_truth(snapshot)
             )
             # Add noise: perturb weights and renormalize
             noisy = {
-                a: max(0, w + float(self.adapter._rng.normal(0, self.adapter.noise_level * 0.2)))
+                a: max(
+                    0,
+                    w
+                    + float(
+                        self.adapter._rng.normal(0, self.adapter.noise_level * 0.2)
+                    ),
+                )
                 for a, w in gt.weights.items()
             }
             total = sum(noisy.values())
@@ -786,7 +853,9 @@ class S3WeightOptimization(PipelineStage):
 
         self._last_prompt = prompt
         try:
-            parsed, raw = _call_with_json_retry(self.adapter, prompt, self.use_tools, "S3")
+            parsed, raw = _call_with_json_retry(
+                self.adapter, prompt, self.use_tools, "S3"
+            )
         except StageRefusalError as exc:
             # Hold current weights — no rebalancing when the model refuses
             current = dict(snapshot.current_weights) if snapshot.current_weights else {}
@@ -849,6 +918,7 @@ class S3WeightOptimization(PipelineStage):
         σ (self.sigma) controls the return-vs-risk balance (default 0.5).
         """
         from ..metrics.allocation_metrics import weight_mae
+
         mae = weight_mae(actual.weights, ground_truth.weights)
         accuracy_score = float(np.clip(1.0 - mae / 2.0, 0.0, 1.0))
 
@@ -958,7 +1028,9 @@ class S3WeightOptimization(PipelineStage):
 
         Returns a score in [0, 1].
         """
-        df = pd.DataFrame({a: s for a, s in snapshot.return_data.items() if not s.empty})
+        df = pd.DataFrame(
+            {a: s for a, s in snapshot.return_data.items() if not s.empty}
+        )
         if df.shape[1] < 2 or len(df) < 10:
             return 1.0  # Insufficient data, skip this component
 
@@ -970,7 +1042,7 @@ class S3WeightOptimization(PipelineStage):
             return float(w @ cov.values @ w)
 
         var_actual = port_var(actual_weights)
-        var_gt     = port_var(gt_weights)
+        var_gt = port_var(gt_weights)
 
         if var_gt <= 0:
             return 1.0
@@ -984,6 +1056,7 @@ class S3WeightOptimization(PipelineStage):
 # S4 – Execution Simulation
 # ---------------------------------------------------------------------------
 
+
 class S4ExecutionSimulation(PipelineStage):
     """
     Stage 4: Trade Execution Simulation.
@@ -996,7 +1069,7 @@ class S4ExecutionSimulation(PipelineStage):
     Commission: fixed rate per trade value.
     """
 
-    SLIPPAGE_RATE = 0.0010   # 10 bps
+    SLIPPAGE_RATE = 0.0010  # 10 bps
     COMMISSION_RATE = 0.0005  # 5 bps
 
     def __init__(self, adapter: AgentAdapter = None):
@@ -1012,7 +1085,10 @@ class S4ExecutionSimulation(PipelineStage):
         return self._execute(s3_gt, snapshot, slippage_rate=0.0)
 
     def _execute(
-        self, s3: S3Output, snapshot: MarketSnapshot, slippage_rate: float = SLIPPAGE_RATE
+        self,
+        s3: S3Output,
+        snapshot: MarketSnapshot,
+        slippage_rate: float = SLIPPAGE_RATE,
     ) -> S4Output:
         current_w = snapshot.current_weights
         target_w = s3.weights
@@ -1036,7 +1112,11 @@ class S4ExecutionSimulation(PipelineStage):
 
             # Get approximate current price from price_data
             price_series = snapshot.price_data.get(asset)
-            price = float(price_series.iloc[-1]) if (price_series is not None and not price_series.empty) else 100.0
+            price = (
+                float(price_series.iloc[-1])
+                if (price_series is not None and not price_series.empty)
+                else 100.0
+            )
 
             slippage = slippage_rate * (1 if direction == "buy" else -1)
             exec_price = price * (1 + slippage)
@@ -1044,14 +1124,22 @@ class S4ExecutionSimulation(PipelineStage):
             total_cost += commission + trade_value * abs(slippage)
             total_turnover += abs(delta)
 
-            orders.append(TradeOrder(
-                asset=asset, direction=direction, quantity=trade_value,
-                price=exec_price, slippage=slippage, commission=commission,
-            ))
+            orders.append(
+                TradeOrder(
+                    asset=asset,
+                    direction=direction,
+                    quantity=trade_value,
+                    price=exec_price,
+                    slippage=slippage,
+                    commission=commission,
+                )
+            )
 
         # Adjust executed weights for cost drag
         cost_drag = total_cost / nav
-        cash_key = next((a for a in executed if "BIL" in a or "cash" in a.lower()), None)
+        cash_key = next(
+            (a for a in executed if "BIL" in a or "cash" in a.lower()), None
+        )
         if cash_key:
             executed[cash_key] = max(0, executed[cash_key] - cost_drag)
 
@@ -1063,7 +1151,11 @@ class S4ExecutionSimulation(PipelineStage):
         )
 
     def run(self, snapshot: MarketSnapshot, prior_output: S3Output = None) -> S4Output:
-        s3 = prior_output if prior_output is not None else S3WeightOptimization(self.adapter).run(snapshot)
+        s3 = (
+            prior_output
+            if prior_output is not None
+            else S3WeightOptimization(self.adapter).run(snapshot)
+        )
         return self._execute(s3, snapshot)
 
     def score(self, actual: S4Output, ground_truth: S4Output) -> float:
@@ -1084,6 +1176,7 @@ class S4ExecutionSimulation(PipelineStage):
 # S5 – Risk Monitoring
 # ---------------------------------------------------------------------------
 
+
 class S5RiskMonitoring(PipelineStage):
     """
     Stage 5: Risk Monitoring.
@@ -1094,9 +1187,9 @@ class S5RiskMonitoring(PipelineStage):
     are used (conservative-equivalent).
     """
 
-    VAR_LIMIT = -0.02          # 1-day VaR(95%) threshold: -2%  (class default)
-    DRAWDOWN_LIMIT = -0.10     # Drawdown limit: -10%            (class default)
-    DRIFT_LIMIT = 0.05         # Max weight drift: 5%            (no profile field)
+    VAR_LIMIT = -0.02  # 1-day VaR(95%) threshold: -2%  (class default)
+    DRAWDOWN_LIMIT = -0.10  # Drawdown limit: -10%            (class default)
+    DRIFT_LIMIT = 0.05  # Max weight drift: 5%            (no profile field)
 
     def __init__(self, adapter: AgentAdapter = None, profile=None):
         self.adapter = adapter or MockAgentAdapter()
@@ -1134,15 +1227,27 @@ class S5RiskMonitoring(PipelineStage):
         # Weight drift vs equal-weight target
         n = max(len(weights), 1)
         target_w = 1.0 / n
-        drift = float(max(abs(w - target_w) for w in weights.values())) if weights else 0.0
+        drift = (
+            float(max(abs(w - target_w) for w in weights.values())) if weights else 0.0
+        )
 
         alerts = []
         if port_var < self._var_limit:
-            alerts.append(RiskAlert("var_breach", port_var, self._var_limit, "warning", "reduce"))
+            alerts.append(
+                RiskAlert("var_breach", port_var, self._var_limit, "warning", "reduce")
+            )
         if port_dd < self._drawdown_limit:
-            alerts.append(RiskAlert("drawdown", port_dd, self._drawdown_limit, "critical", "rebalance"))
+            alerts.append(
+                RiskAlert(
+                    "drawdown", port_dd, self._drawdown_limit, "critical", "rebalance"
+                )
+            )
         if drift > self._drift_limit:
-            alerts.append(RiskAlert("weight_drift", drift, self._drift_limit, "warning", "rebalance"))
+            alerts.append(
+                RiskAlert(
+                    "weight_drift", drift, self._drift_limit, "warning", "rebalance"
+                )
+            )
 
         rebalance_needed = any(a.action == "rebalance" for a in alerts)
 
@@ -1166,10 +1271,16 @@ class S5RiskMonitoring(PipelineStage):
           - Correct rebalance_needed decision (50%)
           - VaR / drawdown accuracy (50%)
         """
-        decision_score = 1.0 if actual.rebalance_needed == ground_truth.rebalance_needed else 0.0
+        decision_score = (
+            1.0 if actual.rebalance_needed == ground_truth.rebalance_needed else 0.0
+        )
 
-        var_err = abs(actual.portfolio_var - ground_truth.portfolio_var) / max(abs(ground_truth.portfolio_var), 1e-6)
-        dd_err = abs(actual.portfolio_drawdown - ground_truth.portfolio_drawdown) / max(abs(ground_truth.portfolio_drawdown), 1e-6)
+        var_err = abs(actual.portfolio_var - ground_truth.portfolio_var) / max(
+            abs(ground_truth.portfolio_var), 1e-6
+        )
+        dd_err = abs(actual.portfolio_drawdown - ground_truth.portfolio_drawdown) / max(
+            abs(ground_truth.portfolio_drawdown), 1e-6
+        )
         numeric_score = float(np.clip(1.0 - (var_err + dd_err) / 2.0, 0.0, 1.0))
 
         return float(0.5 * decision_score + 0.5 * numeric_score)

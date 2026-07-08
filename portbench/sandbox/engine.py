@@ -19,7 +19,7 @@ from __future__ import annotations
 import dataclasses
 from datetime import date
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import pandas as pd
 from tqdm.auto import tqdm
@@ -59,6 +59,8 @@ class BacktestEngine:
         end_date:        Backtest end date.
         rebalance_freq:  One of "weekly", "monthly", "quarterly".
         initial_nav:     Starting portfolio NAV in dollars.
+        initial_weights: Optional initial portfolio weights. If None, uses
+                         equal-weight across all assets.
         lookback_days:   Trading days of history passed to each snapshot.
         use_pipeline:    If True, route LLM through full S1→S5 EvalPipeline.
                          If False, call BaselineStrategy.allocate() directly.
@@ -78,6 +80,7 @@ class BacktestEngine:
         end_date: date = date(2024, 12, 31),
         rebalance_freq: str = "monthly",
         initial_nav: float = 1_000_000.0,
+        initial_weights: Optional[dict[str, float]] = None,
         lookback_days: int = 60,
         use_pipeline: bool = True,
         use_tools: bool = False,
@@ -86,6 +89,8 @@ class BacktestEngine:
         snapshot_dump_dir: Optional[str] = None,
         propagation_weight: float = 0.1,
         step_cache_dir: Optional[str] = None,
+        on_rebalance: Optional[Callable] = None,
+        progress: bool = True,
     ):
         self.strategy = strategy
         self._snapshot_dump_dir: Optional[str] = snapshot_dump_dir
@@ -96,9 +101,12 @@ class BacktestEngine:
         self.rebalance_freq = rebalance_freq
         self._forward_days = _REBALANCE_FORWARD_DAYS.get(rebalance_freq, 21)
         self.initial_nav = initial_nav
+        self.initial_weights = initial_weights
         self.lookback_days = lookback_days
         self.use_pipeline = use_pipeline
         self._propagation_weight = propagation_weight
+        self._on_rebalance = on_rebalance
+        self._progress = progress
         self._profile = profile
         self._alignment_scorer = (
             ProfileAlignmentScorer(asset_class_map)
@@ -158,9 +166,14 @@ class BacktestEngine:
             - If d is a rebalance date: get target weights, execute rebalance
             - Else: mark portfolio to market using daily returns
         """
-        # Initial equal-weight portfolio
+        # Initial portfolio weights (custom or equal-weight)
         n = len(self.assets)
-        init_weights = {a: round(1.0 / n, 6) for a in self.assets}
+        if self.initial_weights:
+            init_weights = dict(self.initial_weights)
+            for a in self.assets:
+                init_weights.setdefault(a, 0.0)
+        else:
+            init_weights = {a: round(1.0 / n, 6) for a in self.assets}
         portfolio = PortfolioState(
             nav=self.initial_nav,
             weights=init_weights,
@@ -179,6 +192,7 @@ class BacktestEngine:
 
         weight_rows: list[dict] = []
         total_cost = 0.0
+        n_rebalances_done = 0
 
         n_rebalances_total = sum(1 for d in all_bdays if d in rebalance_dates)
         pbar = tqdm(
@@ -186,6 +200,7 @@ class BacktestEngine:
             desc=f"backtest {self.strategy.model_name} {self.start_date}→{self.end_date}",
             unit="reb",
             leave=False,
+            disable=not self._progress,
         )
 
         for d in all_bdays:
@@ -215,7 +230,20 @@ class BacktestEngine:
 
                 trade_record = portfolio.rebalance(target_weights, prices, d)
                 total_cost += trade_record["total_cost"]
+                n_rebalances_done += 1
                 pbar.update(1)
+
+                # Fire on_rebalance callback for incremental saving
+                if self._on_rebalance is not None:
+                    try:
+                        self._on_rebalance(
+                            date=d,
+                            weights=dict(portfolio.weights),
+                            nav=portfolio.nav,
+                            rebalance_count=n_rebalances_done,
+                        )
+                    except Exception:
+                        pass  # don't let callback errors break backtest
             else:
                 # --- Daily mark-to-market ---
                 daily_returns = self._get_daily_returns(d)

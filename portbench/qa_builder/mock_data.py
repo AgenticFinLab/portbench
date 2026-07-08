@@ -26,7 +26,6 @@ import pandas as pd
 
 from .base import DataProvider, MarketRegime
 
-
 # ---------------------------------------------------------------------------
 # Per-asset simulation parameters
 # ---------------------------------------------------------------------------
@@ -106,6 +105,14 @@ class MockDataProvider(DataProvider):
             "cpi_yoy": 0.02 + 0.015 * np.sin(t * 0.7 * np.pi),
             "unemployment": 0.05 - 0.01 * np.sin(t * 0.5 * np.pi),
             "gdp_growth_qoq": 0.005 + 0.003 * np.cos(t * np.pi),
+            # Yield curve points + real yield — mirror the real-data macro keys
+            # so signals that read these (term/credit/real-rate carry) have a
+            # non-zero value in mock mode rather than silently defaulting to 0.
+            "dgs_3m": 0.02 + 0.01 * np.sin(t * np.pi),
+            "dgs_2y": 0.025 + 0.012 * np.sin(t * np.pi),
+            "dgs_10y": 0.03 + 0.015 * np.sin(t * np.pi),
+            "dgs_30y": 0.035 + 0.015 * np.sin(t * np.pi),
+            "real_yield_10y": 0.005 + 0.008 * np.sin(t * np.pi),
             "vix": 15 + 10 * abs(np.sin(t * 1.5 * np.pi)),
         }
 
