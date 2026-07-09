@@ -91,6 +91,7 @@ class BacktestEngine:
         step_cache_dir: Optional[str] = None,
         on_rebalance: Optional[Callable] = None,
         progress: bool = True,
+        oracle_mode: str = "ex_post",
     ):
         self.strategy = strategy
         self._snapshot_dump_dir: Optional[str] = snapshot_dump_dir
@@ -122,7 +123,9 @@ class BacktestEngine:
         # Build pipeline once (reused across all rebalance steps)
         self._pipeline: Optional[EvalPipeline] = None
         if use_pipeline:
-            self._pipeline = build_default_pipeline(strategy, use_tools=use_tools, profile=profile)
+            self._pipeline = build_default_pipeline(
+                strategy, use_tools=use_tools, profile=profile, oracle_mode=oracle_mode
+            )
 
         # Per-rebalance collection (populated in _get_target_weights)
         self._episode_results = []

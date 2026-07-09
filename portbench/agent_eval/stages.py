@@ -224,6 +224,64 @@ def _max_sharpe_weights(
     return eq
 
 
+def _lookback_sharpe_weights(
+    assets: list[str], return_data: dict
+) -> dict[str, float]:
+    """
+    Compute max-Sharpe weights using ONLY historical (lookback) return data.
+
+    This is the causal counterpart to _max_sharpe_weights (which uses future
+    returns). Uses historical sample mean as mu estimate and sample covariance
+    as Sigma, then runs the same SLSQP max-Sharpe optimization.
+
+    Falls back to equal-weight if optimization fails or data is insufficient.
+    """
+    from scipy.optimize import minimize
+
+    data = {
+        a: return_data[a]
+        for a in assets
+        if a in return_data and not return_data[a].empty
+    }
+    eq = {a: round(1.0 / len(assets), 4) for a in assets}
+    if len(data) < 2:
+        return eq
+
+    df = pd.DataFrame(data).dropna()
+    if len(df) < 2:
+        return eq
+
+    mu = df.mean().values
+    cov = df.cov().values
+    n = len(mu)
+    asset_list = list(data.keys())
+
+    def neg_sharpe(w):
+        ret = w @ mu
+        vol = float(np.sqrt(w @ cov @ w + 1e-10))
+        return -ret / vol
+
+    try:
+        result = minimize(
+            neg_sharpe,
+            np.ones(n) / n,
+            method="SLSQP",
+            bounds=[(0.0, 1.0)] * n,
+            constraints=[{"type": "eq", "fun": lambda w: np.sum(w) - 1}],
+            options={"ftol": 1e-9, "maxiter": 500},
+        )
+        if result.success:
+            w = np.maximum(result.x, 0.0)
+            w /= w.sum()
+            weights = {a: round(float(w[i]), 4) for i, a in enumerate(asset_list)}
+            for a in assets:
+                weights.setdefault(a, 0.0)
+            return weights
+    except Exception:
+        pass
+    return eq
+
+
 def _min_variance_weights(assets: list[str], return_data: dict) -> dict[str, float]:
     """
     Compute minimum-variance weights using historical returns.
@@ -774,10 +832,17 @@ class S3WeightOptimization(PipelineStage):
         adapter: AgentAdapter = None,
         use_tools: bool = False,
         sigma: float = 0.5,
+        oracle_mode: str = "ex_post",
     ):
         self.adapter = adapter or MockAgentAdapter()
         self.use_tools = use_tools
         self.sigma = float(np.clip(sigma, 0.0, 1.0))
+        if oracle_mode not in ("ex_post", "lookback", "equal_weight"):
+            raise ValueError(
+                f"oracle_mode must be 'ex_post', 'lookback', or 'equal_weight', "
+                f"got {oracle_mode!r}"
+            )
+        self.oracle_mode = oracle_mode
         self._last_snapshot: Optional[MarketSnapshot] = None
 
     @property
@@ -790,13 +855,21 @@ class S3WeightOptimization(PipelineStage):
         if not buy_assets:
             buy_assets = list(s2_gt.signals.keys())
 
-        # GT = max-Sharpe optimal weights (uses realized future returns as oracle)
-        if snapshot.future_return_data:
-            weights = _max_sharpe_weights(buy_assets, snapshot.future_return_data)
-        else:
-            # Fallback: equal-weight when future data is unavailable
+        if self.oracle_mode == "equal_weight":
             n = len(buy_assets)
             weights = {a: round(1.0 / n, 4) for a in buy_assets}
+        elif self.oracle_mode == "lookback":
+            if snapshot.return_data:
+                weights = _lookback_sharpe_weights(buy_assets, snapshot.return_data)
+            else:
+                n = len(buy_assets)
+                weights = {a: round(1.0 / n, 4) for a in buy_assets}
+        else:  # "ex_post" (default)
+            if snapshot.future_return_data:
+                weights = _max_sharpe_weights(buy_assets, snapshot.future_return_data)
+            else:
+                n = len(buy_assets)
+                weights = {a: round(1.0 / n, 4) for a in buy_assets}
 
         for a in s2_gt.signals:
             weights.setdefault(a, 0.0)

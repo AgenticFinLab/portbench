@@ -39,7 +39,10 @@ from .tools import ToolSpec, get_tools, dispatch_tool, BUILTIN_TOOLS
 
 
 def build_default_pipeline(
-    adapter: AgentAdapter = None, use_tools: bool = False, profile=None
+    adapter: AgentAdapter = None,
+    use_tools: bool = False,
+    profile=None,
+    oracle_mode: str = "ex_post",
 ) -> EvalPipeline:
     """
     Construct a default five-stage EvalPipeline with the given adapter.
@@ -52,6 +55,10 @@ def build_default_pipeline(
         profile:    Optional InvestorProfile. When provided, S5 uses the profile's
                     var_limit and max_drawdown_tolerance as alert thresholds instead
                     of the class-level conservative defaults.
+        oracle_mode: S3 ground-truth oracle mode:
+                     "ex_post" — max-Sharpe using future returns (default)
+                     "lookback" — max-Sharpe using only historical returns
+                     "equal_weight" — equal-weight baseline oracle
 
     Returns:
         EvalPipeline ready to call run_episode().
@@ -66,7 +73,7 @@ def build_default_pipeline(
     stages = [
         S1MarketInterpretation(adapter, use_tools=use_tools),
         S2SignalGeneration(adapter, use_tools=use_tools),
-        S3WeightOptimization(adapter, use_tools=use_tools),
+        S3WeightOptimization(adapter, use_tools=use_tools, oracle_mode=oracle_mode),
         S4ExecutionSimulation(adapter),
         S5RiskMonitoring(adapter, profile=profile),
     ]
