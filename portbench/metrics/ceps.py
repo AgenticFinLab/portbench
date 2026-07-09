@@ -90,8 +90,23 @@ class CEPS:
                             Set to 0 to recover the simple mean (no cascade awareness).
     """
 
-    def __init__(self, propagation_weight: float = 0.1):
+    def __init__(self, propagation_weight: float = 0.1, variant: str = "full"):
+        """
+        Args:
+            propagation_weight: Penalty coefficient for cascade drops (default 0.1).
+            variant: Aggregation variant:
+                     "full"      — S1-S5 equal weight (default)
+                     "core"      — S1-S3 only (LLM-involved stages)
+                     "weighted"  — S1-S3 each 0.25, S4-S5 each 0.125
+                     "geometric" — geometric mean instead of arithmetic
+        """
         self.propagation_weight = propagation_weight
+        if variant not in ("full", "core", "weighted", "geometric"):
+            raise ValueError(
+                f"Unknown CEPS variant {variant!r}. "
+                f"Expected: full, core, weighted, geometric"
+            )
+        self.variant = variant
 
     def compute(self, stage_scores: list[StageScore]) -> CEPSResult:
         """
@@ -108,14 +123,38 @@ class CEPS:
             return CEPSResult()
 
         scores = [s.score for s in stage_scores]
-        isolated_avg = sum(scores) / len(scores)
 
-        # Cascade penalty: sum of drops between consecutive stages
-        cascade_drops = sum(
-            max(scores[i] - scores[i + 1], 0.0) for i in range(len(scores) - 1)
-        )
+        # Apply variant-specific aggregation
+        if self.variant == "core":
+            scores = scores[:3]
+            isolated_avg = sum(scores) / max(len(scores), 1)
+            cascade_drops = sum(
+                max(scores[i] - scores[i + 1], 0.0) for i in range(len(scores) - 1)
+            )
+        elif self.variant == "weighted":
+            weights_arr = [0.25, 0.25, 0.25, 0.125, 0.125]
+            isolated_avg = sum(s * w for s, w in zip(scores, weights_arr))
+            cascade_drops = sum(
+                max(scores[i] - scores[i + 1], 0.0) * weights_arr[i]
+                for i in range(len(scores) - 1)
+            )
+        elif self.variant == "geometric":
+            import numpy as np
+
+            eps = 1e-8
+            isolated_avg = float(
+                np.prod([max(s, eps) for s in scores]) ** (1.0 / len(scores))
+            )
+            cascade_drops = sum(
+                max(scores[i] - scores[i + 1], 0.0) for i in range(len(scores) - 1)
+            )
+        else:  # "full" (default)
+            isolated_avg = sum(scores) / len(scores)
+            cascade_drops = sum(
+                max(scores[i] - scores[i + 1], 0.0) for i in range(len(scores) - 1)
+            )
+
         penalty = self.propagation_weight * cascade_drops
-
         ceps_score = max(0.0, min(1.0, isolated_avg - penalty))
 
         return CEPSResult(
@@ -125,17 +164,29 @@ class CEPS:
             isolated_avg=round(isolated_avg, 4),
         )
 
-    def compute_batch(self, episodes: list[list[StageScore]]) -> dict:
+    def compute_batch(
+        self,
+        episodes: list[list[StageScore]],
+        stage_mask: list[bool] = None,
+    ) -> dict:
         """
         Compute CEPS over a batch of evaluation episodes and return summary stats.
 
         Args:
-            episodes: List of episode stage-score lists.
+            episodes:   List of episode stage-score lists.
+            stage_mask: Optional bool mask to filter stages (e.g.
+                        [True, True, True, False, False] for S1-S3 only).
 
         Returns:
             Dict with mean_ceps, std_ceps, per_stage_mean, and individual results.
         """
         import numpy as np
+
+        if stage_mask is not None:
+            episodes = [
+                [ss for ss, keep in zip(ep, stage_mask) if keep]
+                for ep in episodes
+            ]
 
         results = [self.compute(ep) for ep in episodes]
         ceps_scores = [r.ceps_score for r in results]
@@ -160,3 +211,23 @@ class CEPS:
             "n_episodes": len(results),
             "individual_results": results,
         }
+
+    def compute_batch_with_variants(
+        self, episodes: list[list[StageScore]]
+    ) -> dict[str, dict]:
+        """
+        Compute CEPS for all four variants in a single pass.
+
+        Args:
+            episodes: List of episode stage-score lists.
+
+        Returns:
+            Dict mapping variant name → summary dict (from compute_batch).
+        """
+        variants = {
+            "full": CEPS(self.propagation_weight, variant="full"),
+            "core": CEPS(self.propagation_weight, variant="core"),
+            "weighted": CEPS(self.propagation_weight, variant="weighted"),
+            "geometric": CEPS(self.propagation_weight, variant="geometric"),
+        }
+        return {name: ceps.compute_batch(episodes) for name, ceps in variants.items()}
