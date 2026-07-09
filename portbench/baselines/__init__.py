@@ -13,6 +13,7 @@ as a direct replacement for any LLM adapter.
 """
 
 from .base import BaselineStrategy, BaselineResult
+from .black_litterman import BlackLittermanBaseline
 from .equal_weight import EqualWeightBaseline
 from .sixty_forty import SixtyFortyBaseline
 from .risk_parity import RiskParityBaseline
@@ -22,6 +23,7 @@ from .min_variance import MinVarianceBaseline
 __all__ = [
     "BaselineStrategy",
     "BaselineResult",
+    "BlackLittermanBaseline",
     "EqualWeightBaseline",
     "SixtyFortyBaseline",
     "RiskParityBaseline",

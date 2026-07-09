@@ -24,6 +24,7 @@ from ..agent_eval.base import AgentAdapter
 from ..agent_eval.llm_adapters import AnthropicAdapter, OpenAIAdapter
 from ..agent_eval.mock_agent import MockAgentAdapter
 from ..baselines import (
+    BlackLittermanBaseline,
     CovarianceRiskParityBaseline,
     EqualWeightBaseline,
     MinVarianceBaseline,
@@ -56,6 +57,7 @@ PROVIDER_REGISTRY: dict[str, ProviderSpec] = {
 
 
 BASELINE_REGISTRY = {
+    "black_litterman": BlackLittermanBaseline,
     "equal_weight": EqualWeightBaseline,
     "sixty_forty": SixtyFortyBaseline,
     "risk_parity": RiskParityBaseline,
