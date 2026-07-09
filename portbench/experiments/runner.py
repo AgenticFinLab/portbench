@@ -166,8 +166,11 @@ def _is_profile_complete(p_dir: Path, cfg: "ExperimentConfig") -> bool:
         if not (p_dir / f"stress_{sc_name}" / "backtest_result.json").exists():
             return False
     if cfg.run_normal:
-        if not (p_dir / "normal" / "backtest_result.json").exists():
-            return False
+        for np_item in cfg.normal_periods:
+            np_label = np_item.label or "normal"
+            np_dir = p_dir / f"normal_{np_label}" if np_item.label else p_dir / "normal"
+            if not (np_dir / "backtest_result.json").exists():
+                return False
     return True
 
 
@@ -235,6 +238,7 @@ def _run_one_scenario(
         snapshot_dump_dir=str(snapshot_dir) if snapshot_dir else None,
         propagation_weight=cfg.propagation_weight,
         step_cache_dir=str(step_cache_dir) if step_cache_dir else None,
+        oracle_mode=cfg.oracle_mode,
     )
     if pipeline_log_dir is not None:
         engine.enable_pipeline_logging(
@@ -271,6 +275,8 @@ def _run_normal(
     asset_class_map: dict[str, str],
     profile_obj,
     out_dir: Path,
+    period=None,
+    label: str = "",
 ):
     from ..sandbox.result import BacktestResult as _BR
 
@@ -292,11 +298,14 @@ def _run_normal(
     snapshot_dir = (out_dir / "snapshots") if cfg.logging.save_snapshots else None
     step_cache_dir = (out_dir / "step_cache") if use_pipeline else None
 
+    np_start = period.start if period is not None else cfg.normal_periods[0].start
+    np_end = period.end if period is not None else cfg.normal_periods[0].end
+
     engine = BacktestEngine(
         strategy=adapter,
         provider=provider,
-        start_date=cfg.normal_period.start,
-        end_date=cfg.normal_period.end,
+        start_date=np_start,
+        end_date=np_end,
         rebalance_freq=cfg.rebalance,
         initial_nav=cfg.initial_nav,
         use_pipeline=use_pipeline,
@@ -306,11 +315,12 @@ def _run_normal(
         snapshot_dump_dir=str(snapshot_dir) if snapshot_dir else None,
         propagation_weight=cfg.propagation_weight,
         step_cache_dir=str(step_cache_dir) if step_cache_dir else None,
+        oracle_mode=cfg.oracle_mode,
     )
     if pipeline_log_dir is not None:
         engine.enable_pipeline_logging(
             output_dir=str(pipeline_log_dir),
-            run_id="normal",
+            run_id=f"normal_{label}" if label else "normal",
         )
     result = engine.run()
     paths.save_backtest_result(result, out_dir)
@@ -390,30 +400,48 @@ def _run_profile(
         all_passed = all_passed and passed
 
     normal_dict = None
+    normal_dicts = []
     if cfg.run_normal:
-        logger.info(
-            "Phase B: normal backtest %s → %s (stress_gate=%s)",
-            cfg.normal_period.start,
-            cfg.normal_period.end,
-            "PASSED" if all_passed else "FAILED",
-        )
-        normal_result = _run_normal(
-            cfg,
-            spec,
-            adapter,
-            provider,
-            asset_class_map,
-            profile_obj,
-            p_dir / "normal",
-        )
-        normal_dict = normal_result.to_dict()
-        logger.info(
-            "  return=%+.2f%% sharpe=%.3f ceps=%.4f alignment=%.4f",
-            normal_result.total_return * 100,
-            normal_result.sharpe_ratio,
-            normal_result.mean_ceps,
-            normal_result.mean_profile_score,
-        )
+        for np_item in cfg.normal_periods:
+            np_label = np_item.label or "normal"
+            np_out_dir = (
+                p_dir / f"normal_{np_label}" if np_item.label else p_dir / "normal"
+            )
+            logger.info(
+                "Phase B: normal backtest [%s] %s → %s (stress_gate=%s)",
+                np_label,
+                np_item.start,
+                np_item.end,
+                "PASSED" if all_passed else "FAILED",
+            )
+            normal_result = _run_normal(
+                cfg,
+                spec,
+                adapter,
+                provider,
+                asset_class_map,
+                profile_obj,
+                np_out_dir,
+                period=np_item,
+                label=np_label,
+            )
+            normal_dicts.append({
+                "label": np_label,
+                "start": str(np_item.start),
+                "end": str(np_item.end),
+                **normal_result.to_dict(),
+            })
+            logger.info(
+                "  [%s] return=%+.2f%% sharpe=%.3f ceps=%.4f alignment=%.4f",
+                np_label,
+                normal_result.total_return * 100,
+                normal_result.sharpe_ratio,
+                normal_result.mean_ceps,
+                normal_result.mean_profile_score,
+            )
+        # Backward compat: single unlabeled window → key "normal"
+        if len(normal_dicts) == 1 and not cfg.normal_periods[0].label:
+            normal_dict = normal_dicts[0]
     else:
         logger.info("Phase B: skipped (run_normal=false)")
 
@@ -429,6 +457,7 @@ def _run_profile(
         "stress_gate_passed": all_passed,
         "stress_results": stress_summaries,
         "normal": normal_dict,
+        "normal_periods": normal_dicts,
     }
 
 
@@ -631,14 +660,16 @@ class BatchRunner:
                         }
                     )
                 if self.cfg.run_normal:
-                    out.append(
-                        {
-                            "provider": prov,
-                            "model": model,
-                            "profile": profile,
-                            "scenario": "normal",
-                        }
-                    )
+                    for np_item in self.cfg.normal_periods:
+                        np_label = np_item.label or "normal"
+                        out.append(
+                            {
+                                "provider": prov,
+                                "model": model,
+                                "profile": profile,
+                                "scenario": f"normal_{np_label}" if np_item.label else "normal",
+                            }
+                        )
         return out
 
     def run(self) -> dict:

@@ -11,6 +11,17 @@ from .config import ExperimentConfig
 from .runner import BatchRunner
 
 
+def _resolve_output_root(args) -> str:
+    """Return the effective output_root, respecting experiment_tag from config."""
+    if args.config:
+        try:
+            cfg = ExperimentConfig.from_yaml(args.config)
+            return cfg.output_root  # already includes experiment_tag via __post_init__
+        except Exception:
+            pass  # fall through to CLI default
+    return args.output_root
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="PortBench batch experiment runner")
     p.add_argument("--config", default=None, help="Path to YAML experiment config")
@@ -51,6 +62,15 @@ def main(argv=None) -> int:
         ),
     )
     p.add_argument(
+        "--lambda-sweep",
+        action="store_true",
+        help=(
+            "Run CEPS λ sensitivity analysis: recompute CEPS at multiple "
+            "propagation_weight values (0, 0.05, 0.1, 0.2, 0.5) from existing "
+            "pipeline_logs. Reports ranking stability. No LLM calls."
+        ),
+    )
+    p.add_argument(
         "--rebalance",
         default="monthly",
         help="Rebalance frequency directory (default: monthly)",
@@ -67,7 +87,7 @@ def main(argv=None) -> int:
 
         result = rescore_ceps(
             rebalance=args.rebalance,
-            output_root=args.output_root,
+            output_root=_resolve_output_root(args),
             config_path=args.config,
         )
         print(f"Rescore + figure regeneration complete: {result}")
@@ -83,7 +103,7 @@ def main(argv=None) -> int:
         results_path = rescore_sigma_ablation(
             sigma_values=sigma_values,
             rebalance=args.rebalance,
-            output_root=args.output_root,
+            output_root=_resolve_output_root(args),
             config_path=args.config,
         )
         print(f"σ ablation complete: {results_path}")
@@ -92,15 +112,26 @@ def main(argv=None) -> int:
     if getattr(args, "analyze_qa", False):
         from ..qa_eval.analysis import analyze_qa_results
 
-        report = analyze_qa_results(output_root=args.output_root)
+        report = analyze_qa_results(output_root=_resolve_output_root(args))
         print(f"QA analysis complete: {report}")
         return 0
 
     if getattr(args, "analyze_qa_info_level", False):
         from ..qa_eval.analysis import analyze_qa_info_level_comparison
 
-        report = analyze_qa_info_level_comparison(output_root=args.output_root)
+        report = analyze_qa_info_level_comparison(output_root=_resolve_output_root(args))
         print(f"QA info-level comparison complete: {report}")
+        return 0
+
+    if getattr(args, "lambda_sweep", False):
+        from .rescore import rescore_lambda_sweep
+
+        result = rescore_lambda_sweep(
+            rebalance=args.rebalance,
+            output_root=_resolve_output_root(args),
+            config_path=args.config,
+        )
+        print(f"λ sweep complete: {result}")
         return 0
 
     if not args.config:

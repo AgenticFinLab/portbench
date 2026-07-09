@@ -13,48 +13,63 @@ batch_id: "{models}_{rebalance}_{date}"
 data_provider: processed
 data_dir: datasets/processed
 sec_dir: datasets/sec
-rebalance: monthly           # weekly | monthly | quarterly  →  Level 1 directory
+# weekly | monthly | quarterly
+rebalance: monthly           
 initial_nav: 1000000
-workers_per_experiment: 3    # concurrent stress scenarios per profile
-parallel_experiments: 1      # concurrent model runs
+# concurrent stress scenarios per profile
+workers_per_experiment: 3    
+# concurrent model runs
+parallel_experiments: 4      
 seed: 42
 
 generation:
-  temperature: 0.0           # global default; override per model with temperature: X
+  # global default; override per model with temperature: X
+  temperature: 0.0           
   max_tokens: 4096
 
 models:
-  - provider: tencent        # uses TENCENT_API_KEY/_BASE_URL/_MODEL
+  # uses TENCENT_API_KEY/_BASE_URL/_MODEL
+  - provider: tencent        
     model: hy3-preview
-  - provider: deepseek       # uses DEEPSEEK_API_KEY/_BASE_URL/
+  # uses DEEPSEEK_API_KEY/_BASE_URL/
+  - provider: deepseek       
     model: deepseek-v4-pro
-  - provider: deepseek       # uses DEEPSEEK_API_KEY/_BASE_URL/
+  - provider: deepseek       
     model: deepseek-v4-flash
-  - provider: kimi           # uses KIMI_API_KEY/_BASE_URL/_MODEL
-    model: kimi-k2.6
-    temperature: 1.0         # kimi requires temperature=1.0
-  - provider: glm          # uses GLM_API_KEY/_BASE_URL/_MODEL
-    model: glm-5.1
-  - provider: ark            # uses ARK_API_KEY/_BASE_URL/_MODEL
-    model: doubao-seed-2-0-pro-260215
-  - provider: ark
-    model: doubao-seed-2-0-lite-260215
-  - provider: dashscope      # uses DASHSCOPE_API_KEY/_BASE_URL/_MODEL
-    model: qwen3.6-max-preview
-  - provider: minimax
-    model: minimax-m2.7
-  - baseline: equal_weight   # reference baseline (no API)
+  # uses ARK_API_KEY/_BASE_URL/_MODEL
+  # - provider: ark            
+  #   model: doubao-seed-2-0-pro-260215
+  # - provider: ark
+  #   model: doubao-seed-2-0-lite-260215
+  # uses DASHSCOPE_API_KEY/_BASE_URL/_MODEL
+  # - provider: dashscope      
+  #   model: qwen3.7-max
+  # - provider: dashscope
+  #   model: qwen3.6-plus
+  # - provider: dashscope
+  #   model: kimi-k2.6
+  # - provider: dashscope
+  #   model: glm-5.1
+  # - provider: dashscope
+  #   model: qwen3.6-35b-a3b
+  # reference baseline (no API)
+  - baseline: equal_weight   
   - baseline: risk_parity
   - baseline: sixty_forty
   - baseline: cov_risk_parity
   - baseline: min_variance
+  - baseline: black_litterman
 
 profiles: [conservative, balanced, aggressive]
 stress_scenarios: all
 run_normal: true
-normal_period:
-  start: 2024-01-01
-  end: 2024-12-31
+normal_periods:
+  - {start: 2024-01-01, end: 2024-12-31, label: "bull_2024"}
+
+# ex_post | lookback | equal_weight
+oracle_mode: lookback          
+# set to isolate experiments: "rebuttal_lookback" → EXPERIMENTS_rebuttal_lookback/
+experiment_tag: "rebuttal_lookback"            
 
 logging:
   save_pipeline_logs: true
@@ -63,16 +78,26 @@ logging:
 
 on_error: isolate
 output_root: EXPERIMENTS
-timeout: 600                # per-request LLM timeout in seconds
-propagation_weight: 0.1      # CEPS cascade penalty weight
-reuse_latest: true          # true = skip models that already have results in EXPERIMENTS/{rebalance}/{provider}/{model}/
+# per-request LLM timeout in seconds
+timeout: 600         
+# CEPS cascade penalty weight       
+propagation_weight: 0.1      
+# true = skip models that already have results in EXPERIMENTS/{rebalance}/{provider}/{model}/
+reuse_latest: true          
 
-run_qa: true                # true = run QA dataset evaluation for LLM models
+# true = run QA dataset evaluation for LLM models
+run_qa: false                
 
 qa:
   dataset_path: datasets/qa_dataset
-  split: test                # train | val | test | all
+  # train | val | test | all
+  split: test                
   templates: [T1, T2, T3, T4, T5, T6, T7]
   max_pairs_per_template: 50
-  parallel_questions: 4
+  parallel_questions: 8
   save_responses: true
+  # info_level controls what data is exposed to the model in T4/T5 prompts:
+  #   full       – original prompts (covariance matrix included)
+  #   restricted – T4/T5 prompts with covariance/correlation stripped; results in T4_restricted/ T5_restricted/
+  #   both       – run full first, then restricted (useful for ablation comparison)
+  info_level: both

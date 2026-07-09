@@ -87,6 +87,7 @@ class LoggingConfig:
 class NormalPeriod:
     start: date = date(2024, 1, 1)
     end: date = date(2024, 12, 31)
+    label: str = ""  # e.g. "bull_2024", "bear_2022"
 
 
 @dataclass
@@ -114,7 +115,12 @@ class ExperimentConfig:
     )
     stress_scenarios: Union[str, list[str]] = "all"  # "all" or list of names
     run_normal: bool = True
-    normal_period: NormalPeriod = field(default_factory=NormalPeriod)
+    normal_periods: list[NormalPeriod] = field(
+        default_factory=lambda: [NormalPeriod()]
+    )
+    oracle_mode: str = "ex_post"  # "ex_post" | "lookback" | "equal_weight"
+    experiment_tag: str = ""  # appended to output_root for experiment isolation
+                              # e.g. "rebuttal_lookback" → EXPERIMENTS_rebuttal_lookback/
 
     data_provider: str = "processed"
     data_dir: str = "datasets/processed"
@@ -139,6 +145,10 @@ class ExperimentConfig:
         default_factory=lambda: [0.0, 0.25, 0.5, 0.75, 1.0]
     )
 
+    def __post_init__(self):
+        if self.experiment_tag:
+            self.output_root = f"{self.output_root}_{self.experiment_tag}"
+
     @staticmethod
     def from_yaml(path: str | Path) -> "ExperimentConfig":
         raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
@@ -150,11 +160,26 @@ class ExperimentConfig:
         if not models:
             raise ValueError("ExperimentConfig.models must be a non-empty list")
 
-        normal_raw = raw.get("normal_period") or {}
-        np_obj = NormalPeriod(
-            start=_to_date(normal_raw.get("start", "2024-01-01")),
-            end=_to_date(normal_raw.get("end", "2024-12-31")),
-        )
+        # Support "normal_periods" (list) with fallback to "normal_period" (single)
+        normal_periods_raw = raw.get("normal_periods")
+        if normal_periods_raw:
+            np_objs = [
+                NormalPeriod(
+                    start=_to_date(np_raw.get("start", "2024-01-01")),
+                    end=_to_date(np_raw.get("end", "2024-12-31")),
+                    label=np_raw.get("label", ""),
+                )
+                for np_raw in normal_periods_raw
+            ]
+        else:
+            normal_raw = raw.get("normal_period") or {}
+            np_objs = [
+                NormalPeriod(
+                    start=_to_date(normal_raw.get("start", "2024-01-01")),
+                    end=_to_date(normal_raw.get("end", "2024-12-31")),
+                    label=normal_raw.get("label", ""),
+                )
+            ]
 
         log_raw = raw.get("logging") or {}
         log_obj = LoggingConfig(
@@ -184,7 +209,9 @@ class ExperimentConfig:
             ),
             stress_scenarios=raw.get("stress_scenarios", "all"),
             run_normal=bool(raw.get("run_normal", True)),
-            normal_period=np_obj,
+            normal_periods=np_objs,
+            oracle_mode=str(raw.get("oracle_mode", "ex_post")),
+            experiment_tag=str(raw.get("experiment_tag", "")),
             data_provider=raw.get("data_provider", "processed"),
             data_dir=raw.get("data_dir", "datasets/processed"),
             sec_dir=raw.get("sec_dir", "datasets/sec"),
