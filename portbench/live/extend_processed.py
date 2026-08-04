@@ -78,33 +78,31 @@ def restore_yahoo_raw_from_processed(
             continue
         sym = ticker.symbol
         # processed uses ^VIX_close etc.; also try without caret
-        close_col = f"{sym}_close"
-        if close_col not in df.columns and sym.startswith("^"):
-            close_col = f"{sym.lstrip('^')}_close"
-        if close_col not in df.columns:
+        stem = None
+        for cand in (sym, sym.replace("-", "_"), sym.lstrip("^")):
+            if f"{cand}_close" in df.columns:
+                stem = cand
+                break
+        if stem is None:
             skipped += 1
             continue
-        stem = close_col[: -len("_close")]
-        cols = {"date": df["date"]}
-        ok = True
+        cols: dict = {"date": df["date"]}
         for f in _OHLCV:
             c = f"{stem}_{f}"
-            if c not in df.columns:
-                if f == "volume":
-                    cols[f] = 0.0
-                else:
-                    ok = False
-                    break
-            else:
+            if c in df.columns:
                 cols[f] = df[c]
-        if not ok:
-            skipped += 1
-            continue
+            elif f == "volume":
+                cols[f] = 0.0
+            else:
+                # close-only series (some bond ETFs): replicate close into OHLC
+                if f != "close" and f"{stem}_close" in df.columns:
+                    cols[f] = df[f"{stem}_close"]
+                else:
+                    cols[f] = np.nan
         out = pd.DataFrame(cols).dropna(subset=["close"])
         out = out.sort_values("date")
         out_dir = yahoo_root / ac
         out_dir.mkdir(parents=True, exist_ok=True)
-        # Keep original symbol filename including ^VIX
         out_path = out_dir / f"{sym}.csv"
         out.to_csv(out_path, index=False)
         restored += 1
@@ -126,6 +124,20 @@ def _load_ext_ohlcv(symbol: str, asset_class: AssetClass) -> Optional[pd.DataFra
     return df.dropna(subset=["date", "close"]).sort_values("date")
 
 
+def _resolve_stem(base: pd.DataFrame, symbol: str) -> Optional[str]:
+    """Map Yahoo symbol → processed column stem (BTC-USD → BTC_USD, etc.)."""
+    candidates = [
+        symbol,
+        symbol.replace("-", "_"),
+        symbol.lstrip("^"),
+        symbol.replace("^", ""),
+    ]
+    for stem in candidates:
+        if f"{stem}_close" in base.columns:
+            return stem
+    return None
+
+
 def _append_ticker_rows(
     base: pd.DataFrame,
     symbol: str,
@@ -133,53 +145,55 @@ def _append_ticker_rows(
     *,
     after: pd.Timestamp,
 ) -> pd.DataFrame:
-    """Append extension OHLCV+return into a processed asset-class frame."""
-    close_col = f"{symbol}_close"
-    if close_col not in base.columns and symbol.startswith("^"):
-        symbol = symbol.lstrip("^")
-        close_col = f"{symbol}_close"
-    if close_col not in base.columns:
+    """Merge extension OHLCV+return into a processed asset-class frame.
+
+    Updates columns on dates that already exist (e.g. after another ticker
+    extended the calendar) and appends brand-new dates as needed.
+    """
+    stem = _resolve_stem(base, symbol)
+    if stem is None:
         return base
 
     new = ext[ext["date"] > after].copy()
     if new.empty:
         return base
+    new["date"] = pd.to_datetime(new["date"]).dt.normalize()
 
     out = base.copy()
-    out["date"] = pd.to_datetime(out["date"])
-    existing_dates = set(out["date"].dt.normalize())
+    out["date"] = pd.to_datetime(out["date"]).dt.normalize()
+    out = out.set_index("date").sort_index()
 
-    rows = []
     last_close = None
+    close_col = f"{stem}_close"
     if close_col in out.columns:
-        hist = out.dropna(subset=[close_col])
+        hist = out[close_col].dropna()
         if len(hist):
-            last_close = float(hist.iloc[-1][close_col])
+            # last close on/before cutoff
+            prior = hist[hist.index <= after]
+            if len(prior):
+                last_close = float(prior.iloc[-1])
+            else:
+                last_close = float(hist.iloc[-1])
 
     for _, r in new.iterrows():
         d = pd.Timestamp(r["date"]).normalize()
-        if d in existing_dates:
-            continue
-        row = {c: np.nan for c in out.columns}
-        row["date"] = d
+        if d not in out.index:
+            out.loc[d] = np.nan
         for f in _OHLCV:
-            col = f"{symbol}_{f}"
-            if col in out.columns and f in r.index:
-                row[col] = r[f]
-        ret_col = f"{symbol}_return"
-        if ret_col in out.columns:
+            col = f"{stem}_{f}"
+            if col in out.columns and f in r.index and pd.notna(r[f]):
+                out.at[d, col] = r[f]
+        ret_col = f"{stem}_return"
+        if ret_col in out.columns and pd.notna(r.get("close")):
             c = float(r["close"])
             if last_close and last_close > 0 and c > 0:
-                row[ret_col] = float(np.log(c / last_close))
+                out.at[d, ret_col] = float(np.log(c / last_close))
             last_close = c
-        rows.append(row)
-        existing_dates.add(d)
 
-    if not rows:
-        return out
-    add = pd.DataFrame(rows)
-    merged = pd.concat([out, add], ignore_index=True)
-    return merged.sort_values("date").reset_index(drop=True)
+    out = out.reset_index()
+    if "date" not in out.columns and "index" in out.columns:
+        out = out.rename(columns={"index": "date"})
+    return out.sort_values("date").reset_index(drop=True)
 
 
 def build_processed_live(
@@ -237,9 +251,12 @@ def build_processed_live(
         updated = _append_ticker_rows(
             base, ticker.symbol, ext, after=after
         )
-        if len(updated) > len(base):
-            updated.to_csv(path, index=False)
-            extended_tickers += 1
+        # Always persist when an extension file was applied (column fills may
+        # not change row count if another ticker already grew the calendar).
+        if updated.equals(base):
+            continue
+        updated.to_csv(path, index=False)
+        extended_tickers += 1
 
     # Rebuild portbench.csv as outer-join of class frames (same as preprocess)
     class_frames = []

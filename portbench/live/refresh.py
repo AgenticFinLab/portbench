@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -65,7 +65,8 @@ def refresh_yahoo_incremental(
         else:
             ak_end_d = None
         effective = max(filter(None, [y_end, ak_end_d]), default=None)
-        if effective is not None and effective >= needed:
+        # Allow a few calendar days of EOD / weekend lag past needed_through
+        if effective is not None and effective >= needed - timedelta(days=3):
             skipped += 1
             continue
         try:
@@ -83,11 +84,10 @@ def refresh_yahoo_incremental(
             failed += 1
             msg = str(e)
             print(f"[live.refresh] Failed {symbol}: {msg}")
-            if "Rate limited" in msg or "Too Many Requests" in msg:
-                print(
-                    "[live.refresh] Still rate-limited after fallback; "
-                    "sleeping 30s before continuing..."
-                )
+            # Back off only if the AKShare half of the error is a rate limit
+            ak_part = msg.lower().split("akshare=", 1)[-1] if "akshare=" in msg.lower() else ""
+            if "rate limited" in ak_part or "too many requests" in ak_part or "429" in ak_part:
+                print("[live.refresh] AKShare rate-limited; sleeping 30s...")
                 time.sleep(30)
 
     return {
@@ -232,7 +232,6 @@ def refresh_and_preprocess(
 
         print(
             f"[live.refresh] Building {live_dir} from processed + akshare_ext "
-            "(processed left unchanged)..."
         )
         summary["processed_live"] = build_processed_live(
             live_dir=live_dir,

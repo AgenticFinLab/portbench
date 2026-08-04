@@ -452,7 +452,9 @@ class LiveEvalRunner:
                 f"rebalance must be one of {SUPPORTED_FREQUENCIES}, got {rebalance!r}"
             )
 
-        # Need end + buffer so the last decision still has a realization day.
+        # Buffer so the last decision still has a realization day for ex-post GT.
+        # Coverage check floors to available sessions / EOD lag — do not require
+        # future calendar dates that markets have not traded yet.
         needed = coverage_needed_through(range_end=end + timedelta(days=5))
         data, cov_meta = self._ensure_data_coverage(
             needed_through=needed,

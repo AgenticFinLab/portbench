@@ -135,10 +135,22 @@ def is_coverage_insufficient(
     needed_through: date,
     *,
     anchor_asset: str = "SPY",
+    as_of: Optional[date] = None,
 ) -> bool:
-    """True when local max date is strictly before ``needed_through``."""
+    """
+    True when local data is missing sessions we can reasonably expect.
+
+    Does **not** require future calendar days or same-day EOD that vendors
+    have not published yet. Target = last weekday on/before
+    ``min(needed_through, as_of)``, then allow one weekday of EOD lag.
+    """
     try:
         local_max = local_data_max_date(provider, anchor_asset=anchor_asset)
     except RuntimeError:
         return True
-    return local_max < _to_date(needed_through)
+    today = _to_date(as_of) if as_of is not None else date.today()
+    # Never demand dates after "today" (or after needed_through).
+    target = last_weekday_on_or_before(min(_to_date(needed_through), today))
+    # Vendors (Yahoo/AKShare) often lag one session behind the calendar.
+    expect = last_weekday_on_or_before(target - timedelta(days=1))
+    return local_max < expect
