@@ -235,6 +235,79 @@ def _score_t3(gt_answer: str, response: str, answer_numeric: float = None, **kw)
     return _score_t2(gt_answer, response, answer_numeric=answer_numeric)
 
 
+def _parse_json_answer_explanation(response: str) -> tuple[str, str]:
+    """Extract (answer_text, explanation_text) from a JSON or free-form response."""
+    import json
+
+    text = (response or "").strip()
+    if not text:
+        return "", ""
+    # Prefer fenced or raw JSON object
+    candidates = [text]
+    fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL)
+    if fence:
+        candidates.insert(0, fence.group(1))
+    brace = re.search(r"\{.*\}", text, flags=re.DOTALL)
+    if brace:
+        candidates.insert(0, brace.group(0))
+    for cand in candidates:
+        try:
+            obj = json.loads(cand)
+            if isinstance(obj, dict):
+                ans = obj.get("answer", "")
+                if isinstance(ans, (int, float)):
+                    ans = str(ans)
+                expl = obj.get("explanation", "")
+                return str(ans or ""), str(expl or "")
+        except Exception:
+            continue
+    return text, text
+
+
+def _score_explanation(explanation: str, keypoints: Optional[list] = None) -> float:
+    if not keypoints:
+        return 0.0
+    expl = (explanation or "").lower()
+    hits = 0
+    for kp in keypoints:
+        token = str(kp).lower().strip()
+        if not token:
+            continue
+        if token in expl:
+            hits += 1
+            continue
+        # allow loose synonyms for common PM phrases
+        synonyms = {
+            "var": ("var", "value at risk", "downside"),
+            "drawdown": ("drawdown", "max loss", "loss limit"),
+            "variance": ("variance", "min-var", "minimum variance", "risk"),
+            "binding": ("binding", "active", "binds"),
+            "non-binding": ("non-binding", "nonbinding", "not binding", "inactive"),
+            "sum to 1": ("sum to 1", "sum to one", "weights sum", "sum(w)"),
+            "capped": ("capped", "cap at", "at most 1", "maximum 1"),
+            "position size": ("position", "fraction", "allocation"),
+        }
+        alts = synonyms.get(token, ())
+        if any(a in expl for a in alts):
+            hits += 1
+    return hits / len(keypoints)
+
+
+def _composite_t3t4_score(
+    numeric: float,
+    explanation: float,
+    numeric_weight: float = 0.7,
+    explanation_weight: float = 0.3,
+) -> float:
+    nw = float(numeric_weight)
+    ew = float(explanation_weight)
+    total = nw + ew
+    if total <= 0:
+        return 0.0
+    nw, ew = nw / total, ew / total
+    return max(0.0, min(1.0, nw * numeric + ew * explanation))
+
+
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
     dot = sum(x * y for x, y in zip(a, b))
     norm_a = math.sqrt(sum(x * x for x in a))
@@ -340,27 +413,41 @@ def score_response(
     llm_response: str,
     answer_numeric: float = None,
     assets: list[str] = None,
+    redesign: bool = False,
+    explanation_keypoints: Optional[list] = None,
+    numeric_weight: float = 0.7,
+    explanation_weight: float = 0.3,
 ) -> float:
     """
     Score an LLM response against a ground-truth answer.
 
-    Args:
-        template_id: "T1" through "T7"
-        gt_answer: Ground-truth answer string from QAPair.answer
-        llm_response: Raw LLM output
-        answer_numeric: Optional numeric ground truth (for T2/T3)
-        assets: Optional asset list (for T4/T5 weight extraction)
-
-    Returns:
-        float in [0, 1]
+    When redesign=True for T3/T4 (or explanation_keypoints is provided), score is
+    0.7 * numeric + 0.3 * explanation (weights configurable).
     """
-    scorer = _SCORERS.get(template_id)
+    base_tid = template_id.replace("_restricted", "")
+    scorer = _SCORERS.get(base_tid)
     if scorer is None:
         return 0.0
     try:
-        return scorer(
-            gt_answer, llm_response,
-            answer_numeric=answer_numeric, assets=assets,
+        use_redesign = bool(redesign) or bool(explanation_keypoints)
+        answer_text = llm_response
+        expl_text = ""
+        if use_redesign and base_tid in ("T3", "T4"):
+            answer_text, expl_text = _parse_json_answer_explanation(llm_response)
+            if not answer_text.strip():
+                return 0.0
+
+        numeric = scorer(
+            gt_answer,
+            answer_text,
+            answer_numeric=answer_numeric,
+            assets=assets,
         )
+        if use_redesign and base_tid in ("T3", "T4"):
+            expl = _score_explanation(expl_text, explanation_keypoints or [])
+            return _composite_t3t4_score(
+                numeric, expl, numeric_weight, explanation_weight
+            )
+        return numeric
     except Exception:
         return 0.0

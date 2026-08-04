@@ -3,10 +3,12 @@ T3 – Position Sizing
 Determine the maximum position size (as a fraction of portfolio) given a
 maximum drawdown constraint, using the fixed-fractional method.
 Complexity level 1.
+
+When ``redesign=True`` (YAML ``qa.t3t4_redesign``): strip VaR from context,
+vary the drawdown threshold, and require a short explanation in the answer.
 """
 
 from datetime import date
-
 
 from .base import (
     ComplexityLevel,
@@ -17,8 +19,10 @@ from .base import (
     QAPair,
     Split,
 )
-from ..metrics.risk_metrics import max_drawdown, var
+from ..metrics.risk_metrics import var
 from ..metrics.base import MetricsConfig
+
+_REDESIGN_THRESHOLDS = (0.05, 0.08, 0.10, 0.15)
 
 
 class T3PositionSizing(QABuilder):
@@ -28,24 +32,18 @@ class T3PositionSizing(QABuilder):
     Uses a simplified fixed-fractional / Kelly-inspired rule:
         f* = max_acceptable_drawdown / expected_max_single_period_loss
     where expected_max_single_period_loss is approximated as |VaR(99%)|.
-
-    The answer is capped at 1.0 (100% of portfolio) and floored at 0.0.
-
-    Question format:
-        "Given a maximum acceptable drawdown of {threshold}% and the following
-         return history for {asset}, determine the maximum position size as a
-         fraction of portfolio."
     """
 
     def __init__(
-        self, provider, config: QAConfig, max_drawdown_threshold: float = 0.10
+        self,
+        provider,
+        config: QAConfig,
+        max_drawdown_threshold: float = 0.10,
+        redesign: bool = False,
     ):
-        """
-        Args:
-            max_drawdown_threshold: Maximum acceptable portfolio drawdown (e.g., 0.10 = 10%).
-        """
         super().__init__(provider, config)
         self.max_drawdown_threshold = max_drawdown_threshold
+        self.redesign = redesign
 
     @property
     def template_id(self) -> str:
@@ -76,6 +74,23 @@ class T3PositionSizing(QABuilder):
         return [rng.choice(candidates)]
 
     def build_one(self, context: ContextWindow, seq: int) -> QAPair:
+        if self.redesign:
+            return self._build_one_redesign(context, seq)
+        return self._build_one_legacy(context, seq)
+
+    def _compute_position(
+        self, returns, threshold: float
+    ) -> tuple[float, float, float]:
+        metrics_cfg = MetricsConfig(var_confidence=0.99)
+        var_99 = float(var(returns, metrics_cfg))
+        expected_loss = abs(var_99)
+        if expected_loss == 0:
+            position_size = 1.0
+        else:
+            position_size = min(1.0, threshold / expected_loss)
+        return round(position_size, 4), var_99, expected_loss
+
+    def _build_one_legacy(self, context: ContextWindow, seq: int) -> QAPair:
         asset = context.assets[0]
         d = context.decision_date
         returns = context.returns_history[asset].dropna()
@@ -83,19 +98,9 @@ class T3PositionSizing(QABuilder):
         if len(returns) < 20:
             raise ValueError(f"Insufficient history for T3: {asset} at {d}")
 
-        # Approximate max single-period loss as |VaR(99%)|
-        metrics_cfg = MetricsConfig(var_confidence=0.99)
-        var_99 = var(returns, metrics_cfg)
-        expected_loss = abs(var_99)  # Positive number (magnitude of potential loss)
-
-        # Fixed-fractional: position size = threshold / expected_loss
-        if expected_loss == 0:
-            position_size = 1.0
-        else:
-            position_size = min(1.0, self.max_drawdown_threshold / expected_loss)
-
-        position_size = round(position_size, 4)
-
+        position_size, var_99, expected_loss = self._compute_position(
+            returns, self.max_drawdown_threshold
+        )
         pct_threshold = int(self.max_drawdown_threshold * 100)
         context_summary = (
             f"{asset}: {len(returns)}-day history, VaR(99%)={var_99:.4f}, "
@@ -150,5 +155,82 @@ class T3PositionSizing(QABuilder):
                 "expected_loss": round(expected_loss, 6),
                 "max_drawdown_threshold": self.max_drawdown_threshold,
                 "position_size": position_size,
+                "t3t4_redesign": False,
+            },
+        )
+
+    def _build_one_redesign(self, context: ContextWindow, seq: int) -> QAPair:
+        asset = context.assets[0]
+        d = context.decision_date
+        returns = context.returns_history[asset].dropna()
+
+        if len(returns) < 20:
+            raise ValueError(f"Insufficient history for T3: {asset} at {d}")
+
+        threshold = _REDESIGN_THRESHOLDS[seq % len(_REDESIGN_THRESHOLDS)]
+        position_size, var_99, expected_loss = self._compute_position(returns, threshold)
+        pct_threshold = int(threshold * 100)
+
+        # Do not put VaR into context_summary (eval prompt would leak it).
+        context_summary = (
+            f"{asset}: {len(returns)}-day history, "
+            f"max drawdown threshold={pct_threshold}%."
+        )
+
+        question = (
+            f"Asset: {asset}\n"
+            f"Daily returns (past {len(returns)} days): "
+            f"mean={returns.mean():.4f}, std={returns.std():.4f}, "
+            f"worst_day={returns.min():.4f}\n"
+            f"Maximum acceptable portfolio drawdown: {pct_threshold}%\n"
+            f"Market regime: {context.market_regime.value if context.market_regime else 'unknown'}\n"
+            + (
+                f"Recent filing/news:\n{context.news_text}\n"
+                if context.news_text
+                else ""
+            )
+            + f"\nDetermine the maximum fraction of total portfolio capital that should be "
+            f"allocated to {asset}, given the {pct_threshold}% drawdown constraint. "
+            f"Report JSON: "
+            f'{{"answer": <decimal in [0,1]>, "explanation": "<1-3 sentences>"}}.\n'
+            f"In the explanation, state how you estimate downside risk, the "
+            f"position-sizing rule you use, and whether the size is capped at 1.0."
+        )
+
+        explanation = (
+            f"Estimate downside risk as |VaR(99%)| = {expected_loss:.4f}. "
+            f"Fixed-fractional: f* = {threshold:.2f} / {expected_loss:.4f}, capped at 1.0. "
+            f"Maximum position size = {position_size:.4f}."
+        )
+        keypoints = [
+            "var",
+            "drawdown",
+            "capped" if position_size >= 0.999 else "position size",
+        ]
+
+        split = self.config.get_split(d) or Split.TRAIN
+        regime = context.market_regime or MarketRegime.SIDEWAYS
+
+        return QAPair(
+            qa_id=self._make_id(d, seq),
+            template_id=self.template_id,
+            complexity=self.complexity,
+            split=split,
+            market_regime=regime,
+            asset_class=self.asset_class,
+            assets=[asset],
+            decision_date=d,
+            context_summary=context_summary,
+            question=question,
+            answer=f"{position_size:.4f}",
+            answer_numeric=position_size,
+            explanation=explanation,
+            metadata={
+                "var_99": round(float(var_99), 6),
+                "expected_loss": round(expected_loss, 6),
+                "max_drawdown_threshold": threshold,
+                "position_size": position_size,
+                "t3t4_redesign": True,
+                "explanation_keypoints": keypoints,
             },
         )

@@ -143,20 +143,40 @@ def _strip_covariance_from_pair(pair: dict, base_tid: str) -> dict:
     return {**pair, "question": question}
 
 
-def _build_eval_prompt(pair: dict) -> str:
+def _build_eval_prompt(pair: dict, t3t4_redesign: bool = False) -> str:
     context = pair.get("context_summary", "")
     question = pair.get("question", "")
+    tid = pair.get("template_id", pair.get("template", ""))
+    meta = pair.get("metadata") or {}
+    use_json = bool(t3t4_redesign or meta.get("t3t4_redesign")) and tid in (
+        "T3",
+        "T4",
+        "T4_restricted",
+    )
+    if use_json:
+        instructions = (
+            "Instructions:\n"
+            "- Reply with a single JSON object only\n"
+            '- Required keys: "answer" and "explanation"\n'
+            "- Follow the answer format specified in the question\n"
+            "- Keep the explanation to 1-3 short sentences\n\n"
+            "Answer:"
+        )
+    else:
+        instructions = (
+            "Instructions:\n"
+            "- Answer directly and concisely\n"
+            "- Follow exactly the answer format specified in the question above\n"
+            "- For direction prediction: reply with one word — positive, negative, or flat\n"
+            "- For numeric answers: provide a single decimal number (e.g., -0.02 or 0.75)\n"
+            "- For portfolio weight answers: provide decimals summing to 1.0 (e.g., 0.60 not 60%)\n\n"
+            "Answer:"
+        )
     return (
         "[PORTFOLIO MANAGEMENT QA]\n"
         f"Context: {context}\n\n"
         f"Question: {question}\n\n"
-        "Instructions:\n"
-        "- Answer directly and concisely\n"
-        "- Follow exactly the answer format specified in the question above\n"
-        "- For direction prediction: reply with one word — positive, negative, or flat\n"
-        "- For numeric answers: provide a single decimal number (e.g., -0.02 or 0.75)\n"
-        "- For portfolio weight answers: provide decimals summing to 1.0 (e.g., 0.60 not 60%)\n\n"
-        "Answer:"
+        f"{instructions}"
     )
 
 
@@ -403,16 +423,25 @@ class QAEvaluator:
                 eval_pair = (
                     _strip_covariance_from_pair(pair, base_tid) if is_restricted else pair
                 )
-                prompt = _build_eval_prompt(eval_pair)
+                prompt = _build_eval_prompt(
+                    eval_pair, t3t4_redesign=cfg.qa.t3t4_redesign
+                )
                 response = adapter.complete(prompt)
                 latency = time.time() - t0
 
+                meta = pair.get("metadata") or {}
                 sc = score_response(
                     template_id=base_tid,
                     gt_answer=pair.get("answer", ""),
                     llm_response=response or "",
                     answer_numeric=pair.get("answer_numeric"),
                     assets=pair.get("assets"),
+                    redesign=bool(
+                        cfg.qa.t3t4_redesign or meta.get("t3t4_redesign")
+                    ),
+                    explanation_keypoints=meta.get("explanation_keypoints"),
+                    numeric_weight=cfg.qa.t3t4_numeric_weight,
+                    explanation_weight=cfg.qa.t3t4_explanation_weight,
                 )
 
                 record = {

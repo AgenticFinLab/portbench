@@ -103,6 +103,10 @@ class QAConfig:
     # "full" = original prompts; "restricted" = T4/T5 prompts with covariance info stripped;
     # "both" = run full first, then restricted (results stored in T4_restricted/ T5_restricted/)
     info_level: str = "full"
+    # false = legacy T3/T4 (paper numbers); true = redesigned templates + explanation scoring
+    t3t4_redesign: bool = False
+    t3t4_numeric_weight: float = 0.7
+    t3t4_explanation_weight: float = 0.3
 
 
 @dataclass
@@ -320,4 +324,7 @@ def _parse_qa_config(raw: dict) -> QAConfig:
         parallel_questions=int(raw.get("parallel_questions", 4)),
         save_responses=bool(raw.get("save_responses", True)),
         info_level=str(raw.get("info_level", "full")),
+        t3t4_redesign=bool(raw.get("t3t4_redesign", False)),
+        t3t4_numeric_weight=float(raw.get("t3t4_numeric_weight", 0.7)),
+        t3t4_explanation_weight=float(raw.get("t3t4_explanation_weight", 0.3)),
     )

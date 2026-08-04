@@ -24,17 +24,19 @@ from .t7_regime_detection import T7RegimeDetection
 def get_all_builders(
     provider: DataProvider,
     config: QAConfig,
+    t3t4_redesign: bool = False,
 ) -> list[QABuilder]:
     """
     Instantiate all seven template builders with the given provider and config.
 
     Returns a list ordered T1 → T7.
+    Set t3t4_redesign=True to build redesigned T3/T4 (YAML qa.t3t4_redesign).
     """
     return [
         T1ReturnPrediction(provider, config),
         T2RiskAssessment(provider, config),
-        T3PositionSizing(provider, config),
-        T4PairwiseAllocation(provider, config),
+        T3PositionSizing(provider, config, redesign=t3t4_redesign),
+        T4PairwiseAllocation(provider, config, redesign=t3t4_redesign),
         T5MultiAssetOptimization(provider, config),
         T6RebalancingDecision(provider, config),
         T7RegimeDetection(provider, config),

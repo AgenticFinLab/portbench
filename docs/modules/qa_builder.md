@@ -261,6 +261,44 @@ The build script:
 3. For each template, calls `builder.build(n=samples_per_template, decision_dates=...)`
 4. Writes per-split JSONL files and `stats.json` with text statistics
 
+## T3/T4 redesign switch (later rerun)
+
+By default PortBench keeps **legacy** T3/T4 (current paper numbers): T3 may expose VaR in `context_summary`, and T4 prints covariance in the question.
+
+Set `qa.t3t4_redesign: true` in [`configs/experiments/default.yaml`](../../configs/experiments/default.yaml) to use the redesigned path:
+
+- **T3:** no VaR in context; sampled drawdown thresholds; JSON `answer` + short `explanation`
+- **T4:** covariance withheld; return-floor constraint; JSON `answer` + short `explanation`
+- **Scoring:** `0.7 * numeric + 0.3 * explanation` (weights configurable via `t3t4_numeric_weight` / `t3t4_explanation_weight`)
+
+Code is ready with the flag **off**. When you have time to regenerate results:
+
+```powershell
+cd D:\GitHub\portbench
+
+# 1) Backup the current QA dataset (paper numbers)
+Move-Item datasets\qa_dataset datasets\qa_dataset_v1
+
+# 2) Rebuild with redesigned T3/T4
+#    Optional: --output-dir datasets/qa_dataset_v2
+python examples/qa_builder/build_qa_dataset.py --t3t4-redesign
+
+# 3) In configs/experiments/default.yaml:
+#      run_qa: true
+#      qa.t3t4_redesign: true
+#      qa.dataset_path: datasets/qa_dataset   # or qa_dataset_v2
+#      qa.templates: [T3, T4]                # optional: only rerun these
+
+# 4) Rerun QA eval (no pipeline / CEPS rerun required)
+python -m portbench.experiments --config configs/experiments/default.yaml
+```
+
+Notes:
+
+- Leaving `t3t4_redesign: false` does **not** change existing QA numbers.
+- Rebuild and eval must use the same flag (dataset metadata also stores `t3t4_redesign` / `explanation_keypoints`).
+- Unit coverage: `tests/qa/test_t3_t4_redesign.py`.
+
 ## Programmatic Usage
 
 ```python
@@ -273,7 +311,9 @@ config = QAConfig.from_date_range(
     data_end=date(2025, 12, 31),
     samples_per_template=1000,  # cap, not target — actual count adapts to data feasibility
 )
-builders = get_all_builders(provider, config)
+builders = get_all_builders(provider, config, t3t4_redesign=True)  # or False for legacy
+```
+
 
 import pandas as pd, random
 dates = pd.bdate_range(config.train_start, config.test_end).date.tolist()

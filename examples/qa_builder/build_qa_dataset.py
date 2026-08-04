@@ -21,6 +21,7 @@ Requires datasets/processed/ to be populated. Run:
 first if needed.
 """
 
+import argparse
 import json
 import sys
 from datetime import date
@@ -44,8 +45,25 @@ from portbench.qa_builder.t7_regime_detection import T7RegimeDetection
 # Configuration
 # ---------------------------------------------------------------------------
 
-OUTPUT_DIR = Path("datasets/qa_dataset")
+_parser = argparse.ArgumentParser(description="Build PortBench QA dataset")
+_parser.add_argument(
+    "--t3t4-redesign",
+    action="store_true",
+    help="Build redesigned T3/T4 (matches qa.t3t4_redesign: true). "
+    "Default keeps legacy T3/T4 for current paper numbers.",
+)
+_parser.add_argument(
+    "--output-dir",
+    type=str,
+    default="datasets/qa_dataset",
+    help="Output directory (default: datasets/qa_dataset)",
+)
+_args = _parser.parse_args()
+T3T4_REDESIGN = bool(_args.t3t4_redesign)
+
+OUTPUT_DIR = Path(_args.output_dir)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+print(f"t3t4_redesign={T3T4_REDESIGN}; output={OUTPUT_DIR}")
 
 import pandas as pd
 import warnings
@@ -125,8 +143,8 @@ print(f"Candidate decision dates: {len(SAMPLE_DATES)} "
 BUILDERS = [
     T1ReturnPrediction(provider, config),
     T2RiskAssessment(provider, config),
-    T3PositionSizing(provider, config),
-    T4PairwiseAllocation(provider, config),
+    T3PositionSizing(provider, config, redesign=T3T4_REDESIGN),
+    T4PairwiseAllocation(provider, config, redesign=T3T4_REDESIGN),
     T5MultiAssetOptimization(provider, config),
     T6RebalancingDecision(provider, config),
     T7RegimeDetection(provider, config),
