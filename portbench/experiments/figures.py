@@ -31,10 +31,14 @@ from ..visualization.correlation_plots import (
 )
 from ..visualization.style import save_figure
 from ..agent_eval.investor_profiles import PROFILES
+from .paths import find_normal_dir
 
 
 def _load_normal_nav(p_dir: Path) -> Optional[pd.Series]:
-    nav_csv = p_dir / "normal" / "nav_curve.csv"
+    normal = find_normal_dir(p_dir)
+    if normal is None:
+        return None
+    nav_csv = normal / "nav_curve.csv"
     if not nav_csv.exists():
         return None
     df = pd.read_csv(nav_csv, parse_dates=["date"], index_col="date")
@@ -42,7 +46,10 @@ def _load_normal_nav(p_dir: Path) -> Optional[pd.Series]:
 
 
 def _load_normal_result(p_dir: Path) -> Optional[dict]:
-    rj = p_dir / "normal" / "backtest_result.json"
+    normal = find_normal_dir(p_dir)
+    if normal is None:
+        return None
+    rj = normal / "backtest_result.json"
     if not rj.exists():
         return None
     return json.loads(rj.read_text(encoding="utf-8"))
@@ -82,13 +89,17 @@ def _load_ceps_per_step(
     if not profile_data:
         return None
     if scenario:
-        sr = profile_data.get("stress_results", {})
+        sr = profile_data.get("stress_results", {}) or {}
         if isinstance(sr, list):
             steps = next((e.get("per_step_ceps") for e in sr if e.get("scenario") == scenario), None)
         else:
-            steps = sr.get(scenario, {}).get("per_step_ceps")
+            steps = (sr.get(scenario) or {}).get("per_step_ceps")
     else:
-        steps = profile_data.get("normal", {}).get("per_step_ceps")
+        normal = profile_data.get("normal")
+        if not isinstance(normal, dict):
+            periods = profile_data.get("normal_periods") or []
+            normal = periods[0] if periods else {}
+        steps = (normal or {}).get("per_step_ceps")
     if not steps:
         return None
     monthly = nav_series.resample("ME").last().dropna()
@@ -166,9 +177,11 @@ def render_experiment_figures(
         log("figure: stress_drawdown.png")
 
     # 4. Cross-asset correlation evolution (one figure per phase that has snapshots)
-    for phase_dir in [profile_dir / "normal"] + sorted(
+    _normal = find_normal_dir(profile_dir)
+    _phases = ([_normal] if _normal is not None else []) + sorted(
         c for c in profile_dir.iterdir() if c.is_dir() and c.name.startswith("stress_")
-    ):
+    )
+    for phase_dir in _phases:
         snap_dir = phase_dir / "snapshots"
         if not snap_dir.exists():
             continue

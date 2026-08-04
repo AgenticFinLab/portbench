@@ -69,11 +69,17 @@ def _flatten_rows(summaries: list[dict]) -> list[dict]:
             stress_iter = raw_stress.values() if isinstance(raw_stress, dict) else raw_stress
             for sr in stress_iter:
                 rows.append({**base, "phase": "stress", **sr})
-            if payload.get("normal") is not None:
+            normal_payload = payload.get("normal")
+            if normal_payload is None:
+                # Multi-regime runs store the primary window in normal_periods.
+                periods = payload.get("normal_periods") or []
+                if periods:
+                    normal_payload = periods[0]
+            if normal_payload is not None:
                 import numpy as np
 
-                normal = dict(payload["normal"])
-                per_step = normal.pop("per_step_ceps", [])
+                normal = dict(normal_payload)
+                per_step = normal.pop("per_step_ceps", []) or []
                 normal["std_ceps"] = (
                     round(float(np.std(per_step)), 6) if per_step else 0.0
                 )
@@ -122,12 +128,15 @@ def _load_stage_scores(output_root: str, rebalance: str) -> dict[str, dict[str, 
                     summary = json.loads(summary_path.read_text(encoding="utf-8"))
                     stage_accum_summary: dict[str, list[float]] = {}
                     for profile_name in ("conservative", "balanced", "aggressive"):
-                        normal = (
+                        pdata = (
                             summary.get("profiles", {})
                             .get(profile_name, {})
-                            .get("normal", {})
                         )
-                        cached = normal.get("mean_stage_scores")
+                        normal = pdata.get("normal") or {}
+                        if not normal:
+                            periods = pdata.get("normal_periods") or []
+                            normal = periods[0] if periods else {}
+                        cached = normal.get("mean_stage_scores") if isinstance(normal, dict) else None
                         if cached:
                             for sid, sc in cached.items():
                                 stage_accum_summary.setdefault(sid, []).append(float(sc))
@@ -149,7 +158,10 @@ def _load_stage_scores(output_root: str, rebalance: str) -> dict[str, dict[str, 
                     "aggressive",
                 ):
                     continue
-                logs_root = profile_dir / "normal" / "pipeline_logs"
+                normal_dir = paths.find_normal_dir(profile_dir)
+                if normal_dir is None:
+                    continue
+                logs_root = normal_dir / "pipeline_logs"
                 if not logs_root.exists():
                     continue
                 for ep_file in sorted(logs_root.glob("*/episodes/*.json")):
@@ -368,31 +380,51 @@ def analyze_runs(
         log(f"analysis: s2_s4_quadrant.png skipped ({exc})")
 
     # Fig 2b: Normal-vs-Stress CEPS scatter (conservative profile, 2022 crypto)
+    # Prefer on-disk backtest_result.json: multi-regime run_summary often stores
+    # stress as a lightweight list without mean_ceps, and may omit a profile key.
     try:
         ns_points: list[dict] = []
         for summary in summaries:
             model_key = f"{summary['provider']}/{summary['model_name']}"
             if model_key.startswith("baseline/"):
                 continue
-            profile_data = summary.get("profiles", {}).get("conservative", {})
-            normal = profile_data.get("normal", {})
-            ceps_normal = normal.get("mean_ceps", 0.0)
-            if ceps_normal <= 0:
+            prov, model = summary["provider"], summary["model_name"]
+            ts = paths.find_best_run(output_root, rebalance, prov, model, [])
+            if not ts:
                 continue
-            stress = profile_data.get("stress_results", {})
-            if isinstance(stress, dict):
-                crypto = stress.get("2022_crypto_collapse", {})
-            else:
-                crypto = {}
-            ceps_crypto = crypto.get("mean_ceps", 0.0)
-            if ceps_crypto <= 0:
+            p_dir = paths.profile_dir(output_root, rebalance, prov, model, ts, "conservative")
+            if not p_dir.is_dir():
                 continue
+            normal_dir = paths.find_normal_dir(p_dir)
+            normal_br = (
+                json.loads((normal_dir / "backtest_result.json").read_text(encoding="utf-8"))
+                if normal_dir and (normal_dir / "backtest_result.json").exists()
+                else {}
+            )
+            crypto_br_path = p_dir / "stress_2022_crypto_collapse" / "backtest_result.json"
+            crypto_br = (
+                json.loads(crypto_br_path.read_text(encoding="utf-8"))
+                if crypto_br_path.exists()
+                else {}
+            )
+            ceps_normal = float(normal_br.get("mean_ceps") or 0.0)
+            ceps_crypto = float(crypto_br.get("mean_ceps") or 0.0)
+            if ceps_normal <= 0 or ceps_crypto <= 0:
+                continue
+            tol = float(crypto_br.get("drawdown_tolerance") or 0.0)
+            dd = float(crypto_br.get("max_drawdown") or 0.0)
+            crypto_passed = bool(crypto_br.get("stress_passed", True))
+            if "stress_passed" not in crypto_br and tol > 0:
+                crypto_passed = abs(dd) <= tol + 1e-9
+            profile_data = summary.get("profiles", {}).get("conservative", {}) or {}
             ns_points.append({
                 "model": model_key,
                 "ceps_normal": ceps_normal,
                 "ceps_crypto": ceps_crypto,
-                "crypto_passed": crypto.get("stress_passed", True),
-                "stress_gate_passed": profile_data.get("stress_gate_passed", True),
+                "crypto_passed": crypto_passed,
+                "stress_gate_passed": profile_data.get(
+                    "stress_gate_passed", crypto_passed
+                ),
                 "delta": round(ceps_crypto - ceps_normal, 4),
             })
         if ns_points:
@@ -402,6 +434,8 @@ def analyze_runs(
             )
             save_figure(fig, str(fig_dir / "normal_vs_stress.png"), formats=("png",))
             figures_written.append("normal_vs_stress.png")
+        else:
+            log("analysis: normal_vs_stress.png skipped (no points)")
     except Exception as exc:
         log(f"analysis: normal_vs_stress.png skipped ({exc})")
 

@@ -18,7 +18,7 @@ New layout (created lazily as experiments run):
             {profile}/             # conservative | balanced | aggressive
               experiment.log
               figures/
-              normal/
+              normal/ or normal_{label}/   # e.g. normal_bull_2024
                 backtest_result.json
                 nav_curve.csv
                 weight_history.csv
@@ -96,10 +96,29 @@ def normal_dir(
     timestamp: str,
     profile: str,
 ) -> Path:
+    """Canonical write path for unlabeled normal periods (legacy ``normal/``)."""
     return (
         profile_dir(output_root, rebalance, provider, model_name, timestamp, profile)
         / "normal"
     )
+
+
+def find_normal_dir(profile_path: Path) -> Optional[Path]:
+    """Locate the normal-period artifact directory under a profile folder.
+
+    Supports both legacy ``normal/`` and labeled windows such as
+    ``normal_bull_2024/`` used by multi-regime rebuttal runs. When several
+    ``normal_*`` directories exist, prefer the lexicographically last name
+    (stable and matches the newest labeled window in current layouts).
+    """
+    legacy = profile_path / "normal"
+    if legacy.is_dir():
+        return legacy
+    labeled = sorted(
+        p for p in profile_path.iterdir()
+        if p.is_dir() and p.name.startswith("normal_")
+    )
+    return labeled[-1] if labeled else None
 
 
 def figures_dir(

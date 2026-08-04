@@ -164,8 +164,16 @@ def make_figure(pas_data: dict, output_path: str) -> plt.Figure:
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--experiments-dir", default="EXPERIMENTS/monthly")
-    parser.add_argument("--output", default="figures/analysis_profile_adaptation.png")
+    parser.add_argument(
+        "--experiments-dir",
+        default="EXPERIMENTS_rebuttal_lookback/monthly",
+        help="Experiment tree with backtest_result.json files",
+    )
+    parser.add_argument(
+        "--output",
+        default="figures/analysis_profile_adaptation.png",
+        help="Output PNG path",
+    )
     args = parser.parse_args()
 
     pas_data = load_pas_data(args.experiments_dir)
