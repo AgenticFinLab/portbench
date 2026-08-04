@@ -27,16 +27,15 @@ python examples/live/run_live_eval.py --provider dashscope --model qwen3.7-max -
 
 ## Data coverage (auto-refresh)
 
-Live reads `datasets/processed/` first. If the requested dates go **beyond** the
-local max trading day (or you run “today” and local data is stale), the runner
-**automatically**:
+Live reads `datasets/processed/` first. Batch experiments **never** call Yahoo —
+they only use local processed CSVs. Live auto-refresh is different: if dates go
+beyond local max, it does an **incremental** Yahoo/FRED update (only missing /
+stale tickers, sequential with sleep — **not** parallel), then preprocess.
 
-1. force-downloads Yahoo + FRED  
-2. runs preprocess  
-3. reloads processed data and continues  
+Do **not** use `--force-refresh` unless necessary: that re-downloads every ticker
+and often hits Yahoo `Too Many Requests`.
 
-Needs `FRED_API_KEY`. Opt out with `--no-auto-refresh`. Force anytime with
-`--force-refresh`.
+Needs `FRED_API_KEY`. Opt out with `--no-auto-refresh`.
 
 ```powershell
 # Today / latest session (auto-pulls if local data is behind)

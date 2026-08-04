@@ -174,12 +174,15 @@ class LiveEvalRunner:
             reason = "force_refresh" if force_refresh else "local_data_stale"
             print(
                 f"[live] Local data max={local_max}, need through {needed_through} "
-                f"({reason}). Refreshing Yahoo/FRED + preprocess..."
+                f"({reason}). Incremental Yahoo/FRED refresh + preprocess "
+                f"(not parallel; batch experiments never call Yahoo)..."
             )
             refresh_and_preprocess(
-                force=True,
+                # auto path: incremental only. Full force only when force_refresh=True.
+                force=bool(force_refresh),
                 skip_refresh=False,
-                skip_preprocess=False,  # always rebuild processed after download
+                skip_preprocess=False,
+                needed_through=needed_through,
             )
             data = self._load_provider()
             meta["auto_refreshed"] = not force_refresh
@@ -200,8 +203,12 @@ class LiveEvalRunner:
                     "Check network / FRED_API_KEY / market holiday / EOD lag."
                 )
         elif not skip_preprocess and insufficient:
-            # Explicit preprocess-only request with stale data: still refresh.
-            refresh_and_preprocess(force=True, skip_refresh=False, skip_preprocess=False)
+            refresh_and_preprocess(
+                force=False,
+                skip_refresh=False,
+                skip_preprocess=False,
+                needed_through=needed_through,
+            )
             data = self._load_provider()
             meta["auto_refreshed"] = True
 
