@@ -175,7 +175,6 @@ class LiveEvalRunner:
             print(
                 f"[live] Local data max={local_max}, need through {needed_through} "
                 f"({reason}). Incremental Yahoo/FRED refresh + preprocess "
-                f"(not parallel; batch experiments never call Yahoo)..."
             )
             refresh_and_preprocess(
                 # auto path: incremental only. Full force only when force_refresh=True.
