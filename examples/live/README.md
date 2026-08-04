@@ -81,7 +81,10 @@ outputs/live/daily_2025-07-16_2025-07-31/{provider}/{model}/{profile}/
     scores_ex_post.json
     recommended_weights.json
     episode_trace.json
+    prompts.json              # full S1–S3 prompts (no truncation)
+    llm_responses.json        # full raw LLM responses (no truncation)
 ```
+
 
 ## Other frequencies
 

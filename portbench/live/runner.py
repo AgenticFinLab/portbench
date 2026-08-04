@@ -87,15 +87,29 @@ def _serialize_stage_outputs(stage_outputs: dict) -> dict:
             d = {
                 k: v
                 for k, v in vars(val).items()
-                if not k.startswith("_") and k != "raw_llm_output"
+                if not k.startswith("_")
             }
-            raw = getattr(val, "raw_llm_output", None)
-            if raw:
-                d["raw_llm_output_preview"] = str(raw)[:500]
             out[key] = d
         else:
             out[key] = str(val)
     return out
+
+
+def _extract_llm_io(pipeline, stage_outputs: dict) -> tuple[dict[str, str], dict[str, str]]:
+    """Collect full per-stage prompts and raw LLM responses (no truncation)."""
+    prompts: dict[str, str] = {}
+    responses: dict[str, str] = {}
+    stages = getattr(pipeline, "stages", {}) or {}
+    for sid, stage in stages.items():
+        key = sid.value if hasattr(sid, "value") else str(sid)
+        prompt = getattr(stage, "_last_prompt", None)
+        if prompt:
+            prompts[key] = str(prompt)
+        out = stage_outputs.get(sid)
+        raw = getattr(out, "raw_llm_output", None) if out is not None else None
+        if raw:
+            responses[key] = str(raw)
+    return prompts, responses
 
 
 def _trim_future_to_realization(snapshot, decision: date, realization: date):
@@ -330,6 +344,13 @@ class LiveEvalRunner:
                 default=str,
             ),
             encoding="utf-8",
+        )
+        prompts, responses = _extract_llm_io(pipeline, episode.stage_outputs)
+        (out_dir / "prompts.json").write_text(
+            json.dumps(prompts, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        (out_dir / "llm_responses.json").write_text(
+            json.dumps(responses, indent=2, ensure_ascii=False), encoding="utf-8"
         )
         (out_dir / "recommended_weights.json").write_text(
             json.dumps(recommended, indent=2), encoding="utf-8"
