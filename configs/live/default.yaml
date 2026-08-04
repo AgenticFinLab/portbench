@@ -1,0 +1,21 @@
+# Live / same-day eval defaults (yesterday decision, today ex-post GT)
+
+provider: mock          # mock | dashscope | ark | ...
+model: null             # null → use {PREFIX}_MODEL from .env
+profile: balanced
+
+rebalance: daily
+decision_offset: 1      # yesterday
+forward_horizon_days: 1 # today as GT window
+oracle_modes: [lookback, ex_post]
+
+data_dir: datasets/processed
+sec_dir: datasets/sec
+output_root: outputs/live
+lookback_days: 60
+initial_nav: 1000000
+propagation_weight: 0.1
+
+# Refresh is opt-in (slow). Prefer --force-refresh on the CLI when needed.
+force_refresh: false
+skip_preprocess: true

@@ -37,21 +37,21 @@ models:
   - provider: deepseek       
     model: deepseek-v4-flash
   # uses ARK_API_KEY/_BASE_URL/_MODEL
-  # - provider: ark            
-  #   model: doubao-seed-2-0-pro-260215
-  # - provider: ark
-  #   model: doubao-seed-2-0-lite-260215
+  - provider: ark            
+    model: doubao-seed-2-0-pro-260215
+  - provider: ark
+    model: doubao-seed-2-0-lite-260215
   # uses DASHSCOPE_API_KEY/_BASE_URL/_MODEL
-  # - provider: dashscope      
-  #   model: qwen3.7-max
-  # - provider: dashscope
-  #   model: qwen3.6-plus
-  # - provider: dashscope
-  #   model: kimi-k2.6
-  # - provider: dashscope
-  #   model: glm-5.1
-  # - provider: dashscope
-  #   model: qwen3.6-35b-a3b
+  - provider: dashscope      
+    model: qwen3.7-max
+  - provider: dashscope
+    model: qwen3.6-plus
+  - provider: dashscope
+    model: kimi-k2.6
+  - provider: dashscope
+    model: glm-5.1
+  - provider: dashscope
+    model: qwen3.6-35b-a3b
   # reference baseline (no API)
   - baseline: equal_weight   
   - baseline: risk_parity
@@ -101,3 +101,8 @@ qa:
   #   restricted – T4/T5 prompts with covariance/correlation stripped; results in T4_restricted/ T5_restricted/
   #   both       – run full first, then restricted (useful for ablation comparison)
   info_level: both
+  # false = legacy T3/T4 (current paper numbers). Set true later to rebuild/rerun
+  # redesigned T3/T4 (no VaR/cov leak + short explanation scoring).
+  t3t4_redesign: false
+  t3t4_numeric_weight: 0.7
+  t3t4_explanation_weight: 0.3
