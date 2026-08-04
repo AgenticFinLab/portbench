@@ -1,10 +1,10 @@
-"""LiveEvalRunner: yesterday decision + today GT, dual-oracle CEPS."""
+"""LiveEvalRunner: rolling live eval with dual-oracle CEPS."""
 
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
-from datetime import date
+from dataclasses import dataclass, field
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
@@ -14,19 +14,16 @@ from ..agent_eval.investor_profiles import PROFILES
 from ..agent_eval.mock_agent import MockAgentAdapter
 from ..qa_builder.processed_data import ProcessedDataProvider
 from ..sandbox.snapshot_builder import SnapshotBuilder
-from .dates import (
-    calendar_forward_days,
-    iter_daily_decision_pairs,
-    resolve_live_dates,
-)
+from .dates import available_trading_days, calendar_forward_days, resolve_live_dates
 from .dual_score import dual_score
 from .refresh import refresh_and_preprocess
+from .schedule import SUPPORTED_FREQUENCIES, decision_realization_pairs
 
 
 @dataclass
 class LiveEvalResult:
     decision_date: date
-    today: date
+    today: date  # realization / GT end date
     provider: str
     model: str
     profile: str
@@ -34,6 +31,20 @@ class LiveEvalResult:
     scores: dict[str, dict]
     output_dir: str
     meta: dict = field(default_factory=dict)
+    rebalance: str = "daily"
+
+
+@dataclass
+class LiveRangeResult:
+    start: date
+    end: date
+    rebalance: str
+    provider: str
+    model: str
+    profile: str
+    episodes: list[LiveEvalResult]
+    summary_path: str
+    output_dir: str
 
 
 def _default_assets(provider: ProcessedDataProvider) -> list[str]:
@@ -50,7 +61,6 @@ def _default_assets(provider: ProcessedDataProvider) -> list[str]:
             assets.extend(provider.list_assets(cls) or [])
         except Exception:
             continue
-    # Deduplicate, keep order
     seen = set()
     out = []
     for a in assets:
@@ -72,7 +82,6 @@ def _serialize_stage_outputs(stage_outputs: dict) -> dict:
                 for k, v in vars(val).items()
                 if not k.startswith("_") and k != "raw_llm_output"
             }
-            # Keep a short raw snippet for debugging
             raw = getattr(val, "raw_llm_output", None)
             if raw:
                 d["raw_llm_output_preview"] = str(raw)[:500]
@@ -82,12 +91,34 @@ def _serialize_stage_outputs(stage_outputs: dict) -> dict:
     return out
 
 
+def _trim_future_to_realization(snapshot, decision: date, realization: date):
+    """Keep future_return_data rows in (decision, realization]."""
+    if not snapshot.future_return_data:
+        return
+    trimmed = {}
+    for a, s in snapshot.future_return_data.items():
+        s2 = s.copy()
+        try:
+            idx_dates = s2.index.map(
+                lambda x: x.date() if hasattr(x, "date") else x
+            )
+            s2 = s2[(idx_dates > decision) & (idx_dates <= realization)]
+        except Exception:
+            s2 = s2.iloc[:1]
+        if not s2.empty:
+            trimmed[a] = s2
+    if trimmed:
+        snapshot.future_return_data = trimmed
+
+
 class LiveEvalRunner:
     """
-    End-to-end live eval:
+    Live / rolling evaluation.
 
-      refresh → snapshot(yesterday, forward=today) → one LLM episode
-      → dual score (lookback + ex_post) → write outputs/live/...
+    Single step: decision_date sees only PiT data; realization day(s) fill
+    future_return_data for ex-post scoring. Dual-score lookback + ex_post.
+
+    Range mode: rebalance in {daily, weekly, monthly, quarterly, yearly}.
     """
 
     def __init__(
@@ -107,20 +138,7 @@ class LiveEvalRunner:
         self.initial_nav = initial_nav
         self.propagation_weight = propagation_weight
 
-    def run(
-        self,
-        *,
-        provider: str = "mock",
-        model: Optional[str] = None,
-        profile: str = "balanced",
-        decision_date: Optional[date] = None,
-        as_of_today: Optional[date] = None,
-        mock: bool = False,
-        force_refresh: bool = False,
-        skip_refresh: bool = True,
-        skip_preprocess: bool = True,
-        assets: Optional[list[str]] = None,
-    ) -> LiveEvalResult:
+    def _maybe_refresh(self, force_refresh, skip_refresh, skip_preprocess):
         if force_refresh or not skip_refresh:
             refresh_and_preprocess(
                 force=True,
@@ -130,76 +148,45 @@ class LiveEvalRunner:
         elif not skip_preprocess:
             refresh_and_preprocess(skip_refresh=True, skip_preprocess=False)
 
-        data = ProcessedDataProvider(data_dir=self.data_dir, sec_dir=self.sec_dir)
-        yesterday, today = resolve_live_dates(
-            data,
-            decision_date=decision_date,
-            as_of_today=as_of_today,
-        )
-        asset_list = assets or _default_assets(data)
-        n = len(asset_list)
-        weights = {a: round(1.0 / n, 6) for a in asset_list}
+    def _build_adapter(self, provider, model, mock):
+        if mock or provider == "mock":
+            return MockAgentAdapter(noise_level=0.15, seed=42), "mock", "mock"
+        from ..experiments.providers import build_adapter
 
-        # Load optional asset_class_map
-        acm = None
-        acm_path = Path(self.data_dir) / "asset_class_map.json"
-        if acm_path.exists():
-            try:
-                acm = json.loads(acm_path.read_text(encoding="utf-8"))
-            except Exception:
-                acm = None
+        adapter = build_adapter(provider, model=model)
+        return adapter, provider, model or provider
 
-        builder = SnapshotBuilder(
-            data, asset_list, lookback_days=self.lookback_days, asset_class_map=acm
-        )
-        fwd = calendar_forward_days(yesterday, today)
+    def _run_one_pair(
+        self,
+        *,
+        data: ProcessedDataProvider,
+        builder: SnapshotBuilder,
+        adapter,
+        provider_name: str,
+        model_name: str,
+        profile: str,
+        decision: date,
+        realization: date,
+        weights: dict[str, float],
+        rebalance: str,
+        run_tag: str,
+    ) -> LiveEvalResult:
+        fwd = calendar_forward_days(decision, realization)
         snapshot = builder.build(
-            yesterday, weights, self.initial_nav, forward_days=fwd
+            decision, weights, self.initial_nav, forward_days=fwd
         )
-        # Ensure future window includes today when available
-        if snapshot.future_return_data:
-            # Truncate each series to the first trading day after decision (= today ideally)
-            trimmed = {}
-            for a, s in snapshot.future_return_data.items():
-                # keep rows strictly after decision_date
-                s2 = s.copy()
-                try:
-                    s2 = s2[s2.index.map(lambda x: x.date() if hasattr(x, "date") else x) > yesterday]
-                except Exception:
-                    pass
-                if not s2.empty:
-                    trimmed[a] = s2.iloc[:1]
-            if trimmed:
-                snapshot.future_return_data = trimmed
-
+        _trim_future_to_realization(snapshot, decision, realization)
         if snapshot.future_return_data is None:
             raise RuntimeError(
-                f"No future_return_data from {yesterday} toward {today}. "
-                "Refresh market data so today's returns are available, or pass "
-                "--as-of-today / --decision-date explicitly."
+                f"No future_return_data from {decision} toward {realization}. "
+                "Refresh data or shrink the end date so a next period exists."
             )
 
-        # Safety: prompts must not receive future_return_data (pipeline already
-        # omits it; we still record the keys for the meta file).
-        future_keys = list(snapshot.future_return_data.keys())
-
         prof = PROFILES.get(profile) or PROFILES["balanced"]
-        if mock or provider == "mock":
-            adapter = MockAgentAdapter(noise_level=0.15, seed=42)
-            provider_name, model_name = "mock", "mock"
-        else:
-            from ..experiments.providers import build_adapter
-
-            adapter = build_adapter(provider, model=model)
-            provider_name, model_name = provider, model or provider
-
-        # Run once with lookback pipeline (oracle only affects GT scoring inside
-        # run_episode; we re-score both modes from saved outputs below).
         pipeline = build_default_pipeline(
             adapter, profile=prof, oracle_mode="lookback"
         )
         episode = pipeline.run_episode(snapshot)
-
         scores = dual_score(
             snapshot,
             episode.stage_outputs,
@@ -207,37 +194,42 @@ class LiveEvalRunner:
             propagation_weight=self.propagation_weight,
             oracle_modes=["lookback", "ex_post"],
         )
-
         s3_out = episode.stage_outputs.get(StageID.S3_WEIGHT_OPTIMIZATION)
         recommended = dict(getattr(s3_out, "weights", {}) or {})
 
         out_dir = (
             self.output_root
+            / run_tag
             / provider_name
             / model_name.replace("/", "-")
-            / yesterday.isoformat()
+            / profile
+            / decision.isoformat()
         )
         out_dir.mkdir(parents=True, exist_ok=True)
 
         meta = {
-            "decision_date": yesterday.isoformat(),
-            "today": today.isoformat(),
+            "decision_date": decision.isoformat(),
+            "realization_date": realization.isoformat(),
+            "rebalance": rebalance,
             "provider": provider_name,
             "model": model_name,
             "profile": profile,
-            "n_assets": len(asset_list),
-            "future_return_assets": future_keys,
+            "n_assets": len(weights),
+            "future_return_assets": list(snapshot.future_return_data.keys()),
             "notes": [
-                "Model sees only information available on decision_date (yesterday).",
-                "future_return_data (today) is used only for ex_post scoring.",
-                "Does not remove all training-data leakage risk.",
+                "Model sees only information available on decision_date.",
+                "future_return_data through realization_date is used only for ex_post scoring.",
             ],
         }
         (out_dir / "run_meta.json").write_text(
             json.dumps(meta, indent=2), encoding="utf-8"
         )
         (out_dir / "episode_trace.json").write_text(
-            json.dumps(_serialize_stage_outputs(episode.stage_outputs), indent=2, default=str),
+            json.dumps(
+                _serialize_stage_outputs(episode.stage_outputs),
+                indent=2,
+                default=str,
+            ),
             encoding="utf-8",
         )
         (out_dir / "recommended_weights.json").write_text(
@@ -251,8 +243,8 @@ class LiveEvalRunner:
         )
 
         return LiveEvalResult(
-            decision_date=yesterday,
-            today=today,
+            decision_date=decision,
+            today=realization,
             provider=provider_name,
             model=model_name,
             profile=profile,
@@ -260,6 +252,60 @@ class LiveEvalRunner:
             scores=scores,
             output_dir=str(out_dir),
             meta=meta,
+            rebalance=rebalance,
+        )
+
+    def run(
+        self,
+        *,
+        provider: str = "mock",
+        model: Optional[str] = None,
+        profile: str = "balanced",
+        decision_date: Optional[date] = None,
+        as_of_today: Optional[date] = None,
+        mock: bool = False,
+        force_refresh: bool = False,
+        skip_refresh: bool = True,
+        skip_preprocess: bool = True,
+        assets: Optional[list[str]] = None,
+        rebalance: str = "daily",
+    ) -> LiveEvalResult:
+        """Single decision → next-period realization (default: yesterday → today)."""
+        self._maybe_refresh(force_refresh, skip_refresh, skip_preprocess)
+        data = ProcessedDataProvider(data_dir=self.data_dir, sec_dir=self.sec_dir)
+        decision, realization = resolve_live_dates(
+            data,
+            decision_date=decision_date,
+            as_of_today=as_of_today,
+        )
+        asset_list = assets or _default_assets(data)
+        n = len(asset_list)
+        weights = {a: round(1.0 / n, 6) for a in asset_list}
+        acm = None
+        acm_path = Path(self.data_dir) / "asset_class_map.json"
+        if acm_path.exists():
+            try:
+                acm = json.loads(acm_path.read_text(encoding="utf-8"))
+            except Exception:
+                acm = None
+        builder = SnapshotBuilder(
+            data, asset_list, lookback_days=self.lookback_days, asset_class_map=acm
+        )
+        adapter, provider_name, model_name = self._build_adapter(
+            provider, model, mock
+        )
+        return self._run_one_pair(
+            data=data,
+            builder=builder,
+            adapter=adapter,
+            provider_name=provider_name,
+            model_name=model_name,
+            profile=profile,
+            decision=decision,
+            realization=realization,
+            weights=weights,
+            rebalance=rebalance,
+            run_tag="single",
         )
 
     def run_range(
@@ -267,6 +313,7 @@ class LiveEvalRunner:
         *,
         start: date,
         end: date,
+        rebalance: str = "daily",
         provider: str = "mock",
         model: Optional[str] = None,
         profile: str = "balanced",
@@ -275,72 +322,133 @@ class LiveEvalRunner:
         skip_refresh: bool = True,
         skip_preprocess: bool = True,
         assets: Optional[list[str]] = None,
-    ) -> list[LiveEvalResult]:
+        carry_weights: bool = True,
+    ) -> LiveRangeResult:
         """
-        Daily rebalance over ``[start, end]`` decision dates.
+        Rolling live eval over [start, end] at the given rebalance frequency.
 
-        Each day D is scored with the next trading day as ex-post GT.
-        Refresh/preprocess runs at most once before the loop.
+        For each rebalance date D in the window, the model decides using data ≤ D;
+        ex-post GT uses returns from D to the next rebalance date (daily ⇒ next
+        trading day). This simulates "we ran live eval every period in the window"
+        without waiting for a full month of wall-clock time.
         """
-        if force_refresh or not skip_refresh:
-            refresh_and_preprocess(
-                force=True,
-                skip_refresh=False,
-                skip_preprocess=skip_preprocess,
+        freq = rebalance.lower().strip()
+        if freq not in SUPPORTED_FREQUENCIES:
+            raise ValueError(
+                f"rebalance must be one of {SUPPORTED_FREQUENCIES}, got {rebalance!r}"
             )
-        elif not skip_preprocess:
-            refresh_and_preprocess(skip_refresh=True, skip_preprocess=False)
 
+        self._maybe_refresh(force_refresh, skip_refresh, skip_preprocess)
         data = ProcessedDataProvider(data_dir=self.data_dir, sec_dir=self.sec_dir)
-        pairs = iter_daily_decision_pairs(data, start, end)
-        results: list[LiveEvalResult] = []
-        for decision, realization in pairs:
-            results.append(
-                self.run(
-                    provider=provider,
-                    model=model,
-                    profile=profile,
-                    decision_date=decision,
-                    as_of_today=realization,
-                    mock=mock,
-                    force_refresh=False,
-                    skip_refresh=True,
-                    skip_preprocess=True,
-                    assets=assets,
-                )
+
+        # Pull enough calendar to cover GT after ``end``
+        cal_start = start - timedelta(days=40)
+        cal_end = end + timedelta(days=40)
+        days = available_trading_days(
+            data, start=cal_start, end=cal_end
+        )
+        pairs = decision_realization_pairs(
+            days, start=start, end=end, frequency=freq
+        )
+        if not pairs:
+            raise RuntimeError(
+                f"No (decision, realization) pairs for {start}..{end} "
+                f"at rebalance={freq}. Check that processed data covers the window "
+                f"plus one period after the last decision."
             )
 
-        # Write a small window summary next to the model folder
-        if results:
-            provider_name = results[0].provider
-            model_name = results[0].model.replace("/", "-")
-            summary_dir = self.output_root / provider_name / model_name
-            summary_dir.mkdir(parents=True, exist_ok=True)
-            rows = [
-                {
-                    "decision_date": r.decision_date.isoformat(),
-                    "realization_date": r.today.isoformat(),
-                    "profile": r.profile,
-                    "ceps_lookback": r.scores["lookback"]["ceps"],
-                    "ceps_ex_post": r.scores["ex_post"]["ceps"],
-                }
-                for r in results
-            ]
-            summary = {
-                "start": start.isoformat(),
-                "end": end.isoformat(),
-                "n_days": len(rows),
-                "profile": profile,
-                "mean_ceps_lookback": round(
-                    sum(x["ceps_lookback"] for x in rows) / len(rows), 4
-                ),
-                "mean_ceps_ex_post": round(
-                    sum(x["ceps_ex_post"] for x in rows) / len(rows), 4
-                ),
-                "days": rows,
-            }
-            tag = f"{start.isoformat()}_{end.isoformat()}_{profile}"
-            (summary_dir / f"window_summary_{tag}.json").write_text(
-                json.dumps(summary, indent=2), encoding="utf-8"
+        asset_list = assets or _default_assets(data)
+        n = len(asset_list)
+        weights = {a: round(1.0 / n, 6) for a in asset_list}
+        acm = None
+        acm_path = Path(self.data_dir) / "asset_class_map.json"
+        if acm_path.exists():
+            try:
+                acm = json.loads(acm_path.read_text(encoding="utf-8"))
+            except Exception:
+                acm = None
+        builder = SnapshotBuilder(
+            data, asset_list, lookback_days=self.lookback_days, asset_class_map=acm
+        )
+        adapter, provider_name, model_name = self._build_adapter(
+            provider, model, mock
+        )
+
+        tag = f"{freq}_{start.isoformat()}_{end.isoformat()}"
+        episodes: list[LiveEvalResult] = []
+        rows = []
+        for decision, realization in pairs:
+            result = self._run_one_pair(
+                data=data,
+                builder=builder,
+                adapter=adapter,
+                provider_name=provider_name,
+                model_name=model_name,
+                profile=profile,
+                decision=decision,
+                realization=realization,
+                weights=weights,
+                rebalance=freq,
+                run_tag=tag,
             )
-        return results
+            episodes.append(result)
+            rows.append(
+                {
+                    "decision_date": decision.isoformat(),
+                    "realization_date": realization.isoformat(),
+                    "ceps_lookback": result.scores["lookback"]["ceps"],
+                    "ceps_ex_post": result.scores["ex_post"]["ceps"],
+                    "stage_scores_lookback": result.scores["lookback"]["stage_scores"],
+                    "stage_scores_ex_post": result.scores["ex_post"]["stage_scores"],
+                }
+            )
+            if carry_weights and result.recommended_weights:
+                weights = dict(result.recommended_weights)
+
+        out_root = (
+            self.output_root
+            / tag
+            / provider_name
+            / model_name.replace("/", "-")
+            / profile
+        )
+        out_root.mkdir(parents=True, exist_ok=True)
+        summary = {
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+            "rebalance": freq,
+            "provider": provider_name,
+            "model": model_name,
+            "profile": profile,
+            "n_episodes": len(episodes),
+            "mean_ceps_lookback": round(
+                sum(r["ceps_lookback"] for r in rows) / len(rows), 4
+            )
+            if rows
+            else None,
+            "mean_ceps_ex_post": round(
+                sum(r["ceps_ex_post"] for r in rows) / len(rows), 4
+            )
+            if rows
+            else None,
+            "episodes": rows,
+            "notes": [
+                "Simulated rolling live eval over a historical window.",
+                "Supports daily/weekly/monthly/quarterly/yearly rebalance.",
+                "Main paper uses monthly; daily is for faster live-capability demos.",
+            ],
+        }
+        summary_path = out_root / "range_summary.json"
+        summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+
+        return LiveRangeResult(
+            start=start,
+            end=end,
+            rebalance=freq,
+            provider=provider_name,
+            model=model_name,
+            profile=profile,
+            episodes=episodes,
+            summary_path=str(summary_path),
+            output_dir=str(out_root),
+        )

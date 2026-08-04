@@ -1,12 +1,17 @@
-# Live / same-day eval defaults (yesterday decision, today ex-post GT)
+# Live / rolling eval defaults
 
 provider: mock          # mock | dashscope | ark | ...
 model: null             # null → use {PREFIX}_MODEL from .env
 profile: balanced
 
+# daily | weekly | monthly | quarterly | yearly
+# Main paper is monthly; daily is for short-window live-capability demos.
 rebalance: daily
-decision_offset: 1      # yesterday
-forward_horizon_days: 1 # today as GT window
+
+# Example: last two weeks of July 2025 (data currently available without refresh)
+start: "2025-07-16"
+end: "2025-07-31"
+
 oracle_modes: [lookback, ex_post]
 
 data_dir: datasets/processed
@@ -16,6 +21,5 @@ lookback_days: 60
 initial_nav: 1000000
 propagation_weight: 0.1
 
-# Refresh is opt-in (slow). Prefer --force-refresh on the CLI when needed.
 force_refresh: false
 skip_preprocess: true

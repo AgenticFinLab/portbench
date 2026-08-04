@@ -1,52 +1,77 @@
-# Live / same-day eval
+# Live / rolling evaluation
 
-Thin demo that refreshes public market data, lets a model trade on **yesterday's**
-information only, and scores the same decision under two oracles:
+Simulate a live track: on each rebalance date the model sees only PiT data, then
+we score the same decision under **lookback** and **ex-post** (returns until the
+next rebalance).
 
-1. **lookback** — yesterday-optimal (trailing max-Sharpe)
-2. **ex_post** — future-optimal using **today's** realized returns
+Core: `portbench/live/`. This folder is only a CLI.
 
-Core code: `portbench/live/`. This folder is only a CLI wrapper.
+## Why daily (not only monthly)?
 
-## Quick start
+Main paper pipeline is **monthly**. A true wall-clock monthly live wait is slow.
+For proving the benchmark has live-eval capability, use **daily** (or weekly)
+rebalance over a short historical window — e.g. the last two weeks of July —
+as if you had tested the model every day. Frequencies supported:
+
+`daily | weekly | monthly | quarterly | yearly`
+
+## July last two weeks (daily) — recommended demo
+
+Processed data currently covers **2025-07** (not 2026-07 unless you refresh).
 
 ```powershell
 cd D:\GitHub\portbench
 
-# Mock (no API keys). Uses existing datasets/processed.
-python examples/live/run_live_eval.py --mock
+# 1) Smoke with mock (no API keys)
+python examples/live/run_live_eval.py --mock `
+  --start 2025-07-16 --end 2025-07-31 --rebalance daily
 
-# Real model
-python examples/live/run_live_eval.py --provider dashscope --model qwen3.7-max --profile balanced
+# 2) Real model (example)
+python examples/live/run_live_eval.py `
+  --provider dashscope --model qwen3.7-max --profile balanced `
+  --start 2025-07-16 --end 2025-07-31 --rebalance daily
 ```
 
-Optional refresh (slow; needs `FRED_API_KEY`):
+Outputs:
+
+```text
+outputs/live/daily_2025-07-16_2025-07-31/{provider}/{model}/{profile}/
+  range_summary.json          # mean CEPS + per-day rows
+  YYYY-MM-DD/                 # one folder per decision date
+    scores_lookback.json
+    scores_ex_post.json
+    recommended_weights.json
+    episode_trace.json
+```
+
+Each episode: decision on day \(D\), realization / ex-post GT on the next
+trading day after \(D\).
+
+## Other frequencies
 
 ```powershell
-python examples/live/run_live_eval.py --mock --force-refresh --run-preprocess
+# Weekly over the same July window
+python examples/live/run_live_eval.py --mock --start 2025-07-16 --end 2025-07-31 --rebalance weekly
+
+# Monthly over Q1 2025 (closer to main-paper cadence)
+python examples/live/run_live_eval.py --mock --start 2025-01-01 --end 2025-03-31 --rebalance monthly
+
+# Single latest step only
+python examples/live/run_live_eval.py --mock
 ```
 
-## Defaults
+## Refresh calendar-current data (e.g. July 2026)
 
-| Role | Date | Use |
-|------|------|-----|
-| Decision | previous trading day in **processed data** | LLM prompt / PiT snapshot |
-| Realization | latest trading day in **processed data** | `future_return_data` for ex-post GT only |
+```powershell
+python examples/live/run_live_eval.py --mock --force-refresh --run-preprocess `
+  --start 2026-07-16 --end 2026-07-31 --rebalance daily
+```
 
-Without `--force-refresh --run-preprocess`, “today” means the newest date already
-in `datasets/processed/` (not necessarily the calendar today).
-
-Outputs land in `outputs/live/{provider}/{model}/{decision_date}/`:
-
-- `episode_trace.json`
-- `scores_lookback.json`
-- `scores_ex_post.json`
-- `recommended_weights.json`
-- `run_meta.json`
+Needs `FRED_API_KEY`. Slow (full Yahoo+FRED re-download + preprocess).
 
 ## Limits
 
-- EOD data; before US close, “today” may be the previous session
-- FRED macro series lag; news/SEC are not same-day
-- Dual scores measure **one decision**, not a multi-day NAV backtest
-- This does **not** remove all training-data leakage risk
+- Without refresh, dates must exist in `datasets/processed/`
+- EOD only; FRED/news lag
+- Rolling historical window ≠ waiting wall-clock for a live month
+- Dual scores are per decision; this is not a full NAV backtest report

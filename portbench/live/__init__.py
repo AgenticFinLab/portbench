@@ -1,5 +1,11 @@
-"""Live / same-day evaluation (yesterday decision, today ex-post GT)."""
+"""Live / rolling evaluation (dual-oracle CEPS)."""
 
-from .runner import LiveEvalRunner, LiveEvalResult
+from .runner import LiveEvalResult, LiveEvalRunner, LiveRangeResult
+from .schedule import SUPPORTED_FREQUENCIES
 
-__all__ = ["LiveEvalRunner", "LiveEvalResult"]
+__all__ = [
+    "LiveEvalRunner",
+    "LiveEvalResult",
+    "LiveRangeResult",
+    "SUPPORTED_FREQUENCIES",
+]
