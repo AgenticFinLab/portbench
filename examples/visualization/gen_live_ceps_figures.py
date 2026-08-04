@@ -1,8 +1,8 @@
 """
-Live-eval CEPS figures for the paper appendix (LLM models only).
+Live-eval figures for the paper appendix (LLM models only).
 
 Reads outputs/live/daily_*/*/balanced/range_summary.json and writes:
-  - live_ceps_bars.png
+  - live_stage_scores.png  (mean lookback S1--S5; not redundant with CEPS table)
   - live_ceps_daily.png
 into the paper figures/ directory (or --out-dir).
 """
@@ -30,18 +30,17 @@ MODEL_DISPLAY = {
     "kimi-k2.6": "Kimi-K2.6",
 }
 
-# Match short labels used in main tables where helpful
+# Rank by mean lookback CEPS (descending), matching Table tab:live_ceps
 MODEL_ORDER = [
-    "glm-5.1",
     "kimi-k2.6",
+    "glm-5.1",
     "qwen3.6-plus",
     "qwen3.6-35b-a3b",
     "qwen3.7-max",
     "hy3-preview",
 ]
 
-LOOKBACK_COLOR = "#1e3d6e"
-EXPOST_COLOR = "#7a9fc5"
+STAGES = ["S1", "S2", "S3", "S4", "S5"]
 LINE_COLORS = [
     "#1e3d6e",
     "#4a6fa5",
@@ -68,26 +67,48 @@ def _load_llm_summaries(live_root: Path) -> list[dict]:
     return rows
 
 
-def plot_bars(summaries: list[dict], out_path: Path) -> None:
+def _mean_stage_matrix(summaries: list[dict], models: list[str]) -> np.ndarray:
+    """models × stages mean lookback stage scores over episodes."""
+    by_model = {s["model"]: s for s in summaries}
+    mat = np.zeros((len(models), len(STAGES)))
+    for i, m in enumerate(models):
+        eps = by_model[m].get("episodes") or []
+        for j, stage in enumerate(STAGES):
+            vals = [
+                float(e["stage_scores_lookback"][stage])
+                for e in eps
+                if e.get("stage_scores_lookback")
+                and stage in e["stage_scores_lookback"]
+            ]
+            mat[i, j] = float(np.mean(vals)) if vals else np.nan
+    return mat
+
+
+def plot_stage_heatmap(summaries: list[dict], out_path: Path) -> None:
     apply_paper_style()
     by_model = {s["model"]: s for s in summaries}
     models = [m for m in MODEL_ORDER if m in by_model]
     labels = [MODEL_DISPLAY.get(m, m) for m in models]
-    lb = [float(by_model[m]["mean_ceps_lookback"]) for m in models]
-    ep = [float(by_model[m]["mean_ceps_ex_post"]) for m in models]
+    mat = _mean_stage_matrix(summaries, models)
 
-    x = np.arange(len(models))
-    width = 0.36
-    fig, ax = plt.subplots(figsize=(6.8, 3.2))
-    ax.bar(x - width / 2, lb, width, label="Lookback", color=LOOKBACK_COLOR, edgecolor="none")
-    ax.bar(x + width / 2, ep, width, label="Ex-post", color=EXPOST_COLOR, edgecolor="none")
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=20, ha="right")
-    ax.set_ylabel("Mean CEPS")
-    ax.set_ylim(0, max(max(lb), max(ep)) * 1.18)
-    ax.legend(frameon=False, loc="upper right")
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
+    fig, ax = plt.subplots(figsize=(6.8, 3.4))
+    im = ax.imshow(mat, aspect="auto", cmap="Blues", vmin=0.0, vmax=1.0)
+    ax.set_xticks(np.arange(len(STAGES)))
+    ax.set_xticklabels(STAGES)
+    ax.set_yticks(np.arange(len(models)))
+    ax.set_yticklabels(labels)
+    ax.set_xlabel("Pipeline stage (lookback oracle)")
+    for i in range(mat.shape[0]):
+        for j in range(mat.shape[1]):
+            val = mat[i, j]
+            if np.isnan(val):
+                continue
+            # Dark cells → white text
+            color = "white" if val >= 0.55 else "#1a1a1a"
+            ax.text(j, i, f"{val:.2f}", ha="center", va="center", fontsize=8, color=color)
+    cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    cbar.set_label("Mean stage score", fontsize=9)
+    cbar.ax.tick_params(labelsize=8)
     fig.tight_layout()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
@@ -116,7 +137,8 @@ def plot_daily(summaries: list[dict], out_path: Path) -> None:
     ax.set_xlabel("Decision date (2026)")
     ax.set_ylabel("CEPS (lookback)")
     ax.tick_params(axis="x", rotation=45)
-    ax.legend(frameon=False, ncol=2, fontsize=8, loc="lower left")
+    # Inside axes, upper-right, two columns
+    ax.legend(frameon=False, ncol=2, fontsize=8, loc="upper right")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     fig.tight_layout()
@@ -142,8 +164,13 @@ def main() -> int:
     summaries = _load_llm_summaries(live_root)
     if not summaries:
         raise SystemExit(f"No LLM range_summary.json under {live_root}")
-    plot_bars(summaries, out_dir / "live_ceps_bars.png")
+    plot_stage_heatmap(summaries, out_dir / "live_stage_scores.png")
     plot_daily(summaries, out_dir / "live_ceps_daily.png")
+    # Remove obsolete bars figure if present
+    old = out_dir / "live_ceps_bars.png"
+    if old.exists():
+        old.unlink()
+        print(f"removed {old}")
     return 0
 
 
