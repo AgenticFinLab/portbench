@@ -3,9 +3,10 @@ Concrete implementations of the five pipeline stages.
 
 Each stage:
   1. Implements compute_ground_truth() — deterministic rule-based ideal answer
-  2. Implements run()                 — two paths:
+  2. Implements run()                 — three paths:
        a. MockAgentAdapter: adds calibrated noise to ground truth (for testing)
-       b. Real LLM adapter: builds a prompt, calls adapter.complete(), parses JSON
+       b. BaselineStrategy: S1/S2 use ground truth; S3 calls allocate(snapshot)
+       c. Real LLM adapter: builds a prompt, calls adapter.complete(), parses JSON
   3. Implements score()              — stage-appropriate distance metric
 
 Prompt design principles:
@@ -48,6 +49,7 @@ from .prompts import (
     build_s3_prompt,
     build_format_correction_suffix,
 )
+from ..baselines.base import BaselineStrategy
 from .tools import get_tools
 from ..metrics.risk_metrics import var, max_drawdown
 from ..metrics.base import MetricsConfig
@@ -600,6 +602,15 @@ class S1MarketInterpretation(PipelineStage):
                 macro_summary=gt.macro_summary,
                 raw_llm_output=self.adapter.complete(""),
             )
+        if isinstance(self.adapter, BaselineStrategy):
+            # Baselines only allocate at S3; S1 uses rule-based GT.
+            return S1Output(
+                asset_views=dict(gt.asset_views),
+                detected_regime=gt.detected_regime,
+                confidence=gt.confidence,
+                macro_summary=gt.macro_summary,
+                raw_llm_output=self.adapter.complete(""),
+            )
 
         # ----------------------------------------------------------------
         # Real LLM path
@@ -738,6 +749,16 @@ class S2SignalGeneration(PipelineStage):
             return S2Output(
                 signals=noisy_signals,
                 strengths=gt.strengths,
+                raw_llm_output=self.adapter.complete(""),
+            )
+        if isinstance(self.adapter, BaselineStrategy):
+            # Baselines only allocate at S3; S2 uses rule-based GT.
+            gt = self._views_to_signals(
+                S1MarketInterpretation().compute_ground_truth(snapshot)
+            )
+            return S2Output(
+                signals=dict(gt.signals),
+                strengths=dict(gt.strengths),
                 raw_llm_output=self.adapter.complete(""),
             )
 
@@ -914,6 +935,29 @@ class S3WeightOptimization(PipelineStage):
             if total > 0:
                 noisy = {a: round(w / total, 4) for a, w in noisy.items()}
             return S3Output(weights=noisy, raw_llm_output=self.adapter.complete(""))
+        if isinstance(self.adapter, BaselineStrategy):
+            # Direct allocate() — same contract as SandboxEngine (use_pipeline=False).
+            allocated = self.adapter.allocate(snapshot) or {}
+            assets = list(s2.signals.keys()) or list(allocated.keys())
+            raw_weights = {
+                a: max(0.0, float(allocated.get(a, 0.0))) for a in assets
+            }
+            for a, w in allocated.items():
+                if a not in raw_weights:
+                    try:
+                        raw_weights[a] = max(0.0, float(w))
+                    except (TypeError, ValueError):
+                        raw_weights[a] = 0.0
+            total = sum(raw_weights.values())
+            if total <= 0:
+                n = max(len(assets), 1)
+                weights = {a: round(1.0 / n, 4) for a in assets}
+            else:
+                weights = {a: round(w / total, 4) for a, w in raw_weights.items()}
+            return S3Output(
+                weights=weights,
+                raw_llm_output=self.adapter.complete(""),
+            )
 
         # ----------------------------------------------------------------
         # Real LLM path

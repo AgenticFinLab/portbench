@@ -12,6 +12,7 @@ from ..agent_eval import build_default_pipeline
 from ..agent_eval.base import StageID
 from ..agent_eval.investor_profiles import PROFILES
 from ..agent_eval.mock_agent import MockAgentAdapter
+from ..baselines.base import BaselineStrategy
 from ..qa_builder.processed_data import ProcessedDataProvider
 from ..sandbox.snapshot_builder import SnapshotBuilder
 from .dates import (
@@ -152,7 +153,10 @@ def _is_day_complete(out_dir: Path) -> bool:
         ep = json.loads((out_dir / "scores_ex_post.json").read_text(encoding="utf-8"))
     except Exception:
         return False
-    return lb.get("ceps") is not None and ep.get("ceps") is not None
+    # LLM days: both CEPS present. Baselines: CEPS explicitly N/A (weights only).
+    if lb.get("ceps") is not None and ep.get("ceps") is not None:
+        return True
+    return lb.get("ceps_applicable") is False and ep.get("ceps_applicable") is False
 
 
 def _load_existing_day_result(
@@ -376,19 +380,31 @@ class LiveEvalRunner:
             )
 
         prof = PROFILES.get(profile) or PROFILES["balanced"]
+        is_baseline = isinstance(adapter, BaselineStrategy)
         pipeline = build_default_pipeline(
             adapter, profile=prof, oracle_mode="lookback"
         )
         episode = pipeline.run_episode(snapshot)
-        scores = dual_score(
-            snapshot,
-            episode.stage_outputs,
-            profile=prof,
-            propagation_weight=self.propagation_weight,
-            oracle_modes=["lookback", "ex_post"],
-        )
         s3_out = episode.stage_outputs.get(StageID.S3_WEIGHT_OPTIMIZATION)
         recommended = dict(getattr(s3_out, "weights", {}) or {})
+        if is_baseline:
+            # Align with main experiments: baselines produce allocations only;
+            # CEPS is an LLM pipeline metric and is not applicable.
+            na = {
+                "ceps": None,
+                "ceps_applicable": False,
+                "stage_scores": {},
+                "note": "Baseline strategies are not scored with CEPS.",
+            }
+            scores = {"lookback": dict(na), "ex_post": dict(na)}
+        else:
+            scores = dual_score(
+                snapshot,
+                episode.stage_outputs,
+                profile=prof,
+                propagation_weight=self.propagation_weight,
+                oracle_modes=["lookback", "ex_post"],
+            )
 
         out_dir = _day_output_dir(
             self.output_root,
@@ -409,6 +425,7 @@ class LiveEvalRunner:
             "profile": profile,
             "n_assets": len(weights),
             "future_return_assets": list(snapshot.future_return_data.keys()),
+            "ceps_applicable": not is_baseline,
             "notes": [
                 "Model sees only information available on decision_date.",
                 "future_return_data through realization_date is used only for ex_post scoring.",
@@ -666,10 +683,17 @@ class LiveEvalRunner:
                 {
                     "decision_date": decision.isoformat(),
                     "realization_date": realization.isoformat(),
-                    "ceps_lookback": result.scores["lookback"]["ceps"],
-                    "ceps_ex_post": result.scores["ex_post"]["ceps"],
-                    "stage_scores_lookback": result.scores["lookback"]["stage_scores"],
-                    "stage_scores_ex_post": result.scores["ex_post"]["stage_scores"],
+                    "ceps_lookback": result.scores["lookback"].get("ceps"),
+                    "ceps_ex_post": result.scores["ex_post"].get("ceps"),
+                    "stage_scores_lookback": result.scores["lookback"].get(
+                        "stage_scores", {}
+                    ),
+                    "stage_scores_ex_post": result.scores["ex_post"].get(
+                        "stage_scores", {}
+                    ),
+                    "ceps_applicable": result.scores["lookback"].get(
+                        "ceps_applicable", True
+                    ),
                     "skipped_existing": bool(
                         result.meta.get("skipped_existing", False)
                     ),
@@ -686,6 +710,8 @@ class LiveEvalRunner:
             / profile
         )
         out_root.mkdir(parents=True, exist_ok=True)
+        lb_vals = [r["ceps_lookback"] for r in rows if r["ceps_lookback"] is not None]
+        ep_vals = [r["ceps_ex_post"] for r in rows if r["ceps_ex_post"] is not None]
         summary = {
             "start": start.isoformat(),
             "end": end.isoformat(),
@@ -695,15 +721,12 @@ class LiveEvalRunner:
             "profile": profile,
             "n_episodes": len(episodes),
             "n_skipped_existing": n_skipped,
-            "mean_ceps_lookback": round(
-                sum(r["ceps_lookback"] for r in rows) / len(rows), 4
-            )
-            if rows
+            "ceps_applicable": bool(lb_vals) or bool(ep_vals),
+            "mean_ceps_lookback": round(sum(lb_vals) / len(lb_vals), 4)
+            if lb_vals
             else None,
-            "mean_ceps_ex_post": round(
-                sum(r["ceps_ex_post"] for r in rows) / len(rows), 4
-            )
-            if rows
+            "mean_ceps_ex_post": round(sum(ep_vals) / len(ep_vals), 4)
+            if ep_vals
             else None,
             "data_coverage": cov_meta,
             "episodes": rows,
@@ -713,6 +736,7 @@ class LiveEvalRunner:
                 "Main paper uses monthly; daily is for faster live-capability demos.",
                 "If requested dates exceed local data, Yahoo/FRED are auto-refreshed.",
                 "skip_existing reuses complete decision-day folders (no LLM re-call).",
+                "Baseline strategies emit weights only; CEPS is not applicable.",
             ],
         }
         summary_path = out_root / "range_summary.json"
