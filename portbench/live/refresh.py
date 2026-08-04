@@ -22,14 +22,15 @@ def refresh_yahoo_incremental(
     base_dir: str = "datasets",
     start_date: str = "2015-01-01",
     needed_through: Optional[date] = None,
-    sleep_s: float = 2.0,
+    sleep_s: float = 0.5,
 ) -> dict:
     """
     Update Yahoo tickers that are missing or end before ``needed_through``.
 
     Unlike ``download_all(force=True)``, this does **not** re-download every
-    ticker from scratch — that triggers Yahoo rate limits. Batch experiments
-    never hit Yahoo; they only read ``datasets/processed/``.
+    ticker from scratch — that triggers Yahoo rate limits. ``YahooCollector``
+    falls back to AKShare when Yahoo fails. Batch experiments never hit Yahoo;
+    they only read ``datasets/processed/``.
     """
     from ..data_collect.yahoo import YAHOO_TICKERS, YahooCollector
 
@@ -61,10 +62,14 @@ def refresh_yahoo_incremental(
             failed += 1
             msg = str(e)
             print(f"[live.refresh] Failed {symbol}: {msg}")
-            # Back off hard on rate limits instead of blasting the next ticker
+            # YahooCollector already falls back to AKShare; only back off if
+            # both sources failed and the error still looks like Yahoo rate limit.
             if "Rate limited" in msg or "Too Many Requests" in msg:
-                print("[live.refresh] Yahoo rate-limited; sleeping 60s before continuing...")
-                time.sleep(60)
+                print(
+                    "[live.refresh] Still rate-limited after fallback; "
+                    "sleeping 30s before continuing..."
+                )
+                time.sleep(30)
 
     return {
         "downloaded": downloaded,

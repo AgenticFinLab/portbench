@@ -247,66 +247,100 @@ class YahooCollector(DataCollector):
 
         print(f"Downloading {dataset_id}...")
 
+        df: Optional[pd.DataFrame] = None
+        via = "yahoo"
+        yahoo_error: Optional[BaseException] = None
+
         # Download with retry
         max_retries = 3
         retry_delay = 5
 
+        from .akshare_fallback import is_yahoo_rate_limit_error
+
         for attempt in range(max_retries):
             try:
                 ticker = yf.Ticker(dataset_id)
-                df = ticker.history(
+                hist = ticker.history(
                     start=self.start_date,
                     end=self.end_date,
                     auto_adjust=True,
                 )
-                break
+                if hist is not None and not hist.empty:
+                    df = hist.reset_index().rename(columns={"Date": "date"})
+                    columns_map = {
+                        "date": "date",
+                        "Open": "open",
+                        "High": "high",
+                        "Low": "low",
+                        "Close": "close",
+                        "Volume": "volume",
+                    }
+                    df = df[[c for c in columns_map if c in df.columns]]
+                    df = df.rename(columns=columns_map)
+                    df["date"] = pd.to_datetime(df["date"]).dt.tz_localize(None)
+                    df = df.dropna()
+                    if not df.empty:
+                        break
+                yahoo_error = ValueError(f"No data returned for ticker {dataset_id}")
             except Exception as e:
-                if attempt < max_retries - 1:
-                    print(f"  Attempt {attempt + 1} failed: {e}")
-                    print(f"  Retrying in {retry_delay} seconds...")
-                    time.sleep(retry_delay)
-                    retry_delay *= 2
-                else:
-                    raise
+                yahoo_error = e
+                # Rate limits rarely clear in seconds — fall through to AKShare
+                if is_yahoo_rate_limit_error(e):
+                    print(f"  Yahoo rate-limited: {e}")
+                    break
+            if attempt < max_retries - 1:
+                print(f"  Attempt {attempt + 1} failed: {yahoo_error}")
+                print(f"  Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                retry_delay *= 2
 
-        # Validate data
         if df is None or df.empty:
-            raise ValueError(f"No data returned for ticker {dataset_id}")
+            from .akshare_fallback import fetch_us_ohlcv, merge_ohlcv
 
-        # Reset index to make date a column
-        df = df.reset_index()
-        df = df.rename(columns={"Date": "date"})
+            print(
+                f"  Yahoo unavailable for {dataset_id}"
+                + (f" ({yahoo_error})" if yahoo_error else "")
+                + "; trying AKShare fallback..."
+            )
+            try:
+                ak_df = fetch_us_ohlcv(
+                    dataset_id,
+                    start_date=self.start_date,
+                    end_date=self.end_date,
+                )
+            except Exception as ak_err:
+                raise RuntimeError(
+                    f"Yahoo and AKShare both failed for {dataset_id}: "
+                    f"yahoo={yahoo_error}; akshare={ak_err}"
+                ) from ak_err
 
-        # Select and rename columns to standard OHLCV format
-        columns_map = {
-            "date": "date",
-            "Open": "open",
-            "High": "high",
-            "Low": "low",
-            "Close": "close",
-            "Volume": "volume",
-        }
-        df = df[[c for c in columns_map.keys() if c in df.columns]]
-        df = df.rename(columns=columns_map)
-
-        # Convert date to datetime and drop NaN
-        df["date"] = pd.to_datetime(df["date"]).dt.tz_localize(None)
-        df = df.dropna()
+            existing = None
+            if target_file.exists():
+                try:
+                    existing = pd.read_csv(target_file)
+                except Exception:
+                    existing = None
+            df = merge_ohlcv(existing, ak_df)
+            via = "akshare"
 
         # Save to CSV
         df.to_csv(target_file, index=False)
-        print(f"  Saved to: {target_file} ({len(df)} rows)")
+        src_note = f" (via {via})" if via != "yahoo" else ""
+        print(f"  Saved to: {target_file} ({len(df)} rows){src_note}")
 
         # Update metadata
         start_date = df["date"].min().strftime("%Y-%m-%d") if len(df) > 0 else None
         end_date = df["date"].max().strftime("%Y-%m-%d") if len(df) > 0 else None
+        meta_desc = description
+        if via == "akshare":
+            meta_desc = (description + " [akshare fallback]").strip()
 
         self.update_metadata(
             DatasetMetadata(
                 dataset_id=dataset_id,
                 asset_class=asset_class.value,
                 source=self.source_name,
-                description=description,
+                description=meta_desc,
                 file_path=str(target_file),
                 download_time=datetime.now().isoformat(),
                 data_type=DataType.NUMERIC.value,
