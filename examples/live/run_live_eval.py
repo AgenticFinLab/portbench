@@ -236,17 +236,19 @@ def main() -> int:
                     }
                 )
             else:
-                print(
-                    f"  CEPS lookback={result.scores['lookback']['ceps']} "
-                    f"ex_post={result.scores['ex_post']['ceps']}"
-                )
+                lb = result.scores["lookback"].get("ceps")
+                ep = result.scores["ex_post"].get("ceps")
+                if lb is None and ep is None:
+                    print("  CEPS=N/A (baseline weights only)")
+                else:
+                    print(f"  CEPS lookback={lb} ex_post={ep}")
                 batch_rows.append(
                     {
                         "job": label,
                         "ok": True,
                         "output_dir": result.output_dir,
-                        "ceps_lookback": result.scores["lookback"]["ceps"],
-                        "ceps_ex_post": result.scores["ex_post"]["ceps"],
+                        "ceps_lookback": lb,
+                        "ceps_ex_post": ep,
                     }
                 )
         except Exception as exc:
