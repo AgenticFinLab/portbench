@@ -207,11 +207,21 @@ class LiveEvalRunner:
 
         return data, meta
 
-    def _build_adapter(self, provider, model, mock):
+    def _build_adapter(
+        self,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        mock: bool = False,
+        baseline: Optional[str] = None,
+    ):
+        from ..experiments.providers import build_adapter, build_baseline
+
+        if baseline:
+            return build_baseline(baseline), "baseline", baseline
         if mock or provider == "mock":
             return MockAgentAdapter(noise_level=0.15, seed=42), "mock", "mock"
-        from ..experiments.providers import build_adapter
-
+        if not provider:
+            raise ValueError("provider is required when not using mock/baseline")
         adapter = build_adapter(provider, model=model)
         return adapter, provider, model or provider
 
@@ -329,6 +339,7 @@ class LiveEvalRunner:
         skip_preprocess: bool = True,
         assets: Optional[list[str]] = None,
         rebalance: str = "daily",
+        baseline: Optional[str] = None,
     ) -> LiveEvalResult:
         """Single decision → next-period realization (default: yesterday → today)."""
         needed = coverage_needed_through(
@@ -361,7 +372,7 @@ class LiveEvalRunner:
             data, asset_list, lookback_days=self.lookback_days, asset_class_map=acm
         )
         adapter, provider_name, model_name = self._build_adapter(
-            provider, model, mock
+            provider=provider, model=model, mock=mock, baseline=baseline
         )
         result = self._run_one_pair(
             data=data,
@@ -395,6 +406,7 @@ class LiveEvalRunner:
         skip_preprocess: bool = True,
         assets: Optional[list[str]] = None,
         carry_weights: bool = True,
+        baseline: Optional[str] = None,
     ) -> LiveRangeResult:
         """
         Rolling live eval over [start, end] at the given rebalance frequency.
@@ -449,7 +461,7 @@ class LiveEvalRunner:
             data, asset_list, lookback_days=self.lookback_days, asset_class_map=acm
         )
         adapter, provider_name, model_name = self._build_adapter(
-            provider, model, mock
+            provider=provider, model=model, mock=mock, baseline=baseline
         )
 
         tag = f"{freq}_{start.isoformat()}_{end.isoformat()}"

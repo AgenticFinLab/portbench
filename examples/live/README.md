@@ -6,6 +6,25 @@ next rebalance).
 
 Core: `portbench/live/`. This folder is only a CLI.
 
+## Config YAML + CLI
+
+Default config: [`configs/live/default.yaml`](../../configs/live/default.yaml)
+
+`models` / `profiles` match [`configs/experiments/default.yaml`](../../configs/experiments/default.yaml)
+(10 LLMs + 6 baselines × 3 profiles). Running with no flags sweeps that full grid.
+
+```powershell
+python examples/live/run_live_eval.py
+# or:
+python examples/live/run_live_eval.py --config configs/live/default.yaml
+```
+
+CLI overrides / filters, e.g. one model:
+
+```powershell
+python examples/live/run_live_eval.py --provider dashscope --model qwen3.7-max --profile balanced
+```
+
 ## Data coverage (auto-refresh)
 
 Live reads `datasets/processed/` first. If the requested dates go **beyond** the

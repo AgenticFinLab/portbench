@@ -1,16 +1,44 @@
-# Live / rolling eval defaults
+# Live / rolling eval — models/profiles aligned with configs/experiments/default.yaml
+# CLI flags override fields below. examples/live/run_live_eval.py reads this file.
 
-provider: mock          # mock | dashscope | ark | ...
-model: null             # null → use {PREFIX}_MODEL from .env
-profile: balanced
+# Same LLM + baseline set as experiments/default.yaml
+models:
+  - provider: tencent
+    model: hy3-preview
+  - provider: deepseek
+    model: deepseek-v4-pro
+  # - provider: deepseek
+  #   model: deepseek-v4-flash
+  - provider: ark
+    model: doubao-seed-2-0-pro-260215
+  - provider: ark
+    model: doubao-seed-2-0-lite-260215
+  - provider: dashscope
+    model: qwen3.7-max
+  - provider: dashscope
+    model: qwen3.6-plus
+  - provider: dashscope
+    model: kimi-k2.6
+  - provider: dashscope
+    model: glm-5.1
+  - provider: dashscope
+    model: qwen3.6-35b-a3b
+  - baseline: equal_weight
+  - baseline: risk_parity
+  - baseline: sixty_forty
+  - baseline: cov_risk_parity
+  - baseline: min_variance
+  - baseline: black_litterman
+
+# profiles: [conservative, balanced, aggressive]
+profiles: [balanced]
 
 # daily | weekly | monthly | quarterly | yearly
-# Main paper is monthly; daily is for short-window live-capability demos.
 rebalance: daily
 
-# Example: last two weeks of July 2025 (data currently available without refresh)
-start: "2025-07-16"
-end: "2025-07-31"
+# Rolling window (both set → range mode)
+start: "2026-07-16"
+end: "2026-07-31"
 
 oracle_modes: [lookback, ex_post]
 
@@ -21,6 +49,8 @@ lookback_days: 60
 initial_nav: 1000000
 propagation_weight: 0.1
 
-# Auto-refresh when requested dates exceed local processed max (default on in CLI).
 auto_refresh: true
 force_refresh: false
+
+# Optional: isolate failures and continue (like batch experiments)
+on_error: isolate
