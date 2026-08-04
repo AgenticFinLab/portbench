@@ -90,3 +90,55 @@ def calendar_forward_days(decision: date, realization: date) -> int:
     """Calendar-day span for SnapshotBuilder.forward_days covering realization."""
     delta = (realization - decision).days
     return max(1, delta + 2)
+
+
+def last_weekday_on_or_before(d: date) -> date:
+    """Simple weekday floor (Sat/Sun → Friday). Not a full exchange calendar."""
+    out = d
+    while out.weekday() >= 5:
+        out -= timedelta(days=1)
+    return out
+
+
+def local_data_max_date(provider, anchor_asset: str = "SPY") -> date:
+    """Latest trading date present in local processed data for ``anchor_asset``."""
+    days = available_trading_days(provider, anchor_asset=anchor_asset)
+    return days[-1]
+
+
+def coverage_needed_through(
+    *,
+    as_of_today: Optional[date] = None,
+    range_end: Optional[date] = None,
+    decision_date: Optional[date] = None,
+) -> date:
+    """
+    Latest calendar date that local data must cover for this live run.
+
+    - Range mode: need through ``range_end`` (plus caller may require one more
+      trading day for GT; we refresh if ``range_end`` itself is missing).
+    - Single-step with explicit as_of/decision: need through that date.
+    - Default "today" mode: need through the last weekday on/before today.
+    """
+    if range_end is not None:
+        return _to_date(range_end)
+    if as_of_today is not None:
+        return _to_date(as_of_today)
+    if decision_date is not None:
+        # Need decision + at least the next session for ex-post GT.
+        return _to_date(decision_date) + timedelta(days=3)
+    return last_weekday_on_or_before(date.today())
+
+
+def is_coverage_insufficient(
+    provider,
+    needed_through: date,
+    *,
+    anchor_asset: str = "SPY",
+) -> bool:
+    """True when local max date is strictly before ``needed_through``."""
+    try:
+        local_max = local_data_max_date(provider, anchor_asset=anchor_asset)
+    except RuntimeError:
+        return True
+    return local_max < _to_date(needed_through)

@@ -209,6 +209,10 @@ __marimo__/
 
 # Datasets
 datasets/
-
-# Paper appraisal
-docs/paper_appraisal/papers
+outputs/
+EXPERIMENTS*/
+figures/
+.claude/
+CLAUDE.md
+scripts/
+rebuttal-plan/

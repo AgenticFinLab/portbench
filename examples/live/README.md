@@ -6,37 +6,56 @@ next rebalance).
 
 Core: `portbench/live/`. This folder is only a CLI.
 
+## Data coverage (auto-refresh)
+
+Live reads `datasets/processed/` first. If the requested dates go **beyond** the
+local max trading day (or you run “today” and local data is stale), the runner
+**automatically**:
+
+1. force-downloads Yahoo + FRED  
+2. runs preprocess  
+3. reloads processed data and continues  
+
+Needs `FRED_API_KEY`. Opt out with `--no-auto-refresh`. Force anytime with
+`--force-refresh`.
+
+```powershell
+# Today / latest session (auto-pulls if local data is behind)
+python examples/live/run_live_eval.py --mock
+python examples/live/run_live_eval.py --provider dashscope --model qwen3.7-max
+```
+
 ## Why daily (not only monthly)?
 
 Main paper pipeline is **monthly**. A true wall-clock monthly live wait is slow.
-For proving the benchmark has live-eval capability, use **daily** (or weekly)
-rebalance over a short historical window — e.g. the last two weeks of July —
-as if you had tested the model every day. Frequencies supported:
+For proving live-eval capability, use **daily** (or weekly) over a short window
+— e.g. the last two weeks of July. Frequencies:
 
 `daily | weekly | monthly | quarterly | yearly`
 
-## July last two weeks (daily) — recommended demo
-
-Processed data currently covers **2025-07** (not 2026-07 unless you refresh).
+## July last two weeks (daily)
 
 ```powershell
 cd D:\GitHub\portbench
 
-# 1) Smoke with mock (no API keys)
+# Mock
 python examples/live/run_live_eval.py --mock `
   --start 2025-07-16 --end 2025-07-31 --rebalance daily
 
-# 2) Real model (example)
+# Real model
 python examples/live/run_live_eval.py `
   --provider dashscope --model qwen3.7-max --profile balanced `
   --start 2025-07-16 --end 2025-07-31 --rebalance daily
 ```
 
+If you ask for a window newer than local data (e.g. 2026-07), refresh runs
+automatically before the episodes.
+
 Outputs:
 
 ```text
 outputs/live/daily_2025-07-16_2025-07-31/{provider}/{model}/{profile}/
-  range_summary.json          # mean CEPS + per-day rows
+  range_summary.json          # mean CEPS + per-day rows (+ data_coverage)
   YYYY-MM-DD/                 # one folder per decision date
     scores_lookback.json
     scores_ex_post.json
@@ -44,34 +63,15 @@ outputs/live/daily_2025-07-16_2025-07-31/{provider}/{model}/{profile}/
     episode_trace.json
 ```
 
-Each episode: decision on day \(D\), realization / ex-post GT on the next
-trading day after \(D\).
-
 ## Other frequencies
 
 ```powershell
-# Weekly over the same July window
 python examples/live/run_live_eval.py --mock --start 2025-07-16 --end 2025-07-31 --rebalance weekly
-
-# Monthly over Q1 2025 (closer to main-paper cadence)
 python examples/live/run_live_eval.py --mock --start 2025-01-01 --end 2025-03-31 --rebalance monthly
-
-# Single latest step only
-python examples/live/run_live_eval.py --mock
 ```
-
-## Refresh calendar-current data (e.g. July 2026)
-
-```powershell
-python examples/live/run_live_eval.py --mock --force-refresh --run-preprocess `
-  --start 2026-07-16 --end 2026-07-31 --rebalance daily
-```
-
-Needs `FRED_API_KEY`. Slow (full Yahoo+FRED re-download + preprocess).
 
 ## Limits
 
-- Without refresh, dates must exist in `datasets/processed/`
-- EOD only; FRED/news lag
-- Rolling historical window ≠ waiting wall-clock for a live month
-- Dual scores are per decision; this is not a full NAV backtest report
+- Auto-refresh is EOD Yahoo/FRED, not intraday streaming
+- Before US close, “today” may still be the previous session after refresh
+- FRED/news lag; dual scores are per decision, not a full NAV report

@@ -14,7 +14,14 @@ from ..agent_eval.investor_profiles import PROFILES
 from ..agent_eval.mock_agent import MockAgentAdapter
 from ..qa_builder.processed_data import ProcessedDataProvider
 from ..sandbox.snapshot_builder import SnapshotBuilder
-from .dates import available_trading_days, calendar_forward_days, resolve_live_dates
+from .dates import (
+    available_trading_days,
+    calendar_forward_days,
+    coverage_needed_through,
+    is_coverage_insufficient,
+    local_data_max_date,
+    resolve_live_dates,
+)
 from .dual_score import dual_score
 from .refresh import refresh_and_preprocess
 from .schedule import SUPPORTED_FREQUENCIES, decision_realization_pairs
@@ -138,15 +145,67 @@ class LiveEvalRunner:
         self.initial_nav = initial_nav
         self.propagation_weight = propagation_weight
 
-    def _maybe_refresh(self, force_refresh, skip_refresh, skip_preprocess):
-        if force_refresh or not skip_refresh:
+    def _load_provider(self) -> ProcessedDataProvider:
+        return ProcessedDataProvider(data_dir=self.data_dir, sec_dir=self.sec_dir)
+
+    def _ensure_data_coverage(
+        self,
+        *,
+        needed_through: date,
+        force_refresh: bool = False,
+        auto_refresh: bool = True,
+        skip_preprocess: bool = False,
+    ) -> tuple[ProcessedDataProvider, dict]:
+        """
+        Ensure local processed data covers ``needed_through``.
+
+        If coverage is missing (or ``force_refresh``), download Yahoo/FRED and
+        re-preprocess, then reload the provider.
+        """
+        meta: dict = {"auto_refreshed": False, "forced_refresh": False}
+        data = self._load_provider()
+        insufficient = is_coverage_insufficient(data, needed_through)
+
+        if force_refresh or (auto_refresh and insufficient):
+            try:
+                local_max = local_data_max_date(data)
+            except RuntimeError:
+                local_max = None
+            reason = "force_refresh" if force_refresh else "local_data_stale"
+            print(
+                f"[live] Local data max={local_max}, need through {needed_through} "
+                f"({reason}). Refreshing Yahoo/FRED + preprocess..."
+            )
             refresh_and_preprocess(
                 force=True,
                 skip_refresh=False,
-                skip_preprocess=skip_preprocess,
+                skip_preprocess=False,  # always rebuild processed after download
             )
-        elif not skip_preprocess:
-            refresh_and_preprocess(skip_refresh=True, skip_preprocess=False)
+            data = self._load_provider()
+            meta["auto_refreshed"] = not force_refresh
+            meta["forced_refresh"] = bool(force_refresh)
+            meta["local_max_before"] = (
+                local_max.isoformat() if local_max else None
+            )
+            try:
+                meta["local_max_after"] = local_data_max_date(data).isoformat()
+            except RuntimeError:
+                meta["local_max_after"] = None
+
+            if is_coverage_insufficient(data, needed_through):
+                after = meta.get("local_max_after")
+                raise RuntimeError(
+                    f"After refresh, local data still ends at {after}, "
+                    f"but need through {needed_through}. "
+                    "Check network / FRED_API_KEY / market holiday / EOD lag."
+                )
+        elif not skip_preprocess and insufficient:
+            # Explicit preprocess-only request with stale data: still refresh.
+            refresh_and_preprocess(force=True, skip_refresh=False, skip_preprocess=False)
+            data = self._load_provider()
+            meta["auto_refreshed"] = True
+
+        return data, meta
 
     def _build_adapter(self, provider, model, mock):
         if mock or provider == "mock":
@@ -265,14 +324,24 @@ class LiveEvalRunner:
         as_of_today: Optional[date] = None,
         mock: bool = False,
         force_refresh: bool = False,
+        auto_refresh: bool = True,
         skip_refresh: bool = True,
         skip_preprocess: bool = True,
         assets: Optional[list[str]] = None,
         rebalance: str = "daily",
     ) -> LiveEvalResult:
         """Single decision → next-period realization (default: yesterday → today)."""
-        self._maybe_refresh(force_refresh, skip_refresh, skip_preprocess)
-        data = ProcessedDataProvider(data_dir=self.data_dir, sec_dir=self.sec_dir)
+        needed = coverage_needed_through(
+            as_of_today=as_of_today,
+            decision_date=decision_date,
+        )
+        # skip_refresh=False means user asked to refresh (legacy CLI flag)
+        data, cov_meta = self._ensure_data_coverage(
+            needed_through=needed,
+            force_refresh=force_refresh or (not skip_refresh),
+            auto_refresh=auto_refresh,
+            skip_preprocess=skip_preprocess,
+        )
         decision, realization = resolve_live_dates(
             data,
             decision_date=decision_date,
@@ -294,7 +363,7 @@ class LiveEvalRunner:
         adapter, provider_name, model_name = self._build_adapter(
             provider, model, mock
         )
-        return self._run_one_pair(
+        result = self._run_one_pair(
             data=data,
             builder=builder,
             adapter=adapter,
@@ -307,6 +376,8 @@ class LiveEvalRunner:
             rebalance=rebalance,
             run_tag="single",
         )
+        result.meta["data_coverage"] = cov_meta
+        return result
 
     def run_range(
         self,
@@ -319,6 +390,7 @@ class LiveEvalRunner:
         profile: str = "balanced",
         mock: bool = False,
         force_refresh: bool = False,
+        auto_refresh: bool = True,
         skip_refresh: bool = True,
         skip_preprocess: bool = True,
         assets: Optional[list[str]] = None,
@@ -338,8 +410,14 @@ class LiveEvalRunner:
                 f"rebalance must be one of {SUPPORTED_FREQUENCIES}, got {rebalance!r}"
             )
 
-        self._maybe_refresh(force_refresh, skip_refresh, skip_preprocess)
-        data = ProcessedDataProvider(data_dir=self.data_dir, sec_dir=self.sec_dir)
+        # Need end + buffer so the last decision still has a realization day.
+        needed = coverage_needed_through(range_end=end + timedelta(days=5))
+        data, cov_meta = self._ensure_data_coverage(
+            needed_through=needed,
+            force_refresh=force_refresh or (not skip_refresh),
+            auto_refresh=auto_refresh,
+            skip_preprocess=skip_preprocess,
+        )
 
         # Pull enough calendar to cover GT after ``end``
         cal_start = start - timedelta(days=40)
@@ -431,11 +509,13 @@ class LiveEvalRunner:
             )
             if rows
             else None,
+            "data_coverage": cov_meta,
             "episodes": rows,
             "notes": [
                 "Simulated rolling live eval over a historical window.",
                 "Supports daily/weekly/monthly/quarterly/yearly rebalance.",
                 "Main paper uses monthly; daily is for faster live-capability demos.",
+                "If requested dates exceed local data, Yahoo/FRED are auto-refreshed.",
             ],
         }
         summary_path = out_root / "range_summary.json"

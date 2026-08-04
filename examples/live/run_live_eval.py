@@ -65,11 +65,16 @@ def main() -> int:
     )
     p.add_argument("--decision-date", default=None, help="Single-step decision date")
     p.add_argument("--as-of-today", default=None, help="Single-step realization date")
-    p.add_argument("--force-refresh", action="store_true", help="Re-download Yahoo+FRED")
     p.add_argument(
-        "--run-preprocess",
+        "--force-refresh",
         action="store_true",
-        help="Run preprocess_all after refresh / before eval",
+        help="Always re-download Yahoo+FRED + preprocess before eval",
+    )
+    p.add_argument(
+        "--no-auto-refresh",
+        action="store_true",
+        help="Do not auto-refresh when requested dates exceed local data "
+        "(default: auto-refresh + preprocess when coverage is missing)",
     )
     p.add_argument("--data-dir", default="datasets/processed")
     p.add_argument("--sec-dir", default="datasets/sec")
@@ -87,8 +92,9 @@ def main() -> int:
         profile=args.profile,
         mock=args.mock or args.provider == "mock",
         force_refresh=args.force_refresh,
-        skip_refresh=not args.force_refresh,
-        skip_preprocess=not args.run_preprocess,
+        auto_refresh=not args.no_auto_refresh,
+        skip_refresh=True,
+        skip_preprocess=True,
     )
 
     if args.start or args.end:
