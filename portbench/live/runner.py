@@ -112,6 +112,86 @@ def _extract_llm_io(pipeline, stage_outputs: dict) -> tuple[dict[str, str], dict
     return prompts, responses
 
 
+_DAY_COMPLETE_FILES = (
+    "run_meta.json",
+    "episode_trace.json",
+    "recommended_weights.json",
+    "scores_lookback.json",
+    "scores_ex_post.json",
+)
+
+
+def _day_output_dir(
+    output_root: Path,
+    *,
+    run_tag: str,
+    provider_name: str,
+    model_name: str,
+    profile: str,
+    decision: date,
+) -> Path:
+    return (
+        output_root
+        / run_tag
+        / provider_name
+        / model_name.replace("/", "-")
+        / profile
+        / decision.isoformat()
+    )
+
+
+def _is_day_complete(out_dir: Path) -> bool:
+    """True when a decision-day folder has usable scores (resume-safe)."""
+    if not out_dir.is_dir():
+        return False
+    for name in _DAY_COMPLETE_FILES:
+        if not (out_dir / name).exists():
+            return False
+    try:
+        lb = json.loads((out_dir / "scores_lookback.json").read_text(encoding="utf-8"))
+        ep = json.loads((out_dir / "scores_ex_post.json").read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    return lb.get("ceps") is not None and ep.get("ceps") is not None
+
+
+def _load_existing_day_result(
+    out_dir: Path,
+    *,
+    provider_name: str,
+    model_name: str,
+    profile: str,
+    rebalance: str,
+) -> LiveEvalResult:
+    """Rebuild LiveEvalResult from an on-disk decision-day folder."""
+    meta = json.loads((out_dir / "run_meta.json").read_text(encoding="utf-8"))
+    weights = json.loads(
+        (out_dir / "recommended_weights.json").read_text(encoding="utf-8")
+    )
+    scores = {
+        "lookback": json.loads(
+            (out_dir / "scores_lookback.json").read_text(encoding="utf-8")
+        ),
+        "ex_post": json.loads(
+            (out_dir / "scores_ex_post.json").read_text(encoding="utf-8")
+        ),
+    }
+    decision = date.fromisoformat(str(meta["decision_date"]))
+    realization = date.fromisoformat(str(meta["realization_date"]))
+    return LiveEvalResult(
+        decision_date=decision,
+        today=realization,
+        provider=provider_name,
+        model=model_name,
+        profile=profile,
+        recommended_weights=dict(weights),
+        scores=scores,
+        output_dir=str(out_dir),
+        meta={**meta, "skipped_existing": True},
+        rebalance=rebalance,
+    )
+
+
 def _trim_future_to_realization(snapshot, decision: date, realization: date):
     """Keep future_return_data rows in (decision, realization]."""
     if not snapshot.future_return_data:
@@ -310,13 +390,13 @@ class LiveEvalRunner:
         s3_out = episode.stage_outputs.get(StageID.S3_WEIGHT_OPTIMIZATION)
         recommended = dict(getattr(s3_out, "weights", {}) or {})
 
-        out_dir = (
-            self.output_root
-            / run_tag
-            / provider_name
-            / model_name.replace("/", "-")
-            / profile
-            / decision.isoformat()
+        out_dir = _day_output_dir(
+            self.output_root,
+            run_tag=run_tag,
+            provider_name=provider_name,
+            model_name=model_name,
+            profile=profile,
+            decision=decision,
         )
         out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -388,6 +468,7 @@ class LiveEvalRunner:
         auto_refresh: bool = True,
         skip_refresh: bool = True,
         skip_preprocess: bool = True,
+        skip_existing: bool = True,
         assets: Optional[list[str]] = None,
         rebalance: str = "daily",
         baseline: Optional[str] = None,
@@ -409,6 +490,31 @@ class LiveEvalRunner:
             decision_date=decision_date,
             as_of_today=as_of_today,
         )
+        # Resolve adapter names early for skip path output layout
+        adapter, provider_name, model_name = self._build_adapter(
+            provider=provider, model=model, mock=mock, baseline=baseline
+        )
+        if skip_existing:
+            out_dir = _day_output_dir(
+                self.output_root,
+                run_tag="single",
+                provider_name=provider_name,
+                model_name=model_name,
+                profile=profile,
+                decision=decision,
+            )
+            if _is_day_complete(out_dir):
+                print(f"[live] skip existing {out_dir}")
+                result = _load_existing_day_result(
+                    out_dir,
+                    provider_name=provider_name,
+                    model_name=model_name,
+                    profile=profile,
+                    rebalance=rebalance,
+                )
+                result.meta["data_coverage"] = cov_meta
+                return result
+
         asset_list = assets or _default_assets(data)
         n = len(asset_list)
         weights = {a: round(1.0 / n, 6) for a in asset_list}
@@ -421,9 +527,6 @@ class LiveEvalRunner:
                 acm = None
         builder = SnapshotBuilder(
             data, asset_list, lookback_days=self.lookback_days, asset_class_map=acm
-        )
-        adapter, provider_name, model_name = self._build_adapter(
-            provider=provider, model=model, mock=mock, baseline=baseline
         )
         result = self._run_one_pair(
             data=data,
@@ -455,6 +558,7 @@ class LiveEvalRunner:
         auto_refresh: bool = True,
         skip_refresh: bool = True,
         skip_preprocess: bool = True,
+        skip_existing: bool = True,
         assets: Optional[list[str]] = None,
         carry_weights: bool = True,
         baseline: Optional[str] = None,
@@ -466,6 +570,9 @@ class LiveEvalRunner:
         ex-post GT uses returns from D to the next rebalance date (daily ⇒ next
         trading day). This simulates "we ran live eval every period in the window"
         without waiting for a full month of wall-clock time.
+
+        When ``skip_existing`` is True (default), decision days that already have
+        complete score files under ``output_root`` are reused (no LLM re-call).
         """
         freq = rebalance.lower().strip()
         if freq not in SUPPORTED_FREQUENCIES:
@@ -520,20 +627,40 @@ class LiveEvalRunner:
         tag = f"{freq}_{start.isoformat()}_{end.isoformat()}"
         episodes: list[LiveEvalResult] = []
         rows = []
+        n_skipped = 0
         for decision, realization in pairs:
-            result = self._run_one_pair(
-                data=data,
-                builder=builder,
-                adapter=adapter,
+            out_dir = _day_output_dir(
+                self.output_root,
+                run_tag=tag,
                 provider_name=provider_name,
                 model_name=model_name,
                 profile=profile,
                 decision=decision,
-                realization=realization,
-                weights=weights,
-                rebalance=freq,
-                run_tag=tag,
             )
+            if skip_existing and _is_day_complete(out_dir):
+                print(f"[live] skip existing {decision.isoformat()}")
+                result = _load_existing_day_result(
+                    out_dir,
+                    provider_name=provider_name,
+                    model_name=model_name,
+                    profile=profile,
+                    rebalance=freq,
+                )
+                n_skipped += 1
+            else:
+                result = self._run_one_pair(
+                    data=data,
+                    builder=builder,
+                    adapter=adapter,
+                    provider_name=provider_name,
+                    model_name=model_name,
+                    profile=profile,
+                    decision=decision,
+                    realization=realization,
+                    weights=weights,
+                    rebalance=freq,
+                    run_tag=tag,
+                )
             episodes.append(result)
             rows.append(
                 {
@@ -543,6 +670,9 @@ class LiveEvalRunner:
                     "ceps_ex_post": result.scores["ex_post"]["ceps"],
                     "stage_scores_lookback": result.scores["lookback"]["stage_scores"],
                     "stage_scores_ex_post": result.scores["ex_post"]["stage_scores"],
+                    "skipped_existing": bool(
+                        result.meta.get("skipped_existing", False)
+                    ),
                 }
             )
             if carry_weights and result.recommended_weights:
@@ -564,6 +694,7 @@ class LiveEvalRunner:
             "model": model_name,
             "profile": profile,
             "n_episodes": len(episodes),
+            "n_skipped_existing": n_skipped,
             "mean_ceps_lookback": round(
                 sum(r["ceps_lookback"] for r in rows) / len(rows), 4
             )
@@ -581,6 +712,7 @@ class LiveEvalRunner:
                 "Supports daily/weekly/monthly/quarterly/yearly rebalance.",
                 "Main paper uses monthly; daily is for faster live-capability demos.",
                 "If requested dates exceed local data, Yahoo/FRED are auto-refreshed.",
+                "skip_existing reuses complete decision-day folders (no LLM re-call).",
             ],
         }
         summary_path = out_root / "range_summary.json"

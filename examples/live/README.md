@@ -39,6 +39,10 @@ Do **not** use `--force-refresh` unless necessary.
 
 Needs `FRED_API_KEY`. Opt out with `--no-auto-refresh`.
 
+**Resume:** by default `skip_existing: true` — if a decision-day folder already has
+complete scores (`scores_lookback.json` + `scores_ex_post.json` + …), that day is
+reused (no LLM re-call). Force re-run with `--no-skip-existing`.
+
 ```powershell
 # Today / latest session (auto-pulls if local data is behind)
 python examples/live/run_live_eval.py --mock

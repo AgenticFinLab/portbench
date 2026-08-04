@@ -256,13 +256,11 @@ class OpenAIAdapter(AgentAdapter):
         max_retries:    Number of retry attempts on transient errors.
         base_url:       Custom API base URL for non-OpenAI providers.
                         e.g. "https://dashscope.aliyuncs.com/compatible-mode/v1" (Qwen)
-                             "https://api.moonshot.cn/v1"                         (Kimi)
-                             "https://api.deepseek.com/v1"                        (DeepSeek)
         api_key_env:    Name of the environment variable holding the API key.
                         Defaults to "OPENAI_API_KEY".
         timeout:        Per-request timeout in seconds. Prevents hangs when an
                         upstream provider accepts the connection but never
-                        returns. Default 60s.
+                        returns. Default 180s.
     """
 
     def __init__(
@@ -275,7 +273,7 @@ class OpenAIAdapter(AgentAdapter):
         max_retries: int = 3,
         base_url: Optional[str] = None,
         api_key_env: str = "OPENAI_API_KEY",
-        timeout: float = 60.0,
+        timeout: float = 180.0,
     ):
         try:
             from openai import OpenAI

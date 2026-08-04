@@ -5,14 +5,14 @@
 models:
   - provider: tencent
     model: hy3-preview
-  - provider: deepseek
-    model: deepseek-v4-pro
+  # - provider: deepseek
+  #   model: deepseek-v4-pro
   # - provider: deepseek
   #   model: deepseek-v4-flash
-  - provider: ark
-    model: doubao-seed-2-0-pro-260215
-  - provider: ark
-    model: doubao-seed-2-0-lite-260215
+  # - provider: ark
+  #   model: doubao-seed-2-0-pro-260215
+  # - provider: ark
+  #   model: doubao-seed-2-0-lite-260215
   - provider: dashscope
     model: qwen3.7-max
   - provider: dashscope
@@ -53,6 +53,9 @@ propagation_weight: 0.1
 
 auto_refresh: true
 force_refresh: false
+
+# Resume: skip decision days that already have complete scores under output_root
+skip_existing: true
 
 # Optional: isolate failures and continue (like batch experiments)
 on_error: isolate

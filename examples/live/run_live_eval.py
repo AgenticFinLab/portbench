@@ -117,6 +117,12 @@ def main() -> int:
     p.add_argument("--as-of-today", default=None)
     p.add_argument("--force-refresh", action="store_true")
     p.add_argument("--no-auto-refresh", action="store_true")
+    p.add_argument(
+        "--skip-existing",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Skip decision days that already have complete scores (default: from YAML, else True)",
+    )
     p.add_argument("--data-dir", default=None)
     p.add_argument("--sec-dir", default=None)
     p.add_argument("--output-root", default=None)
@@ -152,12 +158,16 @@ def main() -> int:
     force_refresh = bool(args.force_refresh or cfg.get("force_refresh", False))
     auto_refresh = False if args.no_auto_refresh else bool(cfg.get("auto_refresh", True))
     on_error = str(cfg.get("on_error", "isolate"))
+    if args.skip_existing is None:
+        skip_existing = bool(cfg.get("skip_existing", True))
+    else:
+        skip_existing = bool(args.skip_existing)
 
     jobs = _resolve_jobs(cfg, args)
     print(f"[live] config={args.config}")
     print(
         f"[live] jobs={len(jobs)} rebalance={rebalance} start={start} end={end} "
-        f"on_error={on_error}"
+        f"on_error={on_error} skip_existing={skip_existing}"
     )
 
     runner = LiveEvalRunner(
@@ -185,6 +195,7 @@ def main() -> int:
             auto_refresh=auto_refresh and not refreshed_once,
             skip_refresh=True,
             skip_preprocess=True,
+            skip_existing=skip_existing,
         )
         try:
             if start or end:
@@ -210,6 +221,7 @@ def main() -> int:
                 )
                 print(
                     f"  episodes={summary.get('n_episodes')} "
+                    f"skipped={summary.get('n_skipped_existing', 0)} "
                     f"mean_lookback={summary.get('mean_ceps_lookback')} "
                     f"mean_ex_post={summary.get('mean_ceps_ex_post')}"
                 )
