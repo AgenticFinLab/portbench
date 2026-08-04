@@ -248,7 +248,6 @@ class YahooCollector(DataCollector):
         print(f"Downloading {dataset_id}...")
 
         df: Optional[pd.DataFrame] = None
-        via = "yahoo"
         yahoo_error: Optional[BaseException] = None
 
         # Download with retry
@@ -295,12 +294,14 @@ class YahooCollector(DataCollector):
                 retry_delay *= 2
 
         if df is None or df.empty:
-            from .akshare_fallback import fetch_us_ohlcv, merge_ohlcv
+            # AKShare overlay only — never rewrite datasets/yahoo/
+            from .akshare_fallback import fetch_us_ohlcv, save_extension
 
             print(
                 f"  Yahoo unavailable for {dataset_id}"
                 + (f" ({yahoo_error})" if yahoo_error else "")
-                + "; trying AKShare fallback..."
+                + "; writing AKShare overlay to datasets/akshare_ext/ "
+                "(yahoo raw left unchanged)..."
             )
             try:
                 ak_df = fetch_us_ohlcv(
@@ -314,33 +315,38 @@ class YahooCollector(DataCollector):
                     f"yahoo={yahoo_error}; akshare={ak_err}"
                 ) from ak_err
 
-            existing = None
+            after = None
             if target_file.exists():
                 try:
-                    existing = pd.read_csv(target_file)
+                    ydf = pd.read_csv(target_file, usecols=["date"])
+                    ydates = pd.to_datetime(ydf["date"], errors="coerce").dropna()
+                    if len(ydates):
+                        after = ydates.max()
                 except Exception:
-                    existing = None
-            df = merge_ohlcv(existing, ak_df)
-            via = "akshare"
+                    after = None
+            ext_file = save_extension(
+                dataset_id, asset_class, ak_df, after_date=after
+            )
+            print(
+                f"  Saved AKShare extension: {ext_file} "
+                f"(after={after.date() if after is not None else 'None'})"
+            )
+            time.sleep(0.4)
+            return ext_file
 
-        # Save to CSV
+        # Yahoo success — update canonical yahoo raw only
         df.to_csv(target_file, index=False)
-        src_note = f" (via {via})" if via != "yahoo" else ""
-        print(f"  Saved to: {target_file} ({len(df)} rows){src_note}")
+        print(f"  Saved to: {target_file} ({len(df)} rows)")
 
-        # Update metadata
         start_date = df["date"].min().strftime("%Y-%m-%d") if len(df) > 0 else None
         end_date = df["date"].max().strftime("%Y-%m-%d") if len(df) > 0 else None
-        meta_desc = description
-        if via == "akshare":
-            meta_desc = (description + " [akshare fallback]").strip()
 
         self.update_metadata(
             DatasetMetadata(
                 dataset_id=dataset_id,
                 asset_class=asset_class.value,
                 source=self.source_name,
-                description=meta_desc,
+                description=description,
                 file_path=str(target_file),
                 download_time=datetime.now().isoformat(),
                 data_type=DataType.NUMERIC.value,
@@ -352,9 +358,7 @@ class YahooCollector(DataCollector):
             )
         )
 
-        # Rate limiting
         time.sleep(1)
-
         return target_file
 
     def download_all(self, force: bool = False) -> dict[AssetClass, list[Path]]:

@@ -42,7 +42,9 @@ end: "2026-07-31"
 
 oracle_modes: [lookback, ex_post]
 
-data_dir: datasets/processed
+# Benchmark decade stays in datasets/processed; live uses overlay:
+# processed + datasets/akshare_ext → datasets/processed_live
+data_dir: datasets/processed_live
 sec_dir: datasets/sec
 output_root: outputs/live
 lookback_days: 60

@@ -1,12 +1,13 @@
-"""Thin wrappers around existing Yahoo/FRED collectors + preprocess."""
+"""Thin wrappers around Yahoo/FRED collectors + live processed overlay."""
 
 from __future__ import annotations
 
-import runpy
 import time
 from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
+
+import pandas as pd
 
 
 def _meta_end_date(collector, dataset_id: str) -> Optional[date]:
@@ -17,6 +18,19 @@ def _meta_end_date(collector, dataset_id: str) -> Optional[date]:
     return datetime.strptime(str(end)[:10], "%Y-%m-%d").date()
 
 
+def _file_end_date(path: Path) -> Optional[date]:
+    if not path.exists():
+        return None
+    try:
+        df = pd.read_csv(path, usecols=["date"])
+        dates = pd.to_datetime(df["date"], errors="coerce").dropna()
+        if dates.empty:
+            return None
+        return dates.max().date()
+    except Exception:
+        return None
+
+
 def refresh_yahoo_incremental(
     *,
     base_dir: str = "datasets",
@@ -25,13 +39,13 @@ def refresh_yahoo_incremental(
     sleep_s: float = 0.5,
 ) -> dict:
     """
-    Update Yahoo tickers that are missing or end before ``needed_through``.
+    Ensure coverage through ``needed_through``.
 
-    Unlike ``download_all(force=True)``, this does **not** re-download every
-    ticker from scratch — that triggers Yahoo rate limits. ``YahooCollector``
-    falls back to AKShare when Yahoo fails. Batch experiments never hit Yahoo;
-    they only read ``datasets/processed/``.
+    - Prefer Yahoo → writes ``datasets/yahoo/`` only on success.
+    - On Yahoo failure → AKShare overlay in ``datasets/akshare_ext/`` only
+      (never mutates yahoo raw or ``datasets/processed``).
     """
+    from ..data_collect.akshare_fallback import read_ext_end_date
     from ..data_collect.yahoo import YAHOO_TICKERS, YahooCollector
 
     yahoo = YahooCollector(base_dir=base_dir, start_date=start_date)
@@ -39,31 +53,36 @@ def refresh_yahoo_incremental(
     downloaded = 0
     skipped = 0
     failed = 0
+    via_akshare = 0
 
     for ticker in YAHOO_TICKERS:
         symbol = ticker.symbol
         target = yahoo.get_asset_dir(ticker.asset_class) / f"{symbol}.csv"
-        end = _meta_end_date(yahoo, symbol)
-        complete = yahoo._is_complete(target, symbol)
-        stale = (end is None) or (end < needed)
-        if complete and not stale:
+        y_end = _file_end_date(target) or _meta_end_date(yahoo, symbol)
+        ak_end = read_ext_end_date(symbol, ticker.asset_class)
+        if ak_end is not None:
+            ak_end_d = ak_end.date() if hasattr(ak_end, "date") else ak_end
+        else:
+            ak_end_d = None
+        effective = max(filter(None, [y_end, ak_end_d]), default=None)
+        if effective is not None and effective >= needed:
             skipped += 1
             continue
         try:
-            yahoo.download(
+            path = yahoo.download(
                 dataset_id=symbol,
                 asset_class=ticker.asset_class,
-                force=True,  # only for this stale/missing ticker
+                force=True,
                 description=ticker.description,
             )
             downloaded += 1
+            if "akshare_ext" in str(path).replace("\\", "/"):
+                via_akshare += 1
             time.sleep(sleep_s)
         except Exception as e:
             failed += 1
             msg = str(e)
             print(f"[live.refresh] Failed {symbol}: {msg}")
-            # YahooCollector already falls back to AKShare; only back off if
-            # both sources failed and the error still looks like Yahoo rate limit.
             if "Rate limited" in msg or "Too Many Requests" in msg:
                 print(
                     "[live.refresh] Still rate-limited after fallback; "
@@ -75,8 +94,9 @@ def refresh_yahoo_incremental(
         "downloaded": downloaded,
         "skipped": skipped,
         "failed": failed,
+        "via_akshare_ext": via_akshare,
         "needed_through": needed.isoformat(),
-        "mode": "incremental",
+        "mode": "incremental_overlay",
     }
 
 
@@ -104,17 +124,17 @@ def refresh_market_data(
     """
     Refresh market data for live eval.
 
-    - force=False (default / auto-refresh): incremental Yahoo (only stale/missing)
-      + FRED without re-downloading complete series.
-    - force=True (--force-refresh): full re-download (slow, rate-limit prone).
+    Never rewrites ``datasets/processed``. Yahoo failures go to akshare_ext.
+    ``force=True`` still only force-refreshes collectors; AKShare still
+    cannot overwrite yahoo raw.
     """
     if force:
         from ..data_collect.fred import FREDCollector
         from ..data_collect.yahoo import YahooCollector
 
         print(
-            "[live.refresh] force=True: full Yahoo+FRED re-download "
-            "(may hit Yahoo rate limits)."
+            "[live.refresh] force=True: Yahoo attempts full re-download; "
+            "failures still land in akshare_ext only."
         )
         yahoo = YahooCollector(base_dir=base_dir, start_date=start_date)
         fred = FREDCollector(base_dir=base_dir, start_date=start_date)
@@ -136,7 +156,9 @@ def refresh_market_data(
 
 
 def run_preprocess(repo_root: Optional[Path] = None) -> str:
-    """Run canonical preprocess_all.py via runpy."""
+    """Run canonical preprocess_all.py via runpy (writes datasets/processed)."""
+    import runpy
+
     root = Path(repo_root) if repo_root else Path.cwd()
     script = root / "examples" / "data_preprocess" / "preprocess_all.py"
     if not script.exists():
@@ -162,15 +184,61 @@ def refresh_and_preprocess(
     skip_preprocess: bool = False,
     repo_root: Optional[Path] = None,
     needed_through: Optional[date] = None,
+    restore_yahoo_from_processed: bool = True,
+    build_live_overlay: bool = True,
+    live_dir: str = "datasets/processed_live",
 ) -> dict:
-    """End-to-end data refresh for live eval (incremental by default)."""
-    summary: dict = {"refreshed": False, "preprocessed": False}
+    """
+    Live data prep that preserves the benchmark processed decade.
+
+    1. Optionally restore ``datasets/yahoo`` OHLCV from ``datasets/processed``
+       (repairs accidental AKShare overwrites).
+    2. Incremental Yahoo / AKShare-ext / FRED refresh.
+    3. Build ``datasets/processed_live`` = processed + akshare_ext
+       (does **not** rewrite ``datasets/processed``).
+
+    ``skip_preprocess`` is kept for CLI compat; full preprocess of the
+    decade is skipped by default in favor of the live overlay.
+    """
+    summary: dict = {
+        "refreshed": False,
+        "preprocessed": False,
+        "processed_dir_untouched": True,
+    }
+
+    if restore_yahoo_from_processed:
+        from .extend_processed import restore_yahoo_raw_from_processed
+
+        print(
+            "[live.refresh] Restoring datasets/yahoo from datasets/processed "
+            "(through 2025-12-31)..."
+        )
+        summary["yahoo_restore"] = restore_yahoo_raw_from_processed()
+
     if not skip_refresh:
         summary["download"] = refresh_market_data(
             force=force, needed_through=needed_through
         )
         summary["refreshed"] = True
-    if not skip_preprocess:
+
+    # Do not run full preprocess_all into datasets/processed by default.
+    if not skip_preprocess and not build_live_overlay:
         summary["processed_dir"] = run_preprocess(repo_root=repo_root)
         summary["preprocessed"] = True
+        summary["processed_dir_untouched"] = False
+
+    if build_live_overlay:
+        from .extend_processed import build_processed_live
+
+        print(
+            f"[live.refresh] Building {live_dir} from processed + akshare_ext "
+            "(processed left unchanged)..."
+        )
+        summary["processed_live"] = build_processed_live(
+            live_dir=live_dir,
+            needed_through=needed_through,
+            overwrite=True,
+        )
+        summary["preprocessed"] = True
+
     return summary

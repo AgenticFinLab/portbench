@@ -27,13 +27,15 @@ python examples/live/run_live_eval.py --provider dashscope --model qwen3.7-max -
 
 ## Data coverage (auto-refresh)
 
-Live reads `datasets/processed/` first. Batch experiments **never** call Yahoo —
-they only use local processed CSVs. Live auto-refresh is different: if dates go
-beyond local max, it does an **incremental** Yahoo/FRED update (only missing /
-stale tickers, sequential with sleep — **not** parallel), then preprocess.
+Batch experiments keep using frozen `datasets/processed/` (never call Yahoo).
 
-Do **not** use `--force-refresh` unless necessary: that re-downloads every ticker
-and often hits Yahoo `Too Many Requests`.
+Live uses **`datasets/processed_live/`**: a copy of `processed` plus an overlay
+from `datasets/akshare_ext/` (AKShare gap-fill when Yahoo is rate-limited).
+`datasets/yahoo/` and `datasets/processed/` are not rewritten by the AKShare
+fallback. Auto-refresh: incremental Yahoo attempt → AKShare ext → rebuild
+`processed_live`.
+
+Do **not** use `--force-refresh` unless necessary.
 
 Needs `FRED_API_KEY`. Opt out with `--no-auto-refresh`.
 

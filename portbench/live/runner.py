@@ -163,8 +163,28 @@ class LiveEvalRunner:
         re-preprocess, then reload the provider.
         """
         meta: dict = {"auto_refreshed": False, "forced_refresh": False}
-        data = self._load_provider()
-        insufficient = is_coverage_insufficient(data, needed_through)
+        live_dir = (
+            self.data_dir
+            if "processed_live" in self.data_dir.replace("\\", "/")
+            else "datasets/processed_live"
+        )
+
+        def _try_load():
+            try:
+                return self._load_provider()
+            except Exception:
+                # Fall back to benchmark processed for coverage probe only
+                if Path(self.data_dir) != Path("datasets/processed"):
+                    return ProcessedDataProvider(
+                        data_dir="datasets/processed", sec_dir=self.sec_dir
+                    )
+                raise
+
+        data = _try_load()
+        try:
+            insufficient = is_coverage_insufficient(data, needed_through)
+        except Exception:
+            insufficient = True
 
         if force_refresh or (auto_refresh and insufficient):
             try:
@@ -174,14 +194,16 @@ class LiveEvalRunner:
             reason = "force_refresh" if force_refresh else "local_data_stale"
             print(
                 f"[live] Local data max={local_max}, need through {needed_through} "
-                f"({reason}). Incremental Yahoo/FRED refresh + preprocess "
+                f"({reason}). Yahoo→akshare_ext overlay + build {live_dir} "
+                "(datasets/processed untouched)..."
             )
             refresh_and_preprocess(
-                # auto path: incremental only. Full force only when force_refresh=True.
                 force=bool(force_refresh),
                 skip_refresh=False,
                 skip_preprocess=False,
                 needed_through=needed_through,
+                build_live_overlay=True,
+                live_dir=live_dir,
             )
             data = self._load_provider()
             meta["auto_refreshed"] = not force_refresh
@@ -207,6 +229,8 @@ class LiveEvalRunner:
                 skip_refresh=False,
                 skip_preprocess=False,
                 needed_through=needed_through,
+                build_live_overlay=True,
+                live_dir=live_dir,
             )
             data = self._load_provider()
             meta["auto_refreshed"] = True
