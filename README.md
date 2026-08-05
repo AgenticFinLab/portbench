@@ -10,6 +10,7 @@ Existing financial benchmarks are limited because they either focus on single as
 2. **Dual-layer evaluation**: a static QA layer (6,269 pairs across 7 templates T1–T7) probes correlation-based financial reasoning [[PortBench-QA](https://huggingface.co/datasets/AgenticFinLab/PortBench-QA)], paired with a dynamic five-stage sandbox pipeline (market interpretation -> signal generation -> weight optimization -> execution -> risk monitoring) that evaluates the full sequential decision cycle under realistic market replay.
 3. **Novel evaluation metrics**: a two-layer correlation scoring criterion that penalizes intra-class concentration and rewards inter-class hedging in portfolio weights, together with CEPS (Cross-stage Error Propagation Score) that quantifies how errors compound across pipeline stages.
 4. **Stress regime and investor profile evaluation**: models are evaluated under three historical stress regimes (2015 China Shock, 2020 COVID Crash, 2022 Crypto Collapse) and three investor profiles (conservative, balanced, aggressive), testing both robustness under correlation shocks and alignment with investor-specific risk constraints.
+5. **Live evaluation**: besides historical monthly backtests, PortBench can run the same five-stage pipeline on up-to-date market data at daily/weekly/monthly frequency, so models are scored on days that are less likely to appear in pretraining.
 
 <p align="center">
   <img src="figures/intro_overview.png" width="100%" alt="PortBench Overview"/>
@@ -79,6 +80,9 @@ python examples/sandbox/run_backtest.py --data-provider mock
 # 5. Batch sweep across providers / profiles / stress scenarios
 python -m portbench.experiments --config configs/experiments/default.yaml --dry-run
 python -m portbench.experiments --config configs/experiments/default.yaml
+
+# 6. Live evaluation on recent market data (see configs/live/default.yaml)
+python examples/live/run_live_eval.py --config configs/live/default.yaml
 ```
 
 ## Module Documentation
@@ -96,6 +100,7 @@ Detailed module docs live in [`docs/modules/`](docs/modules/):
 | Sandbox Backtest | `portbench/sandbox/` | [sandbox.md](docs/modules/sandbox.md) |
 | Baselines | `portbench/baselines/` | [baselines.md](docs/modules/baselines.md) |
 | Batch Experiments | `portbench/experiments/` | [experiments.md](docs/modules/experiments.md) |
+| Live Evaluation | `portbench/live/` | [examples/live/README.md](examples/live/README.md) |
 | Correlation | `portbench/` (cross-cutting) | [correlation.md](docs/modules/correlation.md) |
 
 ## Module Overview
@@ -115,6 +120,8 @@ Detailed module docs live in [`docs/modules/`](docs/modules/):
 **`portbench/visualization/`** — Matplotlib helpers for generating dataset, regime, ranking, CEPS, stress, and QA-sample figures.
 
 **`portbench/experiments/`** — Batch experiment framework: YAML-driven sweeps over `(provider × model × profile × stress scenario)`, provider registry that reads `{PREFIX}_API_KEY/_BASE_URL/_MODEL` from `.env` (one line to add a new provider), per-`(model, profile)` failure isolation. Built-in providers: `dashscope`, `tencent`, `deepseek`, `glm`, `kimi`, `minimax`, `ark`, `openai`, `google`, `anthropic`. Built-in baselines: `equal_weight`, `sixty_forty`, `risk_parity`, `cov_risk_parity`, `min_variance`.
+
+**`portbench/live/`** — Live evaluation: refresh recent market data, run the five-stage pipeline decision-day by decision-day, and score with lookback / ex-post CEPS. Entry point: `examples/live/run_live_eval.py`.
 
 ---
 
