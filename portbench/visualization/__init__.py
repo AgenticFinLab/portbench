@@ -1,7 +1,13 @@
 """PortBench visualization module."""
 
 from .ceps_plots import plot_ceps_radar, plot_ceps_heatmap, plot_ceps_violin
-from .stress_plots import plot_stress_gate
+from .stress_plots import (
+    plot_stress_gate,
+    plot_stress_continuous_heatmap,
+    plot_stress_drawdown_bars,
+)
+from .cross_period_plots import plot_cross_period_vs_ew
+from .normal_vs_stress_plots import plot_normal_vs_stress_scatter
 from .ranking_plots import plot_risk_ranking
 from .dataset_plots import (
     plot_dataset_overview,
@@ -38,6 +44,10 @@ __all__ = [
     "plot_ceps_heatmap",
     "plot_ceps_violin",
     "plot_stress_gate",
+    "plot_stress_continuous_heatmap",
+    "plot_stress_drawdown_bars",
+    "plot_cross_period_vs_ew",
+    "plot_normal_vs_stress_scatter",
     "plot_risk_ranking",
     "plot_dataset_overview",
     "plot_regime_heatmap",

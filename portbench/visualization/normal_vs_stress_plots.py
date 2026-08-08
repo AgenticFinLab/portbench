@@ -1,10 +1,8 @@
 """
 Normal-vs-Stress CEPS scatter plot for PortBench analysis.
 
-Figure: plot_normal_vs_stress_scatter
-  X = CEPS_normal, Y = CEPS_stress (2022 Crypto Collapse).
-  y = x diagonal separates models that degrade vs improve under stress.
-  Gate failures are encoded as a thick red marker edge (no floating ✗).
+Pass = filled marker; fail = open marker.
+Model identity is a color-matched legend (no on-plot text overlapping points).
 """
 
 from __future__ import annotations
@@ -17,20 +15,13 @@ from matplotlib.figure import Figure
 from .style import apply_paper_style, abbrev_model_name
 from .risk_return_plots import _MODEL_COLOURS, _MODEL_MARKERS
 
-_QWEN_LEFT = {"Qwen3.6-35b", "Qwen3.6-Plus", "Qwen3.7-Max"}
-
 
 def plot_normal_vs_stress_scatter(
     points: list[dict],
     title: str = "Normal vs Stress CEPS — Conservative Profile",
-    figsize: tuple = (5, 5),
+    figsize: tuple = (3.5, 3.5),
 ) -> Figure:
-    """Scatter plot: X=CEPS_normal, Y=CEPS_stress (2022 Crypto), conservative profile.
-
-    y=x diagonal divides models that improve (above) vs degrade (below) under stress.
-    Same axis ranges ensure 45° diagonal. Failed stress-gate models use a thick
-    red edge on the marker instead of a separate ✗ annotation.
-    """
+    """Scatter: X=CEPS_normal, Y=CEPS_stress (2022 Crypto), conservative profile."""
     apply_paper_style()
 
     if not points:
@@ -41,133 +32,104 @@ def plot_normal_vs_stress_scatter(
     pad = 0.03
     lo = max(0.0, min(min(xs), min(ys)) - pad)
     hi = min(1.0, max(max(xs), max(ys)) + pad)
-    # Keep a readable lower floor so the panel is not overly sparse.
     lo = min(lo, 0.15)
     hi = max(hi, 0.55)
     diag = np.linspace(lo, hi, 50)
 
-    model_keys = sorted({p["model"] for p in points})
+    # Stable model order for legend (alphabetical by display name)
+    model_keys = sorted({p["model"] for p in points}, key=abbrev_model_name)
     model_meta: dict[str, dict] = {}
     for i, mk in enumerate(model_keys):
         model_meta[mk] = {
             "color": _MODEL_COLOURS[i % len(_MODEL_COLOURS)],
             "marker": _MODEL_MARKERS[i % len(_MODEL_MARKERS)],
+            "short": abbrev_model_name(mk),
         }
 
     fig, ax = plt.subplots(figsize=figsize)
     ax.set_facecolor("white")
-    ax.grid(True, linestyle="--", linewidth=0.35, alpha=0.4, color="#aaaaaa")
+    ax.grid(True, linestyle="-", linewidth=0.4, alpha=0.35, color="#b0c0d0")
 
-    ax.plot(
-        diag, diag, color="#777777", linestyle="--", linewidth=1.0, alpha=0.7, zorder=2
-    )
+    ax.fill_between(diag, diag - 0.02, diag + 0.02, color="#dfe6ee", alpha=0.45, zorder=1)
+    ax.plot(diag, diag, color="#666666", linestyle="--", linewidth=1.0, alpha=0.85, zorder=2)
 
-    for p in points:
-        short = abbrev_model_name(p["model"])
-        meta = model_meta[p["model"]]
-        x, y = p["ceps_normal"], p["ceps_crypto"]
-        failed = not p.get("stress_gate_passed", True)
-
-        # Failed gate: outer red halo (no floating ✗; works for any fill color).
-        if failed:
+    point_by_model = {p["model"]: p for p in points}
+    for mk in model_keys:
+        p = point_by_model[mk]
+        meta = model_meta[mk]
+        x, y = float(p["ceps_normal"]), float(p["ceps_crypto"])
+        passed = bool(p.get("stress_gate_passed", True))
+        if passed:
             ax.scatter(
-                x,
-                y,
-                facecolors="none",
-                marker="o",
-                s=280,
-                linewidths=2.0,
-                edgecolors="#e74c3c",
-                zorder=4,
-            )
-
-        ax.scatter(
-            x,
-            y,
-            c=meta["color"],
-            marker=meta["marker"],
-            s=120,
-            alpha=0.92,
-            linewidths=1.0,
-            edgecolors="#333333",
-            zorder=5,
-        )
-
-        # Qwen models: label on the left; others: label on the right.
-        if short in _QWEN_LEFT:
-            ax.annotate(
-                short,
-                (x, y),
-                textcoords="offset points",
-                xytext=(-10, 0),
-                fontsize=8,
-                color="#222222",
-                ha="right",
-                va="center",
-                zorder=6,
+                x, y, c=meta["color"], marker=meta["marker"], s=95,
+                alpha=0.95, linewidths=0.9, edgecolors="#222222", zorder=5,
             )
         else:
-            ax.annotate(
-                short,
-                (x, y),
-                textcoords="offset points",
-                xytext=(10, 0),
-                fontsize=8,
-                color="#222222",
-                ha="left",
-                va="center",
-                zorder=6,
+            ax.scatter(
+                x, y, facecolors="none", marker=meta["marker"], s=95,
+                linewidths=1.8, edgecolors=meta["color"], zorder=5,
             )
 
     ax.set_xlim(lo, hi)
     ax.set_ylim(lo, hi)
-    ax.set_xlabel("CEPS — Normal Period (Conservative)", fontsize=10)
-    ax.set_ylabel("CEPS — 2022 Crypto Collapse (Conservative)", fontsize=10)
+    ax.set_xlabel("CEPS — Normal (Conservative)", fontsize=9)
+    ax.set_ylabel("CEPS — 2022 Crypto (Conservative)", fontsize=9)
     ax.set_aspect("equal")
 
     ax.text(
+        lo + 0.68 * (hi - lo),
         lo + 0.62 * (hi - lo),
-        lo + 0.58 * (hi - lo),
         "y = x",
-        fontsize=8,
-        color="#777777",
-        rotation=38,
+        fontsize=7.5,
+        color="#666666",
+        rotation=40,
         ha="left",
         va="bottom",
     )
 
+    # Single combined legend (lower-right): gate encoding + model markers
     pass_handle = mlines.Line2D(
-        [],
-        [],
-        color="#888888",
-        marker="o",
-        linestyle="None",
-        markersize=8,
-        markerfacecolor="#bbbbbb",
-        markeredgecolor="#333333",
-        markeredgewidth=1.0,
+        [], [], color="#555555", marker="o", linestyle="None",
+        markersize=6.5, markerfacecolor="#888888", markeredgecolor="#222222",
         label="Passed gate",
     )
     fail_handle = mlines.Line2D(
-        [],
-        [],
-        color="#e74c3c",
-        marker="o",
-        linestyle="None",
-        markersize=11,
-        markerfacecolor="none",
-        markeredgecolor="#e74c3c",
-        markeredgewidth=2.0,
-        label="Failed gate",
+        [], [], color="#555555", marker="o", linestyle="None",
+        markersize=6.5, markerfacecolor="none", markeredgecolor="#555555",
+        markeredgewidth=1.5, label="Failed gate",
     )
+    model_handles = []
+    for mk in model_keys:
+        meta = model_meta[mk]
+        p = point_by_model[mk]
+        passed = bool(p.get("stress_gate_passed", True))
+        model_handles.append(
+            mlines.Line2D(
+                [], [],
+                color=meta["color"],
+                marker=meta["marker"],
+                linestyle="None",
+                markersize=6,
+                markerfacecolor=meta["color"] if passed else "none",
+                markeredgecolor=meta["color"] if not passed else "#222222",
+                markeredgewidth=1.1,
+                label=meta["short"],
+            )
+        )
+
     ax.legend(
-        handles=[pass_handle, fail_handle],
-        fontsize=8,
+        handles=[pass_handle, fail_handle] + model_handles,
+        fontsize=6,
         loc="lower right",
+        ncol=2,
         frameon=True,
         fancybox=False,
         edgecolor="#cccccc",
         framealpha=0.95,
+        borderpad=0.35,
+        labelspacing=0.28,
+        columnspacing=0.8,
+        handletextpad=0.35,
     )
 
     fig.tight_layout()

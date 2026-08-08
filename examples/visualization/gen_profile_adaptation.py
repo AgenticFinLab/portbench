@@ -2,9 +2,9 @@
 Generate Figure for Section 5.4 — Profile Adaptation as LLM Value.
 
 Model-centric grouped bar chart: each model has 3 bars (Conservative, Balanced,
-Aggressive), sorted left-to-right by adaptation variance (descending). Models
-with visibly uneven bar heights genuinely adapt their portfolios to different
-risk profiles; models with near-flat bars apply a uniform policy.
+Aggressive), sorted left-to-right by adaptation variance (descending). Whiskers
+show the Conservative–Aggressive PAS range. Near-identical DS Flash/Pro pairs
+share a brace annotation when PAS vectors match.
 
 Output: figures/analysis_profile_adaptation.png
 """
@@ -22,15 +22,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from portbench.visualization.style import apply_paper_style, PAPER_COLORS
 
-# ---------------------------------------------------------------------------
-# Model display names (matching paper conventions)
-# ---------------------------------------------------------------------------
 MODEL_DISPLAY = {
     "deepseek-v4-flash":    "DS-V4-\nFlash",
     "deepseek-v4-pro":      "DS-V4-\nPro",
     "qwen3.7-max":          "Qwen3.7-\nMax",
     "qwen3.6-plus":         "Qwen3.6-\nPlus",
-    "qwen3.6-35b-a3b":      "Qwen3.6-\n35B-A3B",
+    "qwen3.6-35b-a3b":      "Qwen3.6-\n35B",
     "glm-5.1":              "GLM-\n5.1",
     "doubao-seed-2-0-lite": "DB-2.0-\nLite",
     "doubao-seed-2-0-pro":  "DB-2.0-\nPro",
@@ -40,8 +37,6 @@ MODEL_DISPLAY = {
 
 PROFILE_LABELS = ["Conservative", "Balanced", "Aggressive"]
 PROFILE_KEYS = ["conservative", "balanced", "aggressive"]
-
-# Frost palette: dark navy, steel blue, light steel
 PROFILE_COLORS = ["#1e3d6e", "#4a6fa5", "#7a9fc5"]
 
 
@@ -75,16 +70,14 @@ def load_pas_data(experiments_dir: str) -> dict[str, dict[str, float]]:
 
 
 def make_figure(pas_data: dict, output_path: str) -> plt.Figure:
-    """Generate the profile adaptation bar chart."""
+    """Generate the profile adaptation bar chart with range whiskers."""
     apply_paper_style()
 
-    # Filter to LLM models only
     llm_models = {
         m: d for m, d in pas_data.items()
         if any(v > 0 for v in d.values()) and len(d) == 3
     }
 
-    # Sort by adaptation std (descending) — higher std = more adaptation
     def adaptation_std(item):
         scores = [item[1].get(k, 0.0) for k in PROFILE_KEYS]
         return np.std(scores)
@@ -95,23 +88,23 @@ def make_figure(pas_data: dict, output_path: str) -> plt.Figure:
     n_models = len(model_names)
     n_profiles = len(PROFILE_KEYS)
 
-    # Build score matrix
     score_matrix = np.zeros((n_models, n_profiles))
     for i, (_, scores) in enumerate(sorted_models):
         for j, key in enumerate(PROFILE_KEYS):
             score_matrix[i, j] = scores.get(key, 0.0)
 
     model_stds = score_matrix.std(axis=1, ddof=0)
+    cons = score_matrix[:, 0]
+    agg = score_matrix[:, 2]
 
-    # Plot
-    fig, ax = plt.subplots(figsize=(7.2, 3.6))
+    fig, ax = plt.subplots(figsize=(7.0, 3.5))
 
     bar_width = 0.22
     x = np.arange(n_models)
 
     for j in range(n_profiles):
         offset = (j - n_profiles / 2 + 0.5) * bar_width
-        bars = ax.bar(
+        ax.bar(
             x + offset,
             score_matrix[:, j],
             width=bar_width * 0.92,
@@ -123,32 +116,49 @@ def make_figure(pas_data: dict, output_path: str) -> plt.Figure:
             zorder=3,
         )
 
-    # Axis labels
+    # Conservative–Aggressive range whiskers (secondary spread cue)
+    for i in range(n_models):
+        lo, hi = min(cons[i], agg[i]), max(cons[i], agg[i])
+        ax.plot([i, i], [lo, hi], color="#333333", linewidth=1.0, alpha=0.55, zorder=4)
+        ax.plot([i - 0.08, i + 0.08], [lo, lo], color="#333333", linewidth=1.0, alpha=0.55, zorder=4)
+        ax.plot([i - 0.08, i + 0.08], [hi, hi], color="#333333", linewidth=1.0, alpha=0.55, zorder=4)
+
     ax.set_xticks(x)
-    ax.set_xticklabels(display_names, fontsize=7.5, linespacing=1.2)
+    ax.set_xticklabels(display_names, fontsize=7.5, linespacing=1.15)
     ax.set_ylabel("Profile Alignment Score (PAS)", fontsize=10)
-    ax.set_ylim(0, 1.13)
+    ax.set_ylim(0, 1.18)
     ax.set_xlim(-0.6, n_models - 0.4)
 
-    # Perfect alignment reference
     ax.axhline(1.0, color=PAPER_COLORS["failed"], linestyle="--",
-               linewidth=0.8, alpha=0.6, zorder=1)
+               linewidth=0.8, alpha=0.55, zorder=1)
 
-    # Adaptation std annotation above each model group
     for i, std_val in enumerate(model_stds):
         ax.text(
-            i, 1.06, f"σ={std_val:.3f}", ha="center", va="bottom",
-            fontsize=6.5, color="#555555", style="italic",
+            i, 1.045, f"Adapt={std_val:.3f}", ha="center", va="bottom",
+            fontsize=6.2, color="#555555", style="italic",
         )
 
-    # Legend — profiles only, bottom-right to avoid overlapping σ annotations
+    # Brace near-identical DS Flash/Pro if adjacent and PAS match
+    for i in range(n_models - 1):
+        a, b = model_names[i], model_names[i + 1]
+        if {"deepseek-v4-flash", "deepseek-v4-pro"} == {a, b}:
+            if np.allclose(score_matrix[i], score_matrix[i + 1], atol=1e-3):
+                ax.annotate(
+                    "",
+                    xy=(i, 1.12),
+                    xytext=(i + 1, 1.12),
+                    arrowprops=dict(arrowstyle="-", color="#666666", lw=0.8),
+                )
+                ax.text(
+                    i + 0.5, 1.125, "identical PAS",
+                    ha="center", va="bottom", fontsize=6, color="#666666", style="italic",
+                )
+
     ax.legend(
-        fontsize=8, loc="lower right", framealpha=0.9,
+        fontsize=7.5, loc="lower right", framealpha=0.9,
         edgecolor=PAPER_COLORS["neutral"], ncol=3,
     )
-
-    # Light grid
-    ax.yaxis.grid(True, alpha=0.4, linestyle="-", linewidth=0.5,
+    ax.yaxis.grid(True, alpha=0.35, linestyle="-", linewidth=0.5,
                   color=PAPER_COLORS["neutral"])
     ax.set_axisbelow(True)
 
@@ -156,7 +166,7 @@ def make_figure(pas_data: dict, output_path: str) -> plt.Figure:
 
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=300)
+    fig.savefig(out, dpi=300, bbox_inches="tight")
     print(f"Saved → {out}")
     return fig
 

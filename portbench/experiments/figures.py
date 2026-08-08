@@ -511,13 +511,12 @@ def render_batch_comparison_figures(
             continuous_data[mlabel] = model_entry
     if continuous_data:
         try:
-            fig = plot_stress_continuous_heatmap(
-                continuous_data,
-                title="Stress Test — Drawdown Score vs Tier Thresholds",
-            )
+            from ..visualization.stress_plots import plot_stress_drawdown_bars
+
+            fig = plot_stress_drawdown_bars(continuous_data)
             save_figure(
                 fig, str(out_dir / "stress.png"), formats=("png",)
             )
             log("figure: stress.png")
         except Exception as exc:
-            log(f"stress_continuous_heatmap skipped: {exc}")
+            log(f"stress_drawdown_bars skipped: {exc}")

@@ -381,13 +381,14 @@ def plot_stress_threshold_chart(
 def plot_stress_continuous_heatmap(
     data: dict[str, dict[str, dict[str, dict]]],
     title: str = "Stress Test Continuous Score",
-    figsize: tuple = (10, 5),
+    figsize: tuple = (7.2, 5.2),
 ) -> Figure:
     """
     Heatmap: rows = models, columns = scenarios.
 
-    Each cell shows the worst-case (min across profiles) drawdown score, color-coded
-    blue (low) → red (high). Failed cells show ✗ with actual max-drawdown %.
+    Color encodes normalized drawdown score (darker = milder). Cell text shows
+    raw max-drawdown % only; failed cells append × (no triple score/DD/X encoding).
+    Worst case is taken as the minimum score across investor profiles.
     """
     apply_paper_style()
 
@@ -396,8 +397,6 @@ def plot_stress_continuous_heatmap(
         "2020_covid_flash_crash": "2020 COVID\nFlash Crash",
         "2022_crypto_collapse":   "2022 Crypto\nCollapse",
     }
-    _TIER_THRESHOLDS = [0.1, 0.4, 0.6, 0.8]
-    _TIER_LABELS     = ["D", "C", "B", "A"]
 
     # ── Collect ordered scenario and model keys ───────────────────────────────
     scenario_set: list[str] = []
@@ -445,54 +444,220 @@ def plot_stress_continuous_heatmap(
             dd_mat[ri, ci]     = worst_dd
             passed_mat[ri, ci] = not any_fail
 
-    # ── Colormap: matplotlib Blues (same as ceps_breakdown) ─────────────────
+    # ── Colormap: Blues (darker = higher / milder drawdown) ───────────────────
     cmap = plt.get_cmap("Blues").copy()
 
-    # ── Figure layout ─────────────────────────────────────────────────────────
-    # Cap figsize width to avoid renderer MemoryError at 300 DPI save
     w, h = figsize
-    fig, ax = plt.subplots(figsize=(min(w, 8), h))
+    fig, ax = plt.subplots(figsize=(min(w, 7.5), h))
     im = ax.imshow(score_mat, cmap=cmap, vmin=0.0, vmax=1.0,
                    aspect="auto", interpolation="nearest")
 
-    # ── Cell annotations: single line, ✗ only for failed ─────────────────────
+    # ── Cell annotations + fail border/× ──────────────────────────────────────
+    import matplotlib.patches as mpatches
+
     for ri in range(n_models):
         for ci in range(n_sc):
             sc_val = score_mat[ri, ci]
             dd_val = dd_mat[ri, ci]
             passed = passed_mat[ri, ci]
-            txt_color = "#111" if sc_val < 0.55 else "white"
+            txt_color = "#111111" if sc_val < 0.55 else "#ffffff"
             if passed:
-                label = f"{sc_val:.2f}  ({dd_val*100:+.1f}%)"
+                ax.text(
+                    ci, ri, f"{dd_val * 100:.1f}%",
+                    ha="center", va="center",
+                    fontsize=8.5, color=txt_color, fontweight="medium",
+                )
             else:
-                label = f"{sc_val:.2f}  ({dd_val*100:+.1f}%)  ✗"
-            ax.text(ci, ri, label, ha="center", va="center",
-                    fontsize=9, color=txt_color)
+                # Red cell border so failures read at a glance
+                ax.add_patch(
+                    mpatches.Rectangle(
+                        (ci - 0.48, ri - 0.48), 0.96, 0.96,
+                        fill=False, edgecolor="#c0392b", linewidth=2.0, zorder=4,
+                    )
+                )
+                ax.text(
+                    ci, ri, f"{dd_val * 100:.1f}%  ×",
+                    ha="center", va="center",
+                    fontsize=8.5, color="#c0392b", fontweight="bold", zorder=5,
+                )
 
     # ── Axes tick labels ──────────────────────────────────────────────────────
     sc_col_labels = [_SC_NAMES.get(sc.removeprefix("stress_"), sc.replace("_", " "))
                      for sc in scenario_set]
     ax.set_xticks(range(n_sc))
-    ax.set_xticklabels(sc_col_labels, fontsize=10, fontweight="bold")
+    ax.set_xticklabels(sc_col_labels, fontsize=9, fontweight="bold")
     ax.set_yticks(range(n_models))
-    ax.set_yticklabels([abbrev_model_name(m) for m in ordered_keys], fontsize=9)
+    ax.set_yticklabels([abbrev_model_name(m) for m in ordered_keys], fontsize=8.5)
     ax.tick_params(length=0)
+    ax.set_xlim(-0.5, n_sc - 0.5)
+    ax.set_ylim(n_models - 0.5, -0.5)
 
-    # ── LLMs / Baselines separator + labels on the LEFT ──────────────────────
+    # ── LLMs / Baselines separator ────────────────────────────────────────────
     if llm_keys and baseline_keys:
         sep = len(llm_keys) - 0.5
-        ax.axhline(sep, color="#ccc", linestyle="--", linewidth=1.0)
-        ax.text(-0.48, sep - 0.18, "LLMs",
-                fontsize=8, color="#111", ha="left", va="bottom",
-                style="italic", transform=ax.transData)
-        ax.text(-0.48, sep + 0.18, "Baselines",
-                fontsize=8, color="#111", ha="left", va="top",
-                style="italic", transform=ax.transData)
+        ax.axhline(sep, color="#555555", linestyle="-", linewidth=1.1, alpha=0.7)
+        ax.text(
+            n_sc - 0.45, sep - 0.12, "LLMs",
+            fontsize=7.5, color="#333333", ha="right", va="bottom", style="italic",
+        )
+        ax.text(
+            n_sc - 0.45, sep + 0.12, "Baselines",
+            fontsize=7.5, color="#333333", ha="right", va="top", style="italic",
+        )
 
-    # ── Colorbar: title on top, Tier lines + labels inside ────────────────────
-    cbar = fig.colorbar(im, ax=ax, fraction=0.035, pad=0.02)
-    cbar.ax.set_title("Score", fontsize=8, pad=4)
-    cbar.ax.tick_params(labelsize=8)
+    cbar = fig.colorbar(im, ax=ax, fraction=0.04, pad=0.03)
+    cbar.ax.set_title("DD score\n(milder↑)", fontsize=7, pad=3)
+    cbar.ax.tick_params(labelsize=7)
+    cbar.set_ticks([0.0, 0.25, 0.5, 0.75, 1.0])
 
     fig.tight_layout()
+    return fig
+
+
+def plot_stress_drawdown_bars(
+    data: dict[str, dict[str, dict[str, dict]]],
+    title: str = "",
+    figsize: tuple = (7.2, 3.6),
+    gate_tol: float = 0.10,
+) -> Figure:
+    """
+    1×3 horizontal bar panels: MaxDD% per model (worst across profiles) for each
+    stress regime. Vertical dashed line marks the conservative gate (−gate_tol).
+    Failed bars (any profile exceeds tolerance) are red; LLM vs baseline separated.
+    """
+    apply_paper_style()
+
+    _SC_NAMES = {
+        "2015_china_shock": "2015 China Stock Crisis",
+        "2020_covid_flash_crash": "2020 COVID Flash Crash",
+        "2022_crypto_collapse": "2022 Crypto Collapse",
+    }
+    _SC_SHORT = {
+        "2015_china_shock": "(a) 2015 China",
+        "2020_covid_flash_crash": "(b) 2020 COVID",
+        "2022_crypto_collapse": "(c) 2022 Crypto",
+    }
+
+    scenario_set: list[str] = []
+    for pd_ in data.values():
+        for sc_map in pd_.values():
+            for sc in sc_map:
+                if sc not in scenario_set:
+                    scenario_set.append(sc)
+    scenario_set.sort()
+
+    profile_order = ["conservative", "balanced", "aggressive"]
+    model_keys = list(data.keys())
+
+    def _worst_entry(mk: str, sc: str) -> tuple[float, bool]:
+        """Return (worst MaxDD across profiles, fail under conservative gate)."""
+        worst_score, worst_dd = 1.1, 0.0
+        for prof in profile_order:
+            entry = data.get(mk, {}).get(prof, {}).get(sc, {})
+            if not entry:
+                continue
+            s = float(entry.get("dd_score", 0.0))
+            if s < worst_score:
+                worst_score = s
+                worst_dd = float(entry.get("max_drawdown", 0.0))
+        # Gate coloring follows the conservative profile (matches −10% line)
+        cons = data.get(mk, {}).get("conservative", {}).get(sc, {})
+        if cons:
+            failed = not bool(cons.get("passed", True))
+            if "passed" not in cons:
+                failed = abs(float(cons.get("max_drawdown", 0.0))) > gate_tol + 1e-9
+        else:
+            failed = abs(worst_dd) > gate_tol + 1e-9
+        return (worst_dd if worst_score < 1.1 else 0.0, failed)
+
+    def _mean_dd(mk: str) -> float:
+        dds = [_worst_entry(mk, sc)[0] for sc in scenario_set]
+        return float(np.mean(dds)) if dds else 0.0
+
+    # Sort: more negative (worse) mean DD first within each group
+    llm_keys = sorted(
+        [m for m in model_keys if not m.startswith("baseline/")],
+        key=_mean_dd,
+    )
+    baseline_keys = sorted(
+        [m for m in model_keys if m.startswith("baseline/")],
+        key=_mean_dd,
+    )
+    ordered = llm_keys + baseline_keys
+    n_models = len(ordered)
+    y = np.arange(n_models)
+    labels = [abbrev_model_name(m) for m in ordered]
+
+    llm_color = "#4a6fa5"
+    base_color = "#7a8a99"
+    fail_color = "#c0392b"
+    gate_x = -100.0 * gate_tol
+
+    fig, axes = plt.subplots(1, 3, figsize=figsize, sharey=True)
+
+    for ax, sc in zip(axes, scenario_set):
+        dds = []
+        fails = []
+        for mk in ordered:
+            dd, failed = _worst_entry(mk, sc)
+            dds.append(100.0 * dd)  # to percent
+            fails.append(failed)
+
+        colors = [
+            fail_color if f else (llm_color if not mk.startswith("baseline/") else base_color)
+            for mk, f in zip(ordered, fails)
+        ]
+        ax.barh(y, dds, height=0.72, color=colors, edgecolor="white", linewidth=0.3, zorder=3)
+        ax.axvline(gate_x, color=fail_color, linestyle="--", linewidth=1.1, zorder=2, alpha=0.85)
+        ax.axvline(0.0, color="#bbbbbb", linewidth=0.7, zorder=1)
+        ax.set_xlabel("MaxDD (%)", fontsize=8)
+        ax.tick_params(axis="x", labelsize=7.5)
+        short = _SC_SHORT.get(sc.removeprefix("stress_"), _SC_NAMES.get(sc.removeprefix("stress_"), sc))
+        # strip stress_ prefix variants
+        key = sc.removeprefix("stress_")
+        short = _SC_SHORT.get(key, short)
+        ax.text(
+            0.5, 1.02, short,
+            transform=ax.transAxes, ha="center", va="bottom",
+            fontsize=9, fontweight="regular", color="#333333", clip_on=False,
+        )
+        ax.set_xlim(min(min(dds) - 1.5, gate_x - 2), 1.0)
+        ax.grid(True, axis="x", alpha=0.35, linewidth=0.5)
+        ax.set_ylim(n_models - 0.55, -0.55)
+
+        # LLM / baseline separator
+        if llm_keys and baseline_keys:
+            sep = len(llm_keys) - 0.5
+            ax.axhline(sep, color="#666666", linewidth=0.9, linestyle="-", alpha=0.6)
+
+    axes[0].set_yticks(y)
+    axes[0].set_yticklabels(labels, fontsize=7.5)
+    for ax in axes[1:]:
+        ax.tick_params(axis="y", length=0)
+
+    if llm_keys and baseline_keys:
+        sep = len(llm_keys) - 0.5
+        axes[-1].text(
+            1.02, sep - 0.15, "LLMs", transform=axes[-1].get_yaxis_transform(),
+            fontsize=7, color="#333333", ha="left", va="bottom", style="italic",
+        )
+        axes[-1].text(
+            1.02, sep + 0.15, "Baselines", transform=axes[-1].get_yaxis_transform(),
+            fontsize=7, color="#333333", ha="left", va="top", style="italic",
+        )
+
+    handles = [
+        mpatches.Patch(color=llm_color, label="LLM (pass)"),
+        mpatches.Patch(color=base_color, label="Baseline (pass)"),
+        mpatches.Patch(color=fail_color, label="Fail gate"),
+        plt.Line2D([0], [0], color=fail_color, linestyle="--", linewidth=1.1,
+                   label=f"Gate (−{gate_tol*100:.0f}%)"),
+    ]
+    fig.legend(
+        handles=handles, loc="lower center", ncol=4, fontsize=7.5,
+        frameon=True, bbox_to_anchor=(0.5, -0.04),
+    )
+    if title:
+        fig.suptitle(title, fontsize=10, fontweight="normal", y=1.05)
+    fig.subplots_adjust(left=0.14, right=0.92, top=0.88, bottom=0.22, wspace=0.12)
     return fig
