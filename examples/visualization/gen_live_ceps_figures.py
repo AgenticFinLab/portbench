@@ -41,14 +41,16 @@ MODEL_ORDER = [
 ]
 
 STAGES = ["S1", "S2", "S3", "S4", "S5"]
+# Okabe–Ito / print-friendly categorical (colorblind-safe)
 LINE_COLORS = [
-    "#1e3d6e",
-    "#4a6fa5",
-    "#c44e52",
-    "#55a868",
-    "#8172b3",
-    "#ccb974",
+    "#0072B2",  # blue
+    "#E69F00",  # amber
+    "#009E73",  # green
+    "#D55E00",  # vermillion
+    "#CC79A7",  # reddish purple
+    "#56B4E9",  # sky blue
 ]
+LINE_MARKERS = ["o", "s", "^", "D", "v", "P"]
 
 
 def _load_llm_summaries(live_root: Path) -> list[dict]:
@@ -120,32 +122,63 @@ def plot_daily(summaries: list[dict], out_path: Path) -> None:
     apply_paper_style()
     by_model = {s["model"]: s for s in summaries}
     models = [m for m in MODEL_ORDER if m in by_model]
-    fig, ax = plt.subplots(figsize=(6.8, 3.4))
-    for i, m in enumerate(models):
-        eps = by_model[m].get("episodes") or []
-        dates = [e["decision_date"][5:] for e in eps]  # MM-DD
-        vals = [float(e["ceps_lookback"]) for e in eps]
-        ax.plot(
-            dates,
-            vals,
-            marker="o",
-            markersize=3.5,
-            linewidth=1.4,
-            color=LINE_COLORS[i % len(LINE_COLORS)],
-            label=MODEL_DISPLAY.get(m, m),
+    ink = "#1A1A1A"
+
+    with plt.rc_context({
+        "font.family": "serif",
+        "font.serif": ["Times New Roman", "Times", "DejaVu Serif", "serif"],
+        "axes.grid": False,
+        "axes.linewidth": 1.05,
+        "axes.edgecolor": ink,
+    }):
+        fig, ax = plt.subplots(figsize=(7.0, 3.7))
+        for i, m in enumerate(models):
+            eps = by_model[m].get("episodes") or []
+            dates = [e["decision_date"][5:] for e in eps]  # MM-DD
+            vals = [float(e["ceps_lookback"]) for e in eps]
+            color = LINE_COLORS[i % len(LINE_COLORS)]
+            marker = LINE_MARKERS[i % len(LINE_MARKERS)]
+            ax.plot(
+                dates,
+                vals,
+                marker=marker,
+                markersize=5.5,
+                markerfacecolor=color,
+                markeredgecolor="white",
+                markeredgewidth=0.9,
+                linewidth=2.0,
+                color=color,
+                label=MODEL_DISPLAY.get(m, m),
+                zorder=3 + i * 0.01,
+            )
+        ax.set_xlabel("Decision date (2026)", fontsize=11.0, color="black")
+        ax.set_ylabel("CEPS (lookback)", fontsize=11.0, color="black")
+        ax.tick_params(axis="x", rotation=35, labelsize=9.5, length=3.5, pad=2)
+        ax.tick_params(axis="y", labelsize=9.5, length=3.5, pad=2)
+        ax.yaxis.grid(True, linestyle="-", linewidth=0.35, alpha=0.25, color="#B8B8B8", zorder=0.5)
+        ax.set_axisbelow(True)
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+        for spine in ("left", "bottom"):
+            ax.spines[spine].set_linewidth(1.05)
+            ax.spines[spine].set_color(ink)
+
+        # Legend below the axes (frameless) so it does not cover trajectories
+        ax.legend(
+            frameon=False,
+            ncol=3,
+            fontsize=9.5,
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.22),
+            handlelength=1.8,
+            columnspacing=1.15,
+            handletextpad=0.4,
         )
-    ax.set_xlabel("Decision date (2026)")
-    ax.set_ylabel("CEPS (lookback)")
-    ax.tick_params(axis="x", rotation=45)
-    # Inside axes, upper-right, two columns
-    ax.legend(frameon=False, ncol=2, fontsize=8, loc="upper right")
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    fig.tight_layout()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=300, bbox_inches="tight")
-    plt.close(fig)
-    print(f"wrote {out_path}")
+        fig.subplots_adjust(left=0.11, right=0.98, top=0.96, bottom=0.28)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out_path, dpi=300, bbox_inches="tight", pad_inches=0.08)
+        plt.close(fig)
+        print(f"wrote {out_path}")
 
 
 def main() -> int:

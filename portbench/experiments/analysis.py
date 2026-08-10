@@ -205,8 +205,8 @@ def _write_figure_index(comp_dir: Path, rebalance: str) -> None:
         "s2_s4_quadrant.png": (
             "**S2 vs S4 Quadrant** — Scatter plot of S2 (Signal Generation) vs S4 (Execution) "
             "scores per model. Median-based crosshairs divide the plane into four quadrants: "
-            "Signal-rich Execution-poor (top-left), Balanced (top-right), Weak on both (bottom-left), "
-            "Execution-leaning (bottom-right). Quadrants are shaded for visual grouping. "
+            "Executes well / predicts poorly (top-left), Balanced (top-right), Weak on both "
+            "(bottom-left), Predicts well / executes poorly (bottom-right). "
             "Use this to identify signal-execution dissociation patterns across models."
         ),
         "normal_vs_stress.png": (

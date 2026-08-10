@@ -27,7 +27,7 @@ _QUADRANT_COLORS = {
 def plot_s2_s4_quadrant(
     stage_scores: dict[str, dict[str, float]],
     title: str = "S2 vs S4: Signal-Execution Dissociation",
-    figsize: tuple = (5.5, 5),
+    figsize: tuple = (5.5, 4.5),
 ) -> Figure:
     """Quadrant scatter: X=S2 score, Y=S4 score.
 
@@ -89,6 +89,13 @@ def plot_s2_s4_quadrant(
         med_s2, color="#555555", linestyle="--", linewidth=1.0, alpha=0.7, zorder=3
     )
 
+    # Right-edge points: park labels above/below and right-align so text
+    # grows leftward instead of clipping at the axes edge.
+    _LABEL_OFFSETS = {
+        "Qwen3.6-Plus": dict(xytext=(-2, -11), ha="right", va="top"),
+        "HY3": dict(xytext=(-2, 11), ha="right", va="bottom"),
+    }
+
     # ── Scatter points ──────────────────────────────────────────────────
     for p in points:
         short = abbrev_model_name(p["model"])
@@ -104,16 +111,17 @@ def plot_s2_s4_quadrant(
             edgecolors="#333333",
             zorder=5,
         )
+        offset = _LABEL_OFFSETS.get(
+            short, dict(xytext=(10, 0), ha="left", va="center")
+        )
         ax.annotate(
             short,
             (p["s2"], p["s4"]),
             textcoords="offset points",
-            xytext=(10, 0),
             fontsize=8,
             color="#222222",
-            ha="left",
-            va="center",
             zorder=6,
+            **offset,
         )
 
     # ── Quadrant corner labels ──────────────────────────────────────────
@@ -121,10 +129,11 @@ def plot_s2_s4_quadrant(
     pad_x = (x_max - x_min) * 0.03
     pad_y = (y_max - y_min) * 0.03
 
+    # X=S2 (predict), Y=S4 (execute); medians split the plane.
     ax.text(
         x_min - x_pad + pad_x,
         y_max + y_pad - pad_y,
-        "Predicts well,\nexecutes poorly",
+        "Executes well,\npredicts poorly",
         ha="left",
         va="top",
         **label_style,
@@ -148,7 +157,7 @@ def plot_s2_s4_quadrant(
     ax.text(
         (med_s2 + x_max + x_pad) / 2,
         y_min - y_pad + pad_y,
-        "Executes well,\npredicts poorly",
+        "Predicts well,\nexecutes poorly",
         ha="center",
         va="bottom",
         **label_style,

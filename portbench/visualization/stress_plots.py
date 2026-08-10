@@ -517,25 +517,20 @@ def plot_stress_continuous_heatmap(
 def plot_stress_drawdown_bars(
     data: dict[str, dict[str, dict[str, dict]]],
     title: str = "",
-    figsize: tuple = (7.2, 3.6),
+    figsize: tuple = (7.6, 4.15),
     gate_tol: float = 0.10,
 ) -> Figure:
     """
     1×3 horizontal bar panels: MaxDD% per model (worst across profiles) for each
     stress regime. Vertical dashed line marks the conservative gate (−gate_tol).
-    Failed bars (any profile exceeds tolerance) are red; LLM vs baseline separated.
+    Failed bars (conservative gate) are red; LLM vs baseline separated.
     """
     apply_paper_style()
 
-    _SC_NAMES = {
-        "2015_china_shock": "2015 China Stock Crisis",
-        "2020_covid_flash_crash": "2020 COVID Flash Crash",
-        "2022_crypto_collapse": "2022 Crypto Collapse",
-    }
-    _SC_SHORT = {
-        "2015_china_shock": "(a) 2015 China",
-        "2020_covid_flash_crash": "(b) 2020 COVID",
-        "2022_crypto_collapse": "(c) 2022 Crypto",
+    _SC_PANEL = {
+        "2015_china_shock": ("a", "2015 China"),
+        "2020_covid_flash_crash": ("b", "2020 COVID"),
+        "2022_crypto_collapse": ("c", "2022 Crypto"),
     }
 
     scenario_set: list[str] = []
@@ -588,76 +583,118 @@ def plot_stress_drawdown_bars(
     y = np.arange(n_models)
     labels = [abbrev_model_name(m) for m in ordered]
 
-    llm_color = "#4a6fa5"
-    base_color = "#7a8a99"
-    fail_color = "#c0392b"
+    # Print-friendly palette (aligned with cross-period Okabe–Ito accents)
+    llm_color = "#0072B2"
+    base_color = "#999999"
+    fail_color = "#D55E00"
+    gate_color = "#D55E00"
+    ink = "#1A1A1A"
     gate_x = -100.0 * gate_tol
 
-    fig, axes = plt.subplots(1, 3, figsize=figsize, sharey=True)
+    with plt.rc_context({
+        "font.family": "serif",
+        "font.serif": ["Times New Roman", "Times", "DejaVu Serif", "serif"],
+        "axes.grid": False,
+        "axes.linewidth": 1.05,
+        "axes.edgecolor": ink,
+    }):
+        fig, axes = plt.subplots(1, 3, figsize=figsize, sharey=True)
 
-    for ax, sc in zip(axes, scenario_set):
-        dds = []
-        fails = []
-        for mk in ordered:
-            dd, failed = _worst_entry(mk, sc)
-            dds.append(100.0 * dd)  # to percent
-            fails.append(failed)
+        for ax, sc in zip(axes, scenario_set):
+            dds = []
+            fails = []
+            for mk in ordered:
+                dd, failed = _worst_entry(mk, sc)
+                dds.append(100.0 * dd)  # to percent
+                fails.append(failed)
 
-        colors = [
-            fail_color if f else (llm_color if not mk.startswith("baseline/") else base_color)
-            for mk, f in zip(ordered, fails)
-        ]
-        ax.barh(y, dds, height=0.72, color=colors, edgecolor="white", linewidth=0.3, zorder=3)
-        ax.axvline(gate_x, color=fail_color, linestyle="--", linewidth=1.1, zorder=2, alpha=0.85)
-        ax.axvline(0.0, color="#bbbbbb", linewidth=0.7, zorder=1)
-        ax.set_xlabel("MaxDD (%)", fontsize=8)
-        ax.tick_params(axis="x", labelsize=7.5)
-        short = _SC_SHORT.get(sc.removeprefix("stress_"), _SC_NAMES.get(sc.removeprefix("stress_"), sc))
-        # strip stress_ prefix variants
-        key = sc.removeprefix("stress_")
-        short = _SC_SHORT.get(key, short)
-        ax.text(
-            0.5, 1.02, short,
-            transform=ax.transAxes, ha="center", va="bottom",
-            fontsize=9, fontweight="regular", color="#333333", clip_on=False,
-        )
-        ax.set_xlim(min(min(dds) - 1.5, gate_x - 2), 1.0)
-        ax.grid(True, axis="x", alpha=0.35, linewidth=0.5)
-        ax.set_ylim(n_models - 0.55, -0.55)
+            colors = [
+                fail_color if f else (llm_color if not mk.startswith("baseline/") else base_color)
+                for mk, f in zip(ordered, fails)
+            ]
+            ax.barh(
+                y, dds, height=0.70,
+                color=colors, edgecolor="white", linewidth=0.55, zorder=3,
+            )
+            ax.axvline(
+                gate_x, color=gate_color, linestyle=(0, (3.5, 2.2)),
+                linewidth=1.25, zorder=2, alpha=0.95,
+            )
+            ax.axvline(0.0, color="#B0B0B0", linewidth=0.8, zorder=1)
 
-        # LLM / baseline separator
+            key = sc.removeprefix("stress_")
+            letter, name = _SC_PANEL.get(key, ("?", key.replace("_", " ")))
+            ax.set_title(
+                f"({letter}) {name}",
+                loc="center",
+                fontsize=10.5,
+                fontweight="bold",
+                color="black",
+                pad=6,
+            )
+
+            ax.set_xlabel("")
+            ax.tick_params(axis="x", labelsize=9.5, length=3.5, pad=2)
+            ax.set_xlim(min(min(dds) - 1.2, gate_x - 1.8), 0.8)
+            ax.xaxis.grid(True, linestyle="-", linewidth=0.35, alpha=0.22, color="#B8B8B8", zorder=0.5)
+            ax.set_axisbelow(True)
+            ax.set_ylim(n_models - 0.55, -0.55)
+            for spine in ("left", "bottom"):
+                ax.spines[spine].set_linewidth(1.05)
+                ax.spines[spine].set_color(ink)
+
+            # LLM / baseline separator
+            if llm_keys and baseline_keys:
+                sep = len(llm_keys) - 0.5
+                ax.axhline(sep, color="#666666", linewidth=1.0, linestyle="-", alpha=0.55)
+
+        axes[0].set_yticks(y)
+        axes[0].set_yticklabels(labels, fontsize=10.0)
+        axes[0].tick_params(axis="y", length=0, pad=3)
+        for ax in axes[1:]:
+            ax.tick_params(axis="y", length=0, labelleft=False)
+
         if llm_keys and baseline_keys:
-            sep = len(llm_keys) - 0.5
-            ax.axhline(sep, color="#666666", linewidth=0.9, linestyle="-", alpha=0.6)
+            # Group labels inside panel (a), in the empty region left of the
+            # short boundary bars (last LLM / first baseline) — no side gutter
+            ax0 = axes[0]
+            last_llm = len(llm_keys) - 1
+            first_base = len(llm_keys)
+            x_left = ax0.get_xlim()[0] + 0.35
+            for y_row, text in ((last_llm, "LLMs"), (first_base, "Baselines")):
+                ax0.text(
+                    x_left, y_row, text,
+                    ha="left", va="center",
+                    fontsize=8.5, color=ink, fontstyle="italic",
+                    zorder=6,
+                    bbox=dict(
+                        facecolor="white", edgecolor="none",
+                        alpha=0.85, pad=0.6,
+                    ),
+                )
 
-    axes[0].set_yticks(y)
-    axes[0].set_yticklabels(labels, fontsize=7.5)
-    for ax in axes[1:]:
-        ax.tick_params(axis="y", length=0)
-
-    if llm_keys and baseline_keys:
-        sep = len(llm_keys) - 0.5
-        axes[-1].text(
-            1.02, sep - 0.15, "LLMs", transform=axes[-1].get_yaxis_transform(),
-            fontsize=7, color="#333333", ha="left", va="bottom", style="italic",
+        fig.text(
+            0.55, 0.105,
+            "MaxDD (%)",
+            ha="center", va="center",
+            fontsize=11.0, color="black",
         )
-        axes[-1].text(
-            1.02, sep + 0.15, "Baselines", transform=axes[-1].get_yaxis_transform(),
-            fontsize=7, color="#333333", ha="left", va="top", style="italic",
-        )
 
-    handles = [
-        mpatches.Patch(color=llm_color, label="LLM (pass)"),
-        mpatches.Patch(color=base_color, label="Baseline (pass)"),
-        mpatches.Patch(color=fail_color, label="Fail gate"),
-        plt.Line2D([0], [0], color=fail_color, linestyle="--", linewidth=1.1,
-                   label=f"Gate (−{gate_tol*100:.0f}%)"),
-    ]
-    fig.legend(
-        handles=handles, loc="lower center", ncol=4, fontsize=7.5,
-        frameon=True, bbox_to_anchor=(0.5, -0.04),
-    )
-    if title:
-        fig.suptitle(title, fontsize=10, fontweight="normal", y=1.05)
-    fig.subplots_adjust(left=0.14, right=0.92, top=0.88, bottom=0.22, wspace=0.12)
-    return fig
+        handles = [
+            mpatches.Patch(color=llm_color, label="LLM (pass)"),
+            mpatches.Patch(color=base_color, label="Baseline (pass)"),
+            mpatches.Patch(color=fail_color, label="Fail gate"),
+            plt.Line2D(
+                [0], [0], color=gate_color, linestyle=(0, (3.5, 2.2)),
+                linewidth=1.25, label=f"Gate (−{gate_tol*100:.0f}%)",
+            ),
+        ]
+        fig.legend(
+            handles=handles, loc="lower center", ncol=4, fontsize=9.5,
+            frameon=False, bbox_to_anchor=(0.55, -0.02),
+            handletextpad=0.45, columnspacing=1.2,
+        )
+        if title:
+            fig.suptitle(title, fontsize=12, fontweight="normal", y=1.04)
+        fig.subplots_adjust(left=0.14, right=0.995, top=0.88, bottom=0.20, wspace=0.16)
+        return fig

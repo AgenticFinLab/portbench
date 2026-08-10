@@ -460,11 +460,12 @@ _MODEL_ABBREVS = {
     "qwen3.6-plus":          "Qwen3.6-Plus",
     "qwen3.7-max":           "Qwen3.7-Max",
     "glm-5.1":               "GLM-5.1",
-    "equal_weight":         "EqWt",
+    "equal_weight":         "EqW",
     "risk_parity":          "RiskPar",
     "sixty_forty":          "60/40",
     "cov_risk_parity":      "CovRiskPar",
     "min_variance":         "MinVar",
+    "black_litterman":      "BL",
 }
 
 

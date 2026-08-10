@@ -1,13 +1,18 @@
 """
 Generate Figure for Section 5.4 — Profile Adaptation as LLM Value.
 
-Model-centric grouped bar chart: each model has 3 bars (Conservative, Balanced,
-Aggressive), sorted left-to-right by adaptation variance (descending). Whiskers
-show the Conservative–Aggressive PAS range. Near-identical DS Flash/Pro pairs
-share a brace annotation when PAS vectors match.
+Scatter design (aligned with analysis_normal_vs_stress):
+  X = AdaptScore, Y = PAS.
+  Each model contributes three independent points (one per investor profile).
+  Encoding:
+    - profile → colour (solid fill, uniform white edge)
+    - model   → marker shape
+  All three profile points share the model AdaptScore (no stems, no dodge).
 
 Output: figures/analysis_profile_adaptation.png
 """
+
+from __future__ import annotations
 
 import json
 import os
@@ -15,29 +20,90 @@ import re
 import sys
 from pathlib import Path
 
+import matplotlib.lines as mlines
 import matplotlib.pyplot as plt
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from portbench.visualization.style import apply_paper_style, PAPER_COLORS
-
-MODEL_DISPLAY = {
-    "deepseek-v4-flash":    "DS-V4-\nFlash",
-    "deepseek-v4-pro":      "DS-V4-\nPro",
-    "qwen3.7-max":          "Qwen3.7-\nMax",
-    "qwen3.6-plus":         "Qwen3.6-\nPlus",
-    "qwen3.6-35b-a3b":      "Qwen3.6-\n35B",
-    "glm-5.1":              "GLM-\n5.1",
-    "doubao-seed-2-0-lite": "DB-2.0-\nLite",
-    "doubao-seed-2-0-pro":  "DB-2.0-\nPro",
-    "hy3-preview":          "HY3-\nPreview",
-    "kimi-k2.6":            "Kimi-\nK2.6",
-}
+from portbench.visualization.risk_return_plots import _MODEL_MARKERS
+from portbench.visualization.style import abbrev_model_name, apply_paper_style
 
 PROFILE_LABELS = ["Conservative", "Balanced", "Aggressive"]
 PROFILE_KEYS = ["conservative", "balanced", "aggressive"]
-PROFILE_COLORS = ["#1e3d6e", "#4a6fa5", "#7a9fc5"]
+
+# Editorial categorical: cool–mid–warm, muted chroma, print-safe.
+# Hue separation ≈ blue–teal–copper (CVD-friendly); matched mid-value
+# so marker shape, not brightness, carries identity.
+PROFILE_COLORS = {
+    "conservative": "#2C4A6E",  # slate navy
+    "balanced":     "#4A8B7F",  # muted teal
+    "aggressive":   "#B87A45",  # antique copper
+}
+
+# Matplotlib marker area is not perceptually equal across shapes.
+# Scale `s` so diamonds/stars/pluses read as the same size as circles.
+_MARKER_SIZE_SCALE = {
+    "o": 1.00,
+    "s": 0.85,
+    "^": 0.95,
+    "D": 0.45,
+    "*": 2.05,
+    "H": 0.78,
+    "v": 0.95,
+    "<": 0.95,
+    ">": 0.95,
+    "P": 0.95,
+    "X": 0.95,
+    "p": 0.90,
+    "h": 0.78,
+}
+_BASE_SCATTER_S = 90.0
+_BASE_LEGEND_MS = 6.5
+
+# User-annotated legend anchors in data coordinates (AdaptScore×100, PAS).
+# PROFILE box ≈ (0–4.8, 0.79–0.865); MODEL box ≈ (11.2–17.5, 0.69–0.865).
+_PROFILE_ANCHOR = (0.8, 0.870)   # upper-left of left empty band
+# Upper-right of Model box: below the GLM-5.1 balanced (pink) star
+# (~13.3, 0.88), inset from x_hi=18 so the frame is not clipped.
+_MODEL_ANCHOR = (17.95, 0.832)
+
+
+def _place_data_legend(
+    ax: plt.Axes,
+    handles: list,
+    ncol: int,
+    title: str,
+    anchor_data: tuple[float, float],
+    loc: str,
+    legend_kw: dict,
+):
+    """
+    Place an axes legend at a data-coordinate anchor.
+
+    The legend packer is centre-aligned so the short title sits over the
+    wider entry block; each entry's own TextArea stays left-aligned.
+    Returns the legend artist.
+    """
+    leg = ax.legend(
+        handles=handles,
+        loc=loc,
+        bbox_to_anchor=anchor_data,
+        bbox_transform=ax.transData,
+        ncol=ncol,
+        title=title,
+        title_fontproperties={"size": 6.5, "weight": "normal"},
+        **legend_kw,
+    )
+    # Centre title over the entry block (entries remain left-aligned inside).
+    leg._legend_box.align = "center"
+    leg._legend_box.sep = 1.0
+    title_obj = leg.get_title()
+    title_obj.set_fontweight("normal")
+    title_obj.set_ha("center")
+    leg.set_clip_on(False)
+    ax.add_artist(leg)
+    return leg
 
 
 def load_pas_data(experiments_dir: str) -> dict[str, dict[str, float]]:
@@ -70,7 +136,7 @@ def load_pas_data(experiments_dir: str) -> dict[str, dict[str, float]]:
 
 
 def make_figure(pas_data: dict, output_path: str) -> plt.Figure:
-    """Generate the profile adaptation bar chart with range whiskers."""
+    """Scatter: AdaptScore (x) vs PAS (y), three profiles per model."""
     apply_paper_style()
 
     llm_models = {
@@ -78,101 +144,145 @@ def make_figure(pas_data: dict, output_path: str) -> plt.Figure:
         if any(v > 0 for v in d.values()) and len(d) == 3
     }
 
-    def adaptation_std(item):
-        scores = [item[1].get(k, 0.0) for k in PROFILE_KEYS]
-        return np.std(scores)
+    model_keys = sorted(llm_models.keys(), key=abbrev_model_name)
+    model_meta: dict[str, dict] = {}
+    for i, mk in enumerate(model_keys):
+        scores = [llm_models[mk][k] for k in PROFILE_KEYS]
+        model_meta[mk] = {
+            "marker": _MODEL_MARKERS[i % len(_MODEL_MARKERS)],
+            "short": abbrev_model_name(mk),
+            "adapt": float(np.std(scores, ddof=0)),
+            "pas": {k: float(llm_models[mk][k]) for k in PROFILE_KEYS},
+        }
 
-    sorted_models = sorted(llm_models.items(), key=adaptation_std, reverse=True)
-    model_names = [m for m, _ in sorted_models]
-    display_names = [MODEL_DISPLAY.get(m, m) for m in model_names]
-    n_models = len(model_names)
-    n_profiles = len(PROFILE_KEYS)
+    adapts = [model_meta[m]["adapt"] for m in model_keys]
+    all_pas = [model_meta[m]["pas"][k] for m in model_keys for k in PROFILE_KEYS]
+    # Plot AdaptScore ×100 so the axis is 0/5/10/15 instead of 0.00/0.05/...
+    scale = 100.0
+    x_pad = 1.2
+    y_pad = 0.03
+    x_lo = max(0.0, min(adapts) * scale - x_pad)
+    # Extra right pad so the Model legend (upper-right anchored) is not clipped
+    x_hi = max(max(adapts) * scale + x_pad * 1.5, 18.0)
+    y_lo = max(0.55, min(all_pas) - y_pad)
+    y_hi = 1.02  # tiny pad so markers at PAS=1.0 are not clipped
 
-    score_matrix = np.zeros((n_models, n_profiles))
-    for i, (_, scores) in enumerate(sorted_models):
-        for j, key in enumerate(PROFILE_KEYS):
-            score_matrix[i, j] = scores.get(key, 0.0)
+    # Separate near-colliding AdaptScores so model groups stay readable
+    x_pos: dict[str, float] = {m: model_meta[m]["adapt"] * scale for m in model_keys}
+    sorted_by_adapt = sorted(model_keys, key=lambda m: model_meta[m]["adapt"])
+    for a, b in zip(sorted_by_adapt, sorted_by_adapt[1:]):
+        if abs(x_pos[b] - x_pos[a]) < 0.40:
+            x_pos[a] -= 0.25
+            x_pos[b] += 0.25
 
-    model_stds = score_matrix.std(axis=1, ddof=0)
-    cons = score_matrix[:, 0]
-    agg = score_matrix[:, 2]
+    fig, ax = plt.subplots(figsize=(4.0, 3.5))
+    ax.set_facecolor("white")
+    ax.grid(True, linestyle="-", linewidth=0.4, alpha=0.35, color="#b0c0d0")
 
-    fig, ax = plt.subplots(figsize=(7.0, 3.5))
+    # Draw aggressive → balanced → conservative so darker points sit on top when close
+    draw_order = ["aggressive", "balanced", "conservative"]
+    for mk in model_keys:
+        meta = model_meta[mk]
+        msize = _BASE_SCATTER_S * _MARKER_SIZE_SCALE.get(meta["marker"], 1.0)
+        for key in draw_order:
+            ax.scatter(
+                x_pos[mk],
+                meta["pas"][key],
+                marker=meta["marker"],
+                s=msize,
+                c=PROFILE_COLORS[key],
+                edgecolors="white",
+                linewidths=0.85,
+                alpha=0.95,
+                zorder=5,
+            )
 
-    bar_width = 0.22
-    x = np.arange(n_models)
+    ax.set_xlim(x_lo, x_hi)
+    ax.set_ylim(y_lo, y_hi)
+    ax.set_xticks([0, 5, 10, 15])
+    ax.set_yticks([0.6, 0.7, 0.8, 0.9, 1.0])
+    ax.set_xlabel(r"AdaptScore ($\times 100$)", fontsize=9)
+    ax.set_ylabel("Profile Alignment Score (PAS)", fontsize=9)
 
-    for j in range(n_profiles):
-        offset = (j - n_profiles / 2 + 0.5) * bar_width
-        ax.bar(
-            x + offset,
-            score_matrix[:, j],
-            width=bar_width * 0.92,
-            color=PROFILE_COLORS[j],
-            alpha=0.90,
-            edgecolor="white",
-            linewidth=0.3,
-            label=PROFILE_LABELS[j],
-            zorder=3,
+    # Profile colour legend
+    profile_handles = [
+        mlines.Line2D(
+            [], [],
+            color=PROFILE_COLORS[k],
+            marker="o",
+            linestyle="None",
+            markersize=_BASE_LEGEND_MS,
+            markerfacecolor=PROFILE_COLORS[k],
+            markeredgecolor="white",
+            markeredgewidth=0.85,
+            label=lab,
         )
-
-    # Conservative–Aggressive range whiskers (secondary spread cue)
-    for i in range(n_models):
-        lo, hi = min(cons[i], agg[i]), max(cons[i], agg[i])
-        ax.plot([i, i], [lo, hi], color="#333333", linewidth=1.0, alpha=0.55, zorder=4)
-        ax.plot([i - 0.08, i + 0.08], [lo, lo], color="#333333", linewidth=1.0, alpha=0.55, zorder=4)
-        ax.plot([i - 0.08, i + 0.08], [hi, hi], color="#333333", linewidth=1.0, alpha=0.55, zorder=4)
-
-    ax.set_xticks(x)
-    ax.set_xticklabels(display_names, fontsize=7.5, linespacing=1.15)
-    ax.set_ylabel("Profile Alignment Score (PAS)", fontsize=10)
-    ax.set_ylim(0, 1.18)
-    ax.set_xlim(-0.6, n_models - 0.4)
-
-    ax.axhline(1.0, color=PAPER_COLORS["failed"], linestyle="--",
-               linewidth=0.8, alpha=0.55, zorder=1)
-
-    for i, std_val in enumerate(model_stds):
-        ax.text(
-            i, 1.045, f"Adapt={std_val:.3f}", ha="center", va="bottom",
-            fontsize=6.2, color="#555555", style="italic",
+        for k, lab in zip(PROFILE_KEYS, PROFILE_LABELS)
+    ]
+    # Compact legend labels (long Qwen names were overflowing the axes)
+    _LEGEND_SHORT = {
+        "Qwen3.6-35b": "Q3.6-35b",
+        "Qwen3.6-Plus": "Q3.6-Plus",
+        "Qwen3.7-Max": "Q3.7-Max",
+        "Doubao-Lite": "DB-Lite",
+        "Doubao-Pro": "DB-Pro",
+    }
+    # Model shape legend (neutral fill so colour stays reserved for profile)
+    model_handles = [
+        mlines.Line2D(
+            [], [],
+            color="#555555",
+            marker=model_meta[mk]["marker"],
+            linestyle="None",
+            markersize=_BASE_LEGEND_MS * np.sqrt(
+                _MARKER_SIZE_SCALE.get(model_meta[mk]["marker"], 1.0)
+            ),
+            markerfacecolor="#888888",
+            markeredgecolor="white",
+            markeredgewidth=0.85,
+            label=_LEGEND_SHORT.get(model_meta[mk]["short"], model_meta[mk]["short"]),
         )
+        for mk in model_keys
+    ]
 
-    # Brace near-identical DS Flash/Pro if adjacent and PAS match
-    for i in range(n_models - 1):
-        a, b = model_names[i], model_names[i + 1]
-        if {"deepseek-v4-flash", "deepseek-v4-pro"} == {a, b}:
-            if np.allclose(score_matrix[i], score_matrix[i + 1], atol=1e-3):
-                ax.annotate(
-                    "",
-                    xy=(i, 1.12),
-                    xytext=(i + 1, 1.12),
-                    arrowprops=dict(arrowstyle="-", color="#666666", lw=0.8),
-                )
-                ax.text(
-                    i + 0.5, 1.125, "identical PAS",
-                    ha="center", va="bottom", fontsize=6, color="#666666", style="italic",
-                )
-
-    ax.legend(
-        fontsize=7.5, loc="lower right", framealpha=0.9,
-        edgecolor=PAPER_COLORS["neutral"], ncol=3,
+    legend_kw = dict(
+        fontsize=5.8,
+        frameon=True,
+        fancybox=False,
+        edgecolor="#cccccc",
+        framealpha=0.95,
+        borderpad=0.30,
+        labelspacing=0.22,
+        columnspacing=0.55,
+        handletextpad=0.28,
     )
-    ax.yaxis.grid(True, alpha=0.35, linestyle="-", linewidth=0.5,
-                  color=PAPER_COLORS["neutral"])
-    ax.set_axisbelow(True)
 
     fig.tight_layout()
 
+    # Fixed anchors from user annotation (red boxes)
+    leg_left = _place_data_legend(
+        ax, profile_handles, ncol=1, title="Profile",
+        anchor_data=_PROFILE_ANCHOR, loc="upper left", legend_kw=legend_kw,
+    )
+    leg_right = _place_data_legend(
+        ax, model_handles, ncol=2, title="Model",
+        anchor_data=_MODEL_ANCHOR, loc="upper right", legend_kw=legend_kw,
+    )
+
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=300, bbox_inches="tight")
+    fig.savefig(
+        out, dpi=300, bbox_inches="tight",
+        bbox_extra_artists=(leg_left, leg_right),
+        pad_inches=0.03,
+    )
     print(f"Saved → {out}")
     return fig
 
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--experiments-dir",

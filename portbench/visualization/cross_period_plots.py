@@ -200,24 +200,16 @@ def plot_cross_period_vs_ew(
                         zorder=5,
                     )
 
-            # Title: bold panel id + period (left); beat-rate as muted secondary (right)
+            # Centered panel title with beat-rate in parentheses
             letter = PERIOD_PANEL[per]
             rate = beat_rates.get(per, 0.0)
             ax.set_title(
-                f"({letter})  {PERIOD_LABELS[per]}",
-                loc="left",
-                fontsize=10.0,
+                f"({letter})  {PERIOD_LABELS[per]}  ({rate:.0f}%)",
+                loc="center",
+                fontsize=11.5,
                 fontweight="bold",
-                color=_INK,
-                pad=7,
-            )
-            ax.text(
-                1.0, 1.055,
-                f"{rate:.0f}%",
-                transform=ax.transAxes,
-                ha="right", va="bottom",
-                fontsize=9.0, color=_MUTED,
-                clip_on=False,
+                color="black",
+                pad=8,
             )
 
             # Narrow-scale callout for the bull panel (axis range ≪ other panels)
@@ -227,17 +219,17 @@ def plot_cross_period_vs_ew(
                     "narrow scale",
                     transform=ax.transAxes,
                     ha="right", va="bottom",
-                    fontsize=7.5, color=_MUTED, style="italic",
+                    fontsize=9.0, color=_MUTED, style="italic",
                 )
 
             ax.set_yticks(y)
             if idx == 0:
-                ax.set_yticklabels(labels, fontsize=10)
+                ax.set_yticklabels(labels, fontsize=11.5)
                 ax.tick_params(axis="y", length=0, pad=3)
             else:
                 ax.tick_params(axis="y", length=0, labelleft=False)
             ax.set_xlabel("")  # single shared label below
-            ax.tick_params(axis="x", labelsize=8.5, length=3.5, pad=2)
+            ax.tick_params(axis="x", labelsize=10.0, length=3.5, pad=2)
             ax.set_xlim(xmin, xmax)
             ax.set_ylim(n_models - 0.55, -0.55)
 
@@ -254,13 +246,13 @@ def plot_cross_period_vs_ew(
             0.55, 0.10,
             "Sharpe − EqW",
             ha="center", va="center",
-            fontsize=10.0, color=_INK,
+            fontsize=11.5, color="black",
         )
 
         handles = [
             mlines.Line2D(
                 [], [], color=PROFILE_COLORS[p], marker=PROFILE_MARKERS[p], linestyle="None",
-                markersize=8.0, markeredgecolor="white", markeredgewidth=1.0,
+                markersize=9.0, markeredgecolor="white", markeredgewidth=1.0,
                 label=p.capitalize(),
             )
             for p in PROFILE_ORDER
@@ -278,13 +270,13 @@ def plot_cross_period_vs_ew(
             handles=handles,
             loc="lower center",
             ncol=5,
-            fontsize=9.0,
+            fontsize=10.5,
             frameon=False,
             bbox_to_anchor=(0.55, -0.015),
             handletextpad=0.45,
             columnspacing=1.35,
         )
         if title:
-            fig.suptitle(title, fontsize=12, fontweight="normal", y=1.06)
-        fig.subplots_adjust(left=0.095, right=0.995, top=0.88, bottom=0.20, wspace=0.10)
+            fig.suptitle(title, fontsize=13, fontweight="normal", y=1.06)
+        fig.subplots_adjust(left=0.10, right=0.995, top=0.88, bottom=0.20, wspace=0.10)
         return fig
