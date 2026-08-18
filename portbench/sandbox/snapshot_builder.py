@@ -45,6 +45,7 @@ class SnapshotBuilder:
         current_weights: dict[str, float],
         nav: float,
         forward_days: int = 0,
+        as_of_date: Optional[date] = None,
     ) -> MarketSnapshot:
         """
         Build a MarketSnapshot for decision_date with live portfolio state.
@@ -56,23 +57,27 @@ class SnapshotBuilder:
             forward_days:    If > 0, fetch this many trading days of future returns
                              (starting from decision_date) and populate
                              future_return_data for S3 ground-truth computation.
+            as_of_date:      If set, price/return/macro/regime series stop on this
+                             date instead of decision_date. Use the previous close
+                             to exclude same-day information.
 
         Returns:
             MarketSnapshot ready to pass to EvalPipeline.run_episode() or
             BaselineStrategy.allocate().
         """
-        lookback_start = decision_date - timedelta(days=int(self.lookback_days * 1.5))
+        data_date = as_of_date if as_of_date is not None else decision_date
+        lookback_start = data_date - timedelta(days=int(self.lookback_days * 1.5))
 
         price_data: dict[str, pd.Series] = {}
         return_data: dict[str, pd.Series] = {}
 
         for asset in self.assets:
             prices = self.provider.get_price_series(
-                asset, lookback_start, decision_date
+                asset, lookback_start, data_date
             )
             prices = prices.iloc[-self.lookback_days :]
             returns = self.provider.get_return_series(
-                asset, lookback_start, decision_date
+                asset, lookback_start, data_date
             )
             returns = returns.iloc[-self.lookback_days :]
             if prices.empty or returns.empty:
@@ -89,12 +94,12 @@ class SnapshotBuilder:
             ret_df = pd.DataFrame(return_data)
             corr = ret_df.corr()
 
-        macro = self.provider.get_macro(decision_date)
-        regime = self.provider.get_regime(decision_date).value
+        macro = self.provider.get_macro(data_date)
+        regime = self.provider.get_regime(data_date).value
 
         news_text = ""
         for asset in self.assets:
-            txt = self.provider.get_news(asset, decision_date)
+            txt = self.provider.get_news(asset, data_date)
             if txt:
                 news_text = txt
                 break

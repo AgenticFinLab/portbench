@@ -172,6 +172,22 @@ class DataCollector(ABC):
 
         return True
 
+    def _csv_date_range(self, path: Path) -> tuple[Optional[str], Optional[str]]:
+        """Return (min_date, max_date) as YYYY-MM-DD from a CSV with a date column."""
+
+        if not path.is_file() or path.suffix.lower() != ".csv":
+            return None, None
+        import pandas as pd
+
+        df = pd.read_csv(path, usecols=["date"])
+        dates = pd.to_datetime(df["date"], errors="coerce").dropna()
+        if dates.empty:
+            return None, None
+        return (
+            dates.min().strftime("%Y-%m-%d"),
+            dates.max().strftime("%Y-%m-%d"),
+        )
+
     @abstractmethod
     def download(
         self, dataset_id: str, asset_class: AssetClass, force: bool = False

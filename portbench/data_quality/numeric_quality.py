@@ -12,6 +12,16 @@ from .base import (
     QualityLevel,
 )
 
+# Close-price columns that must be non-null inside val and stress windows.
+_FLAGSHIP_CLOSE = {
+    "equities": ("SPY_close",),
+    "bonds": ("TLT_close",),
+    "commodities": ("GLD_close",),
+    "real_estate": ("VNQ_close",),
+    "cryptocurrency": ("BTC_USD_close", "BTC-USD_close"),
+    "cash": ("BIL_close",),
+}
+
 
 class NumericQualityChecker(DataQualityChecker):
     """
@@ -110,6 +120,7 @@ class NumericQualityChecker(DataQualityChecker):
 
         report.checks.append(self._check_temporal_coverage(df))
         report.checks.extend(self._check_stress_coverage(df))
+        report.checks.extend(self._check_flagship_coverage(df, asset_class))
         report.checks.append(self._check_split_completeness(df))
         report.checks.append(self._check_missing_gap(df, numeric_cols))
         report.checks.extend(self._check_price_sanity(df, price_cols))
@@ -181,6 +192,50 @@ class NumericQualityChecker(DataQualityChecker):
                 )
             )
 
+        return results
+
+    def _check_flagship_coverage(
+        self, df: pd.DataFrame, asset_class: str
+    ) -> list[CheckResult]:
+        """Non-null coverage of flagship close columns in val and stress windows."""
+
+        candidates = _FLAGSHIP_CLOSE.get(asset_class, ())
+        col = next((c for c in candidates if c in df.columns), None)
+        if col is None:
+            return []
+
+        windows = [("val", self.config.val_start, self.config.val_end)]
+        windows.extend(self.config.stress_periods)
+        results = []
+        for period_name, start, end in windows:
+            mask = (df["date"] >= start) & (df["date"] <= end)
+            n_rows = int(mask.sum())
+            n_valid = int(df.loc[mask, col].notna().sum()) if n_rows else 0
+            coverage = n_valid / max(n_rows, 1)
+            level = self._level_by_threshold(
+                coverage,
+                warn_threshold=self.config.min_stress_coverage,
+                fail_threshold=0.70,
+                higher_is_better=True,
+            )
+            results.append(
+                self._make_check(
+                    f"flagship_coverage_{col}_{period_name}",
+                    value=round(coverage, 4),
+                    threshold=self.config.min_stress_coverage,
+                    level=level,
+                    message=(
+                        f"{col} non-null on {coverage:.1%} of rows in "
+                        f"'{period_name}' ({start} – {end})."
+                    ),
+                    details={
+                        "column": col,
+                        "period": period_name,
+                        "n_rows": n_rows,
+                        "n_valid": n_valid,
+                    },
+                )
+            )
         return results
 
     def _check_split_completeness(self, df: pd.DataFrame) -> CheckResult:

@@ -46,9 +46,9 @@ _RETURN_SUFFIX = "_return"
 _MACRO_COLUMNS: dict[str, tuple[str, str]] = {
     # Money / rates (from cash.csv)
     "fed_funds_rate": ("cash", "fred_DFF"),
-    "cpi_yoy": ("cash", "fred_CPIAUCSL"),
+    "cpi_yoy": ("cash", "fred_CPIAUCSL_yoy"),
     "unemployment": ("cash", "fred_UNRATE"),
-    "gdp_growth_qoq": ("cash", "fred_GDPC1"),
+    "gdp_growth_qoq": ("cash", "fred_GDPC1_qoq"),
     # Yield curve / credit (from bonds.csv)
     "t10y2y_spread": ("bonds", "fred_T10Y2Y"),
     "t10y3m_spread": ("bonds", "fred_T10Y3M"),
@@ -66,6 +66,29 @@ _MACRO_COLUMNS: dict[str, tuple[str, str]] = {
     "real_yield_10y": ("bonds", "fred_DFII10"),
     # Equity volatility (from equities.csv — VIX lives here)
     "vix": ("equities", "^VIX_close"),
+}
+
+# Calendar days after the observation's period-start before the value is
+# treated as available. Daily series use one day. Monthly CPI/UNRATE use
+# 45 days. Quarterly GDPC1 uses 120 days.
+_MACRO_LAGS: dict[str, int] = {
+    "fed_funds_rate": 1,
+    "cpi_yoy": 45,
+    "unemployment": 45,
+    "gdp_growth_qoq": 120,
+    "t10y2y_spread": 1,
+    "t10y3m_spread": 1,
+    "breakeven_10y": 1,
+    "hy_oas": 1,
+    "ig_oas": 1,
+    "ted_spread": 1,
+    "mortgage_30y": 1,
+    "dgs_3m": 1,
+    "dgs_2y": 1,
+    "dgs_10y": 1,
+    "dgs_30y": 1,
+    "real_yield_10y": 1,
+    "vix": 1,
 }
 
 # Map from short ticker name → possible column prefixes in the processed CSV
@@ -376,24 +399,51 @@ class ProcessedDataProvider(DataProvider):
         return prices.pct_change().dropna()
 
     def get_macro(self, d: date) -> dict[str, float]:
-        """
-        Return macro indicators as of date d (most recent observation ≤ d).
+        """Return macro indicators available on date d after publication lags."""
 
-        Reads from cash.csv, bonds.csv, and equities.csv as mapped in
-        _MACRO_COLUMNS. Missing values default to 0.0.
-        """
         result = {}
         for macro_key, (frame_key, col_name) in _MACRO_COLUMNS.items():
-            df = self._frames.get(frame_key)
+            df = self._ensure_frame(frame_key)
             if df is None or col_name not in df.columns:
                 result[macro_key] = 0.0
                 continue
-            candidates = df.loc[df.index.date <= d, col_name].dropna()
-            result[macro_key] = (
-                float(candidates.iloc[-1]) if not candidates.empty else 0.0
+            lag_days = _MACRO_LAGS[macro_key]
+            result[macro_key] = self._last_available_macro(
+                df[col_name], d, lag_days
             )
-
         return result
+
+    def _ensure_frame(self, frame_key: str) -> Optional[pd.DataFrame]:
+        """Load one asset-class CSV on first use."""
+
+        if frame_key in self._frames:
+            return self._frames[frame_key]
+        filename = self._CLASS_TO_FILE.get(frame_key)
+        if filename is None:
+            return None
+        df = self._load_asset_frame(frame_key, filename)
+        if df is not None:
+            self._frames[frame_key] = df
+        return df
+
+    @staticmethod
+    def _last_available_macro(
+        series: pd.Series, as_of: date, lag_days: int
+    ) -> float:
+        """Last distinct observation whose period-start plus lag is <= as_of."""
+
+        s = series.dropna()
+        if s.empty:
+            return 0.0
+        # Collapse daily ffill plateaus to the first date of each level.
+        changed = s.ne(s.shift(1))
+        obs = s[changed]
+        available_on = pd.to_datetime(obs.index) + pd.Timedelta(days=int(lag_days))
+        cutoff = pd.Timestamp(as_of)
+        usable = obs[available_on <= cutoff]
+        if usable.empty:
+            return 0.0
+        return float(usable.iloc[-1])
 
     def get_regime(self, d: date, asset: str = "SPY") -> MarketRegime:
         """
@@ -407,12 +457,16 @@ class ProcessedDataProvider(DataProvider):
             if not candidates.empty:
                 return MarketRegime(candidates.iloc[-1])
 
-        # On-the-fly fallback
+        # On-the-fly fallback. Try SPY, then other broad-equity ETFs.
         half_year_ago = d - timedelta(days=126)
-        try:
-            prices = self.get_price_series("SPY", half_year_ago, d)
-        except (KeyError, Exception):
-            return MarketRegime.SIDEWAYS
+        prices = pd.Series(dtype=float)
+        for ticker in (asset, "SPY", "IVV", "QQQ"):
+            try:
+                prices = self.get_price_series(ticker, half_year_ago, d)
+            except (KeyError, Exception):
+                continue
+            if len(prices) >= 2:
+                break
 
         if len(prices) < 2:
             return MarketRegime.SIDEWAYS
@@ -755,14 +809,15 @@ class ProcessedDataProvider(DataProvider):
 
     def _ticker_has_columns(self, ticker: str, cls: str, all_columns: set) -> bool:
         """Check if a ticker has matching columns in the loaded data."""
+
+        variants = [ticker, ticker.replace("-", "_")]
         for suffix in ["_close", "_return"]:
-            # Check with each source prefix
-            for prefix in _SOURCE_PREFIXES:
-                if f"{prefix}_{ticker}{suffix}" in all_columns:
+            for name in variants:
+                for prefix in _SOURCE_PREFIXES:
+                    if f"{prefix}_{name}{suffix}" in all_columns:
+                        return True
+                if f"{name}{suffix}" in all_columns:
                     return True
-            # Check bare name (for FF49/SP500 isolated datasets)
-            if f"{ticker}{suffix}" in all_columns:
-                return True
         return False
 
     def _load_asset_frame(self, cls: str, filename: str) -> Optional[pd.DataFrame]:

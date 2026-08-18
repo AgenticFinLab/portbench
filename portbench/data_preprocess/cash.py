@@ -28,9 +28,15 @@ class CashPreprocessor(AssetPreprocessor):
                 if "date" in df.columns and "value" in df.columns:
                     result = pd.DataFrame()
                     result["date"] = pd.to_datetime(df["date"])
-                    result[f"fred_{series_name}"] = pd.to_numeric(
-                        df["value"], errors="coerce"
-                    )
+                    level_col = f"fred_{series_name}"
+                    result[level_col] = pd.to_numeric(df["value"], errors="coerce")
+                    result = result.sort_values("date").reset_index(drop=True)
+                    # YoY on the monthly CPI index, before daily alignment.
+                    if series_name == "CPIAUCSL":
+                        result["fred_CPIAUCSL_yoy"] = result[level_col].pct_change(12)
+                    # QoQ on the quarterly real-GDP level, before daily alignment.
+                    if series_name == "GDPC1":
+                        result["fred_GDPC1_qoq"] = result[level_col].pct_change(1)
                     result = self.numeric_processor.align_to_dates(
                         result, start_date, end_date
                     )

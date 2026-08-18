@@ -11,6 +11,26 @@ import yfinance as yf
 
 from .base import DataCollector, AssetClass, DataType, DatasetMetadata
 
+# Tickers that must cover the collector start_date. A short recent file is
+# treated as incomplete even if metadata.json exists.
+_REQUIRE_START_COVERAGE = {
+    "SPY",
+    "QQQ",
+    "IVV",
+    "IWM",
+    "VTI",
+    "TLT",
+    "IEF",
+    "GLD",
+    "VNQ",
+    "BIL",
+    "^VIX",
+    "BTC-USD",
+}
+
+# Allow listing delay of a few weeks after the configured start.
+_COVERAGE_GRACE_DAYS = 40
+
 
 @dataclass
 class YahooTicker:
@@ -242,8 +262,12 @@ class YahooCollector(DataCollector):
         target_file = target_dir / f"{dataset_id}.csv"
 
         if not force and self._is_complete(target_file, dataset_id):
-            print(f"Ticker already complete: {target_file}")
-            return target_file
+            if self._has_expected_coverage(target_file, dataset_id):
+                print(f"Ticker already complete: {target_file}")
+                return target_file
+            print(
+                f"Ticker metadata exists but date coverage is short: {target_file}"
+            )
 
         print(f"Downloading {dataset_id}...")
 
@@ -360,6 +384,19 @@ class YahooCollector(DataCollector):
 
         time.sleep(1)
         return target_file
+
+    def _has_expected_coverage(self, path: Path, dataset_id: str) -> bool:
+        """True when a flagship ticker CSV starts near the collector start_date."""
+
+        if dataset_id not in _REQUIRE_START_COVERAGE:
+            return True
+        min_date, _max_date = self._csv_date_range(path)
+        if min_date is None:
+            return False
+        file_start = datetime.strptime(min_date, "%Y-%m-%d")
+        expected = datetime.strptime(self.start_date, "%Y-%m-%d")
+        gap_days = (file_start - expected).days
+        return gap_days <= _COVERAGE_GRACE_DAYS
 
     def download_all(self, force: bool = False) -> dict[AssetClass, list[Path]]:
         """
