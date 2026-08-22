@@ -1,0 +1,51 @@
+# Preregistered conservative pressure-window replication of the 2x2x2 comparison.
+batch_id: "agentic_hy3_conservative_{date}"
+
+data_provider: processed
+data_version: processed-v1
+data_dir: datasets/processed
+sec_dir: datasets/sec
+rebalance: monthly
+initial_nav: 1000000
+workers_per_experiment: 1
+parallel_experiments: 2
+seed: 42
+
+generation:
+  temperature: 0.0
+  max_tokens: 8192
+
+resource_budget:
+  max_tokens_per_episode: 32000
+  max_requests_per_episode: 24
+  config_version: iso-token-v3
+
+models:
+  - {provider: tencent, model: hy3-preview, architecture_id: SA}
+  - {provider: tencent, model: hy3-preview, architecture_id: SA-T}
+  - {provider: tencent, model: hy3-preview, architecture_id: SA-M}
+  - {provider: tencent, model: hy3-preview, architecture_id: SA-MT}
+  - {provider: tencent, model: hy3-preview, architecture_id: MA}
+  - {provider: tencent, model: hy3-preview, architecture_id: MA-T}
+  - {provider: tencent, model: hy3-preview, architecture_id: MA-M}
+  - {provider: tencent, model: hy3-preview, architecture_id: MA-MT}
+
+profiles: [conservative]
+stress_scenarios: []
+run_normal: true
+normal_periods:
+  - {start: 2022-07-01, end: 2022-12-31, label: conservative_pressure_2022h2}
+
+oracle_mode: lookback
+experiment_tag: agentic_hy3_conservative_v1
+logging:
+  save_pipeline_logs: true
+  save_snapshots: true
+  save_figures: true
+
+on_error: isolate
+output_root: EXPERIMENTS
+timeout: 600
+propagation_weight: 0.1
+reuse_latest: true
+run_qa: false

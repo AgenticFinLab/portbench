@@ -51,6 +51,16 @@ class GenerationConfig:
     max_tokens: int = 4096
 
 
+@dataclass
+class ResourceBudgetConfig:
+    """Configure the shared per-episode token budget."""
+
+    # Both architectures use the same hard episode limits for fair comparison.
+    max_tokens_per_episode: int = 32000
+    max_requests_per_episode: int = 24
+    config_version: str = "iso-token-v3"
+
+
 import yaml
 
 
@@ -65,6 +75,16 @@ class ModelSpec:
     temperature: Optional[float] = None  # overrides global generation.temperature
     max_tokens: Optional[int] = None  # overrides global generation.max_tokens
     parallel_questions: Optional[int] = None  # overrides global qa.parallel_questions for this model
+    architecture_id: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.architecture_id is None:
+            return
+        from ..agent_eval.contracts import ARCHITECTURE_IDS
+
+        # Fail during config loading instead of after a paid provider call.
+        if self.architecture_id not in ARCHITECTURE_IDS:
+            raise ValueError(f"unknown architecture_id={self.architecture_id!r}")
 
     def kind(self) -> str:
         if self.baseline:
@@ -127,6 +147,7 @@ class ExperimentConfig:
                               # e.g. "rebuttal_lookback" → EXPERIMENTS_rebuttal_lookback/
 
     data_provider: str = "processed"
+    data_version: str = "processed-v1"
     data_dir: str = "datasets/processed"
     sec_dir: str = "datasets/sec"
     rebalance: str = "monthly"
@@ -145,11 +166,17 @@ class ExperimentConfig:
     run_qa: bool = False  # run QA dataset evaluation alongside sandbox
     qa: QAConfig = field(default_factory=QAConfig)
     generation: GenerationConfig = field(default_factory=GenerationConfig)
+    resource_budget: ResourceBudgetConfig = field(default_factory=ResourceBudgetConfig)
     sigma_ablation_values: list = field(
         default_factory=lambda: [0.0, 0.25, 0.5, 0.75, 1.0]
     )
 
     def __post_init__(self):
+        # Concurrent scenarios would mix provider usage deltas across threads.
+        if any(model.architecture_id for model in self.models) and self.workers_per_experiment != 1:
+            raise ValueError(
+                "architecture experiments require workers_per_experiment=1 for exact usage attribution"
+            )
         if self.experiment_tag:
             self.output_root = f"{self.output_root}_{self.experiment_tag}"
 
@@ -199,6 +226,13 @@ class ExperimentConfig:
             temperature=float(gen_raw.get("temperature", 0.0)),
             max_tokens=int(gen_raw.get("max_tokens", 4096)),
         )
+        budget_raw = raw.get("resource_budget") or {}
+        # Parse the budget as integers so runtime accounting has one canonical type.
+        budget_obj = ResourceBudgetConfig(
+            max_tokens_per_episode=int(budget_raw.get("max_tokens_per_episode", 32000)),
+            max_requests_per_episode=int(budget_raw.get("max_requests_per_episode", 24)),
+            config_version=str(budget_raw.get("config_version", "iso-token-v3")),
+        )
 
         batch_id_raw = raw.get("batch_id") or ""
         batch_id = _expand_batch_id(
@@ -217,6 +251,7 @@ class ExperimentConfig:
             oracle_mode=str(raw.get("oracle_mode", "ex_post")),
             experiment_tag=str(raw.get("experiment_tag", "")),
             data_provider=raw.get("data_provider", "processed"),
+            data_version=str(raw.get("data_version", "processed-v1")),
             data_dir=raw.get("data_dir", "datasets/processed"),
             sec_dir=raw.get("sec_dir", "datasets/sec"),
             rebalance=raw.get("rebalance", "monthly"),
@@ -235,6 +270,7 @@ class ExperimentConfig:
             run_qa=bool(raw.get("run_qa", False)),
             qa=_parse_qa_config(raw.get("qa") or {}),
             generation=gen_obj,
+            resource_budget=budget_obj,
             sigma_ablation_values=list(
                 raw.get("sigma_ablation_values", [0.0, 0.25, 0.5, 0.75, 1.0])
             ),

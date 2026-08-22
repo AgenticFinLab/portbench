@@ -20,6 +20,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import sys
+import subprocess
 import threading
 import time
 import traceback
@@ -33,6 +34,7 @@ import yaml
 from tqdm.auto import tqdm
 
 from ..agent_eval.base import AgentAdapter
+from ..agent_eval.architectures import IsoTokenBudget
 from ..agent_eval.investor_profiles import PROFILES
 from ..agent_eval.stress_scenarios import STRESS_SCENARIOS
 from ..qa_builder.mock_data import MockDataProvider
@@ -52,9 +54,39 @@ from .providers import (
     spec_provider_name,
     spec_model_name,
 )
+from .source_version import source_tree_hash
 
 
 _STRESS_BY_NAME = {s.name: s for s in STRESS_SCENARIOS}
+_CODE_REVISION_CACHE: Optional[str] = None
+
+
+def _current_code_commit() -> str:
+    """Return a revision identifier that also changes for a dirty source tree."""
+    global _CODE_REVISION_CACHE
+    if _CODE_REVISION_CACHE is not None:
+        return _CODE_REVISION_CACHE
+
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    commit = result.stdout.strip() or "unknown"
+    # Git HEAD alone is insufficient while experiments run from uncommitted code.
+    _CODE_REVISION_CACHE = f"{commit}+tree.{source_tree_hash()[:12]}"
+    return _CODE_REVISION_CACHE
+
+
+def _resource_budget(cfg: ExperimentConfig) -> IsoTokenBudget:
+    """Convert the experiment budget config into the runtime contract."""
+    return IsoTokenBudget(
+        max_tokens_per_episode=cfg.resource_budget.max_tokens_per_episode,
+        max_requests_per_episode=cfg.resource_budget.max_requests_per_episode,
+        config_version=cfg.resource_budget.config_version,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -98,7 +130,11 @@ def _resolve_model_name(spec: ModelSpec) -> str:
     if not model:
         prov_spec = PROVIDER_REGISTRY[spec.provider.lower()]
         model = _env(prov_spec.env_prefix, "MODEL") or "default"
-    return model.replace("/", "_").replace(":", "_")
+    resolved = model.replace("/", "_").replace(":", "_")
+    if spec.architecture_id:
+        # Keep SA and MA artifacts in separate model directories.
+        resolved = f"{resolved}__{spec.architecture_id}"
+    return resolved
 
 
 def _build_provider(cfg: ExperimentConfig):
@@ -153,7 +189,34 @@ def _make_logger(name: str, log_path: Path) -> logging.Logger:
 # ---------------------------------------------------------------------------
 
 
-def _is_profile_complete(p_dir: Path, cfg: "ExperimentConfig") -> bool:
+def _cache_contract_matches(data: dict, cfg: "ExperimentConfig", spec: ModelSpec) -> bool:
+    """Return whether a closed-loop artifact belongs to the current experiment contract."""
+    expected_architecture = spec.architecture_id or "legacy"
+    expected_schema = "pipeline-v3-collab" if spec.architecture_id else "pipeline-v1"
+    # Reuse requires an exact match across protocol, data, and executable source.
+    return all(
+        (
+            data.get("architecture_id") == expected_architecture,
+            data.get("result_protocol") == "closed-loop",
+            data.get("schema_version") == expected_schema,
+            data.get("data_version") == cfg.data_version,
+            data.get("code_commit") == _current_code_commit(),
+        )
+    )
+
+
+def _result_file_reusable(path: Path, cfg: "ExperimentConfig", spec: ModelSpec) -> bool:
+    """Validate a saved result before model-level or scenario-level reuse."""
+    if not path.exists():
+        return False
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return False
+    return isinstance(data, dict) and _cache_contract_matches(data, cfg, spec)
+
+
+def _is_profile_complete(p_dir: Path, cfg: "ExperimentConfig", spec: ModelSpec) -> bool:
     """
     Return True only if every expected scenario result file exists on disk.
 
@@ -163,13 +226,14 @@ def _is_profile_complete(p_dir: Path, cfg: "ExperimentConfig") -> bool:
     skipped because the stress gate failed).
     """
     for sc_name in cfg.resolved_stress_scenarios():
-        if not (p_dir / f"stress_{sc_name}" / "backtest_result.json").exists():
+        result_path = p_dir / f"stress_{sc_name}" / "backtest_result.json"
+        if not _result_file_reusable(result_path, cfg, spec):
             return False
     if cfg.run_normal:
         for np_item in cfg.normal_periods:
             np_label = np_item.label or "normal"
             np_dir = p_dir / f"normal_{np_label}" if np_item.label else p_dir / "normal"
-            if not (np_dir / "backtest_result.json").exists():
+            if not _result_file_reusable(np_dir / "backtest_result.json", cfg, spec):
                 return False
     return True
 
@@ -196,6 +260,8 @@ def _run_one_scenario(
     if cached_result_path.exists():
         try:
             data = json.loads(cached_result_path.read_text(encoding="utf-8"))
+            if not _cache_contract_matches(data, cfg, spec):
+                raise ValueError("cached result contract mismatch")
             result = _BR.from_dict(data)
             passed = bool(data.get("stress_passed", False))
             dd_score = float(
@@ -239,6 +305,11 @@ def _run_one_scenario(
         propagation_weight=cfg.propagation_weight,
         step_cache_dir=str(step_cache_dir) if step_cache_dir else None,
         oracle_mode=cfg.oracle_mode,
+        architecture_id=spec.architecture_id,
+        provider_name=spec.provider or "",
+        data_version=cfg.data_version,
+        code_commit=_current_code_commit(),
+        resource_budget=_resource_budget(cfg) if spec.architecture_id else None,
     )
     if pipeline_log_dir is not None:
         engine.enable_pipeline_logging(
@@ -285,6 +356,8 @@ def _run_normal(
     if cached_result_path.exists():
         try:
             data = json.loads(cached_result_path.read_text(encoding="utf-8"))
+            if not _cache_contract_matches(data, cfg, spec):
+                raise ValueError("cached result contract mismatch")
             return _BR.from_dict(data)
         except Exception:
             pass  # corrupt cache — re-run
@@ -316,6 +389,11 @@ def _run_normal(
         propagation_weight=cfg.propagation_weight,
         step_cache_dir=str(step_cache_dir) if step_cache_dir else None,
         oracle_mode=cfg.oracle_mode,
+        architecture_id=spec.architecture_id,
+        provider_name=spec.provider or "",
+        data_version=cfg.data_version,
+        code_commit=_current_code_commit(),
+        resource_budget=_resource_budget(cfg) if spec.architecture_id else None,
     )
     if pipeline_log_dir is not None:
         engine.enable_pipeline_logging(
@@ -503,7 +581,7 @@ def _run_one_model(
     # pending so the scenario-level cache handles skipping what already ran.
     if already_done_set:
         incomplete = {
-            p for p in already_done_set if not _is_profile_complete(r_dir / p, cfg)
+            p for p in already_done_set if not _is_profile_complete(r_dir / p, cfg, spec)
         }
         if incomplete:
             logger.info(
@@ -550,7 +628,7 @@ def _run_one_model(
     )
 
     errors_path = r_dir / "errors.jsonl"
-    completed = list(already_done or [])
+    completed = list(already_done_set)
 
     for profile_name in pending:
         p_dir = r_dir / profile_name
@@ -719,7 +797,7 @@ class BatchRunner:
                     done = paths.get_completed_profiles(r_dir, cfg.profiles)
                     # Verify scenario data exists; demote incomplete profiles
                     truly_done = [
-                        p for p in done if _is_profile_complete(r_dir / p, cfg)
+                        p for p in done if _is_profile_complete(r_dir / p, cfg, spec)
                     ]
                     if set(truly_done) >= set(cfg.profiles):
                         # All profiles complete — fully reuse this run
