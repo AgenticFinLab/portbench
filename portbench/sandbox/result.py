@@ -64,6 +64,12 @@ class BacktestResult:
     # Refusal tracking (populated when use_pipeline=True)
     n_refused_steps: int = 0    # episodes where ≥1 stage returned a refusal fallback
     refused_rate: float = 0.0   # n_refused_steps / n_rebalances
+    architecture_id: str = "legacy"
+    result_protocol: str = "closed-loop"
+    schema_version: str = "pipeline-v1"
+    data_version: str = ""
+    code_commit: str = ""
+    resource_audit: list[dict] = field(default_factory=list)
 
     def __post_init__(self):
         self._compute_metrics()
@@ -88,6 +94,25 @@ class BacktestResult:
 
     def to_dict(self) -> dict:
         """Serialize to JSON-safe dict (excludes time series)."""
+        resource_totals = {
+            "episodes": len(self.resource_audit),
+            "token_exact": 0,
+            "token_est": 0,
+            "request_count": 0,
+            "tool_call_count": 0,
+            "cache_hit_count": 0,
+            "logical_call_count": 0,
+            "latency_ms": 0.0,
+        }
+        for episode in self.resource_audit:
+            usage = episode.get("usage", {})
+            for key in resource_totals:
+                if key != "episodes":
+                    resource_totals[key] += usage.get(key, 0)
+        resource_totals["latency_ms"] = round(float(resource_totals["latency_ms"]), 3)
+        resource_totals["mean_latency_ms_per_episode"] = round(
+            resource_totals["latency_ms"] / max(resource_totals["episodes"], 1), 3
+        )
         d = {
             "model_name": self.model_name,
             "start_date": str(self.start_date),
@@ -105,6 +130,13 @@ class BacktestResult:
             "volatility": round(self.volatility, 6),
             "n_rebalances": self.n_rebalances,
             "total_transaction_cost": round(self.total_transaction_cost, 4),
+            "architecture_id": self.architecture_id,
+            "result_protocol": self.result_protocol,
+            "schema_version": self.schema_version,
+            "data_version": self.data_version,
+            "code_commit": self.code_commit,
+            "resource_audit": list(self.resource_audit),
+            "resource_totals": resource_totals,
         }
         if self.profile_name is not None:
             d["profile_name"] = self.profile_name
@@ -162,6 +194,12 @@ class BacktestResult:
         obj.stress_passed = d.get("stress_passed")
         obj.n_refused_steps = int(d.get("n_refused_steps", 0))
         obj.refused_rate = float(d.get("refused_rate", 0.0))
+        obj.architecture_id = str(d.get("architecture_id", "legacy"))
+        obj.result_protocol = str(d.get("result_protocol", "closed-loop"))
+        obj.schema_version = str(d.get("schema_version", "pipeline-v1"))
+        obj.data_version = str(d.get("data_version", ""))
+        obj.code_commit = str(d.get("code_commit", ""))
+        obj.resource_audit = list(d.get("resource_audit", []))
         return obj
 
     def summary(self) -> str:

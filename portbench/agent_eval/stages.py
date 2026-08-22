@@ -385,7 +385,11 @@ def _is_refusal(raw: str) -> bool:
 
 
 def _call_with_json_retry(
-    adapter, prompt: str, use_tools: bool, stage_name: str
+    adapter,
+    prompt: str,
+    use_tools: bool,
+    stage_name: str,
+    snapshot: Optional[MarketSnapshot] = None,
 ) -> tuple:
     """
     Call the LLM and parse a JSON object, retrying on parse failure.
@@ -406,7 +410,7 @@ def _call_with_json_retry(
             full_prompt = prompt + build_format_correction_suffix(str(last_err))
         try:
             if use_tools:
-                raw = adapter.complete_with_tools(full_prompt, get_tools())
+                raw = adapter.complete_with_tools(full_prompt, get_tools(snapshot=snapshot))
             else:
                 raw = adapter.complete(full_prompt)
         except EmptyResponseError:
@@ -632,7 +636,7 @@ class S1MarketInterpretation(PipelineStage):
         self._last_prompt = prompt
         try:
             parsed, raw = _call_with_json_retry(
-                self.adapter, prompt, self.use_tools, "S1"
+                self.adapter, prompt, self.use_tools, "S1", snapshot
             )
         except StageRefusalError as exc:
             return S1Output(
@@ -771,7 +775,7 @@ class S2SignalGeneration(PipelineStage):
         self._last_prompt = prompt
         try:
             parsed, raw = _call_with_json_retry(
-                self.adapter, prompt, self.use_tools, "S2"
+                self.adapter, prompt, self.use_tools, "S2", snapshot
             )
         except StageRefusalError as exc:
             return S2Output(
@@ -971,7 +975,7 @@ class S3WeightOptimization(PipelineStage):
         self._last_prompt = prompt
         try:
             parsed, raw = _call_with_json_retry(
-                self.adapter, prompt, self.use_tools, "S3"
+                self.adapter, prompt, self.use_tools, "S3", snapshot
             )
         except StageRefusalError as exc:
             # Hold current weights — no rebalancing when the model refuses
@@ -1174,6 +1178,7 @@ class S3WeightOptimization(PipelineStage):
 # ---------------------------------------------------------------------------
 
 
+# Dual-layer S4/S5 plan vs env: see portbench.agent_eval.s4_s5_* and portbench.sandbox.execution / risk_control (this legacy stage stays pipeline-v1-deterministic).
 class S4ExecutionSimulation(PipelineStage):
     """
     Stage 4: Trade Execution Simulation.

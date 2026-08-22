@@ -91,6 +91,12 @@ class EpisodeLog:
     stages: list[StageLog] = field(default_factory=list)
     ceps_score: float = 0.0
     duration_ms: float = 0.0
+    architecture_id: str = "legacy"
+    result_protocol: str = "closed-loop"
+    schema_version: str = "pipeline-v1"
+    resource_usage: dict = field(default_factory=dict)
+    provenance: dict = field(default_factory=dict)
+    collaboration_trace: list[dict] = field(default_factory=list)
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
 
 
@@ -203,6 +209,12 @@ class EvalLogger:
             stages=stage_logs,
             ceps_score=ceps_score,
             duration_ms=duration_ms,
+            architecture_id=result.architecture_id,
+            result_protocol=result.result_protocol,
+            schema_version=result.schema_version,
+            resource_usage=dict(result.resource_usage),
+            provenance=dict(result.provenance),
+            collaboration_trace=list(result.collaboration_trace),
         )
 
         # Serialize and write
@@ -289,6 +301,12 @@ class EvalLogger:
             "model_name": ep.model_name,
             "ceps_score": ep.ceps_score,
             "duration_ms": ep.duration_ms,
+            "architecture_id": ep.architecture_id,
+            "result_protocol": ep.result_protocol,
+            "schema_version": ep.schema_version,
+            "resource_usage": ep.resource_usage,
+            "provenance": ep.provenance,
+            "collaboration_trace": ep.collaboration_trace,
             "timestamp": ep.timestamp,
             "stages": [
                 {

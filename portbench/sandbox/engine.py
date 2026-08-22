@@ -92,6 +92,11 @@ class BacktestEngine:
         on_rebalance: Optional[Callable] = None,
         progress: bool = True,
         oracle_mode: str = "ex_post",
+        architecture_id: Optional[str] = None,
+        provider_name: str = "",
+        data_version: str = "",
+        code_commit: str = "",
+        resource_budget=None,
     ):
         self.strategy = strategy
         self._snapshot_dump_dir: Optional[str] = snapshot_dump_dir
@@ -109,6 +114,9 @@ class BacktestEngine:
         self._on_rebalance = on_rebalance
         self._progress = progress
         self._profile = profile
+        self._architecture_id = architecture_id
+        self._data_version = data_version
+        self._code_commit = code_commit
         self._alignment_scorer = (
             ProfileAlignmentScorer(asset_class_map)
             if (profile is not None and asset_class_map)
@@ -124,13 +132,33 @@ class BacktestEngine:
         self._pipeline: Optional[EvalPipeline] = None
         if use_pipeline:
             self._pipeline = build_default_pipeline(
-                strategy, use_tools=use_tools, profile=profile, oracle_mode=oracle_mode
+                strategy,
+                use_tools=use_tools,
+                profile=profile,
+                oracle_mode=oracle_mode,
+                architecture_id=architecture_id,
+                cache_dir=(
+                    str(Path(step_cache_dir) / "stage_cache")
+                    if step_cache_dir and architecture_id is not None
+                    else None
+                ),
+                memory_path=(
+                    str(Path(step_cache_dir) / "memory.json")
+                    if step_cache_dir and architecture_id is not None
+                    else None
+                ),
+                budget=resource_budget,
+                provider=provider_name,
+                profile_name=profile.name if profile is not None else "",
+                data_version=data_version,
+                code_commit=code_commit,
             )
 
         # Per-rebalance collection (populated in _get_target_weights)
         self._episode_results = []
         self._per_step_ceps: list[float] = []
         self._per_step_alignment: list[float] = []
+        self._resource_audit: list[dict] = []
         self._n_refused_steps: int = 0  # episodes with ≥1 refused stage
 
         # Step-level weight cache: {date_str → {weights, step_ceps, step_alignment}}
@@ -156,7 +184,11 @@ class BacktestEngine:
             self._pipeline.enable_logging(
                 output_dir=output_dir,
                 model_name=self.strategy.model_name,
-                config={"sandbox_run_id": run_id},
+                config={
+                    "sandbox_run_id": run_id,
+                    "architecture_id": self._architecture_id or "legacy",
+                    "result_protocol": "closed-loop",
+                },
             )
             self._pipeline_log_dir = output_dir
 
@@ -290,6 +322,14 @@ class BacktestEngine:
             refused_rate=round(
                 self._n_refused_steps / max(1, len(portfolio.trade_history)), 4
             ),
+            architecture_id=self._architecture_id or "legacy",
+            result_protocol="closed-loop",
+            schema_version=(
+                "pipeline-v3-collab" if self._architecture_id is not None else "pipeline-v1"
+            ),
+            data_version=self._data_version,
+            code_commit=self._code_commit,
+            resource_audit=list(self._resource_audit),
         )
 
     def _get_target_weights(self, snapshot) -> dict[str, float]:
@@ -299,7 +339,7 @@ class BacktestEngine:
             date_key = str(snapshot.decision_date)
 
             # ── Step cache hit: skip LLM call, restore cached metrics ──────
-            if date_key in self._step_cache:
+            if self._architecture_id is None and date_key in self._step_cache:
                 cached = self._step_cache[date_key]
                 if cached.get("step_ceps") is not None:
                     self._per_step_ceps.append(float(cached["step_ceps"]))
@@ -316,6 +356,15 @@ class BacktestEngine:
 
             result = self._pipeline.run_episode(snapshot)
             self._episode_results.append(result)
+            self._resource_audit.append(
+                {
+                    "decision_date": date_key,
+                    "architecture_id": result.architecture_id,
+                    "usage": dict(result.resource_usage),
+                    "provenance": dict(result.provenance),
+                    "collaboration_trace": list(result.collaboration_trace),
+                }
+            )
             if result.refused_stages:
                 self._n_refused_steps += 1
 
@@ -336,16 +385,20 @@ class BacktestEngine:
 
             # Extract weights
             weights: Optional[dict] = None
-            s3_output = result.stage_outputs.get(StageID.S3_WEIGHT_OPTIMIZATION)
-            if s3_output is not None and s3_output.weights:
-                weights = s3_output.weights
+            s5_output = result.stage_outputs.get(StageID.S5_RISK_MONITORING)
+            if s5_output is not None and getattr(s5_output, "final_weights", None):
+                weights = s5_output.final_weights
             if weights is None:
                 s4_output = result.stage_outputs.get(StageID.S4_EXECUTION_SIMULATION)
                 if s4_output is not None and s4_output.executed_weights:
                     weights = s4_output.executed_weights
+            s3_output = result.stage_outputs.get(StageID.S3_WEIGHT_OPTIMIZATION)
+            if weights is None and s3_output is not None and s3_output.weights:
+                weights = s3_output.weights
 
             if weights is not None:
-                self._write_step_cache(date_key, weights, step_ceps, step_alignment)
+                if self._architecture_id is None:
+                    self._write_step_cache(date_key, weights, step_ceps, step_alignment)
                 return weights
 
         if isinstance(self.strategy, BaselineStrategy):

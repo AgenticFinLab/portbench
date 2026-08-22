@@ -43,6 +43,14 @@ def build_default_pipeline(
     use_tools: bool = False,
     profile=None,
     oracle_mode: str = "ex_post",
+    architecture_id: str | None = None,
+    cache_dir: str | None = None,
+    memory_path: str | None = None,
+    budget=None,
+    provider: str = "",
+    profile_name: str = "",
+    data_version: str = "",
+    code_commit: str = "",
 ) -> EvalPipeline:
     """
     Construct a default five-stage EvalPipeline with the given adapter.
@@ -70,14 +78,49 @@ def build_default_pipeline(
             "that is genuinely what you want."
         )
 
+    if architecture_id is None:
+        stages = [
+            S1MarketInterpretation(adapter, use_tools=use_tools),
+            S2SignalGeneration(adapter, use_tools=use_tools),
+            S3WeightOptimization(adapter, use_tools=use_tools, oracle_mode=oracle_mode),
+            S4ExecutionSimulation(adapter),
+            S5RiskMonitoring(adapter, profile=profile),
+        ]
+        return EvalPipeline(stages)
+
+    from .agentic_pipeline_stages import AgenticS4PipelineStage, AgenticS5PipelineStage
+    from .architectures import ArchitectureRuntime
+
+    runtime = ArchitectureRuntime(
+        adapter,
+        architecture_id,
+        cache_dir=cache_dir,
+        memory_path=memory_path,
+        budget=budget,
+        provider=provider,
+        profile=profile_name,
+        data_version=data_version,
+        code_commit=code_commit,
+    )
+    tools_enabled = runtime.spec.tools_enabled
+    if runtime.spec.shared_agent:
+        s3_stage = S3WeightOptimization(
+            runtime.stage_adapter("S3"),
+            use_tools=tools_enabled,
+            oracle_mode=oracle_mode,
+        )
+    else:
+        from .collaboration import CollaborativeS3WeightOptimization
+
+        s3_stage = CollaborativeS3WeightOptimization(runtime, oracle_mode=oracle_mode)
     stages = [
-        S1MarketInterpretation(adapter, use_tools=use_tools),
-        S2SignalGeneration(adapter, use_tools=use_tools),
-        S3WeightOptimization(adapter, use_tools=use_tools, oracle_mode=oracle_mode),
-        S4ExecutionSimulation(adapter),
-        S5RiskMonitoring(adapter, profile=profile),
+        S1MarketInterpretation(runtime.stage_adapter("S1"), use_tools=tools_enabled),
+        S2SignalGeneration(runtime.stage_adapter("S2"), use_tools=tools_enabled),
+        s3_stage,
+        AgenticS4PipelineStage(runtime.stage_adapter("S4"), oracle_mode=oracle_mode),
+        AgenticS5PipelineStage(runtime.stage_adapter("S5"), profile=profile),
     ]
-    return EvalPipeline(stages)
+    return EvalPipeline(stages, runtime=runtime)
 
 
 __all__ = [

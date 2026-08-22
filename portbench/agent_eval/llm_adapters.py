@@ -28,6 +28,7 @@ Usage:
 import os
 import time
 import json
+import threading
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -291,6 +292,36 @@ class OpenAIAdapter(AgentAdapter):
         self._temperature = temperature
         self._system_prompt = system_prompt
         self._max_retries = max_retries
+        self._timeout = timeout
+        self._usage_lock = threading.Lock()
+        self._usage = {
+            "token_exact": 0,
+            "token_est": 0,
+            "request_count": 0,
+            "tool_call_count": 0,
+        }
+
+    def _record_openai_response(self, response) -> None:
+        """Record exact usage returned by an OpenAI-compatible provider."""
+        usage = getattr(response, "usage", None)
+        total_tokens = int(getattr(usage, "total_tokens", 0) or 0)
+        with self._usage_lock:
+            self._usage["token_exact"] += total_tokens
+
+    def _record_request(self) -> None:
+        """Count every provider request, including retries."""
+        with self._usage_lock:
+            self._usage["request_count"] += 1
+
+    def _record_tool_calls(self, count: int) -> None:
+        """Count provider-requested tool invocations."""
+        with self._usage_lock:
+            self._usage["tool_call_count"] += int(count)
+
+    def resource_usage(self) -> dict:
+        """Return cumulative exact provider usage."""
+        with self._usage_lock:
+            return dict(self._usage)
 
     @property
     def model_name(self) -> str:
@@ -302,6 +333,7 @@ class OpenAIAdapter(AgentAdapter):
         for empty_attempt in range(2):  # 2 attempts total (initial + 1 retry)
             # Re-define _call each iteration so the closure is fresh
             def _call():
+                self._record_request()
                 response = self._client.chat.completions.create(
                     model=self._model,
                     max_tokens=self._max_tokens,
@@ -311,6 +343,7 @@ class OpenAIAdapter(AgentAdapter):
                         {"role": "user", "content": prompt},
                     ],
                 )
+                self._record_openai_response(response)
                 content = response.choices[0].message.content
                 if not content or not content.strip():
                     raise EmptyResponseError("Empty response from API")
@@ -354,13 +387,16 @@ class OpenAIAdapter(AgentAdapter):
         for _ in range(10):  # max 10 tool rounds
 
             def _call(msgs=messages):
-                return self._client.chat.completions.create(
+                self._record_request()
+                response = self._client.chat.completions.create(
                     model=self._model,
                     max_tokens=self._max_tokens,
                     temperature=self._temperature,
                     tools=openai_tools,
                     messages=msgs,
                 )
+                self._record_openai_response(response)
+                return response
 
             response = _retry(_call, max_retries=self._max_retries)
             choice = response.choices[0]
@@ -370,6 +406,8 @@ class OpenAIAdapter(AgentAdapter):
 
             if choice.finish_reason != "tool_calls":
                 return choice.message.content or ""
+
+            self._record_tool_calls(len(choice.message.tool_calls or []))
 
             # Execute tool calls
             messages.append(choice.message.model_dump())

@@ -10,6 +10,11 @@ Available built-in tools:
   - volatility    : annualized volatility of a return series
   - mean_return   : annualized mean return of a series
 
+Snapshot-bound tools:
+  - portfolio_risk    : lookback volatility, VaR/CVaR, and drawdown
+  - risk_contribution : lookback variance contribution by asset
+  - execution_cost    : turnover and deterministic transaction-cost estimate
+
 Optional tool (requires SERPER_API_KEY):
   - web_search    : search the web for recent financial news/data
 """
@@ -18,6 +23,9 @@ import math
 import os
 from dataclasses import dataclass
 from typing import Any, Callable
+
+import numpy as np
+import pandas as pd
 
 
 @dataclass
@@ -83,6 +91,83 @@ def _mean_return(returns: list[float], annualize: bool = True) -> float:
         raise ValueError("Empty returns list.")
     daily_mean = sum(returns) / len(returns)
     return daily_mean * 252 if annualize else daily_mean
+
+
+def _weight_vector(snapshot: Any, weights: dict[str, float]) -> tuple[pd.DataFrame, np.ndarray]:
+    """Align declared weights to historical return columns."""
+    # Build the universe from lookback returns so forward-only assets cannot enter the tool.
+    frame = pd.DataFrame(snapshot.return_data).dropna(how="all").fillna(0.0)
+    if frame.empty:
+        raise ValueError("Historical return data is required.")
+    # Clip negative declarations because every evaluated portfolio is long-only.
+    vector = np.array(
+        [max(0.0, float(weights.get(asset, 0.0))) for asset in frame.columns]
+    )
+    total = float(vector.sum())
+    if total <= 0.0:
+        raise ValueError("At least one positive portfolio weight is required.")
+    return frame, vector / total
+
+
+def _portfolio_risk(snapshot: Any, weights: dict[str, float]) -> dict[str, float]:
+    """Compute lookback-only volatility, historical VaR/CVaR, and drawdown."""
+    frame, vector = _weight_vector(snapshot, weights)
+    # Convert aligned asset returns into one historical portfolio return series.
+    returns = frame.to_numpy(dtype=float) @ vector
+    if len(returns) < 2:
+        raise ValueError("At least two historical observations are required.")
+
+    # Derive drawdown from compounded wealth rather than summing returns.
+    wealth = np.cumprod(1.0 + returns)
+    running_peak = np.maximum.accumulate(wealth)
+    drawdowns = wealth / np.maximum(running_peak, 1e-12) - 1.0
+    # Use the empirical lower tail to avoid a distributional VaR assumption.
+    quantile = float(np.quantile(returns, 0.05))
+    tail = returns[returns <= quantile]
+    return {
+        "annualized_volatility": float(np.std(returns, ddof=1) * math.sqrt(252)),
+        "historical_var_95": float(max(0.0, -quantile)),
+        "historical_cvar_95": float(max(0.0, -float(np.mean(tail)))) if len(tail) else 0.0,
+        "max_drawdown": float(np.min(drawdowns)) if len(drawdowns) else 0.0,
+    }
+
+
+def _risk_contribution(snapshot: Any, weights: dict[str, float]) -> dict[str, float]:
+    """Compute each asset's share of lookback portfolio variance."""
+    frame, vector = _weight_vector(snapshot, weights)
+    # Annualize the lookback covariance before computing marginal contributions.
+    covariance = frame.cov().fillna(0.0).to_numpy(dtype=float) * 252.0
+    marginal = covariance @ vector
+    total_variance = float(vector @ marginal)
+    if total_variance <= 0.0:
+        return {str(asset): 0.0 for asset in frame.columns}
+    # Divide component variance by total variance to return contribution shares.
+    return {
+        str(asset): float(vector[index] * marginal[index] / total_variance)
+        for index, asset in enumerate(frame.columns)
+    }
+
+
+def _execution_cost(
+    snapshot: Any,
+    target_weights: dict[str, float],
+    slippage_rate: float = 0.001,
+    commission_rate: float = 0.0005,
+) -> dict[str, float]:
+    """Estimate turnover and deterministic trading cost from current weights."""
+    # Include assets that disappear from or enter the target portfolio.
+    assets = set(snapshot.current_weights) | set(target_weights)
+    turnover = sum(
+        abs(float(target_weights.get(asset, 0.0)) - float(snapshot.current_weights.get(asset, 0.0)))
+        for asset in assets
+    )
+    traded_notional = float(snapshot.portfolio_value) * turnover
+    # Apply linear slippage and commission to the same traded notional.
+    return {
+        "turnover": float(turnover),
+        "traded_notional": traded_notional,
+        "estimated_cost": traded_notional * (float(slippage_rate) + float(commission_rate)),
+    }
 
 
 def _web_search(query: str, n_results: int = 3) -> str:
@@ -236,9 +321,60 @@ _WEB_SEARCH_TOOL = ToolSpec(
 )
 
 
-def get_tools(include_web_search: bool = False) -> list[ToolSpec]:
+def _snapshot_tools(snapshot: Any) -> list[ToolSpec]:
+    """Bind deterministic Point-in-Time portfolio tools to one snapshot."""
+    # Reuse one schema so all three tools accept the same weight representation.
+    weights_schema = {
+        "type": "object",
+        "additionalProperties": {"type": "number"},
+        "description": "Portfolio weights keyed by asset symbol.",
+    }
+    return [
+        ToolSpec(
+            name="portfolio_risk",
+            description="Compute lookback annualized volatility, historical VaR/CVaR, and max drawdown.",
+            input_schema={
+                "type": "object",
+                "properties": {"weights": weights_schema},
+                "required": ["weights"],
+            },
+            fn=lambda weights: _portfolio_risk(snapshot, weights),
+        ),
+        ToolSpec(
+            name="risk_contribution",
+            description="Compute lookback variance contribution by asset for candidate weights.",
+            input_schema={
+                "type": "object",
+                "properties": {"weights": weights_schema},
+                "required": ["weights"],
+            },
+            fn=lambda weights: _risk_contribution(snapshot, weights),
+        ),
+        ToolSpec(
+            name="execution_cost",
+            description="Estimate turnover and trading cost relative to current portfolio weights.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "target_weights": weights_schema,
+                    "slippage_rate": {"type": "number", "default": 0.001},
+                    "commission_rate": {"type": "number", "default": 0.0005},
+                },
+                "required": ["target_weights"],
+            },
+            fn=lambda target_weights, slippage_rate=0.001, commission_rate=0.0005: _execution_cost(
+                snapshot, target_weights, slippage_rate, commission_rate
+            ),
+        ),
+    ]
+
+
+def get_tools(include_web_search: bool = False, snapshot: Any = None) -> list[ToolSpec]:
     """Return the list of available tools for agent evaluation."""
     tools = list(BUILTIN_TOOLS)
+    # Snapshot tools close over the current PiT state and never access forward returns.
+    if snapshot is not None:
+        tools.extend(_snapshot_tools(snapshot))
     if include_web_search:
         tools.append(_WEB_SEARCH_TOOL)
     return tools

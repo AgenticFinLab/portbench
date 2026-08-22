@@ -237,6 +237,7 @@ class S3Output:
     sharpe_estimate: float = 0.0
     raw_llm_output: str = ""
     refused: bool = False
+    collaboration: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -268,6 +269,10 @@ class S4Output:
     total_cost: float = 0.0
     turnover: float = 0.0
     raw_llm_output: str = ""
+    schema_version: str = "pipeline-v1-deterministic"
+    plan: dict[str, Any] = field(default_factory=dict)
+    plan_scores: dict[str, float] = field(default_factory=dict)
+    outcome_scores: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -300,6 +305,11 @@ class S5Output:
     alerts: list[RiskAlert] = field(default_factory=list)
     rebalance_needed: bool = False
     raw_llm_output: str = ""
+    final_weights: dict[str, float] = field(default_factory=dict)
+    schema_version: str = "pipeline-v1-deterministic"
+    decision: dict[str, Any] = field(default_factory=dict)
+    plan_scores: dict[str, float] = field(default_factory=dict)
+    outcome_scores: dict[str, float] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -449,6 +459,12 @@ class EpisodeResult:
     refused_stages: list[str] = field(
         default_factory=list
     )  # stage names that returned a refusal fallback
+    architecture_id: str = "legacy"
+    result_protocol: str = "closed-loop"
+    schema_version: str = "pipeline-v1"
+    resource_usage: dict[str, Any] = field(default_factory=dict)
+    provenance: dict[str, Any] = field(default_factory=dict)
+    collaboration_trace: list[dict[str, Any]] = field(default_factory=list)
 
     def to_stage_score_list(self):
         """Convert to a list of StageScore objects for CEPS computation."""
@@ -494,12 +510,13 @@ class EvalPipeline:
         only the impact of S4 and S5 errors on downstream performance.
     """
 
-    def __init__(self, stages: list[PipelineStage]):
+    def __init__(self, stages: list[PipelineStage], runtime: Any = None):
         """
         Args:
             stages: List of PipelineStage objects, ordered S1 → S5.
         """
         self.stages = {s.stage_id: s for s in stages}
+        self.runtime = runtime
         self._logger = None  # Set by enable_logging()
 
     def enable_logging(
@@ -550,6 +567,8 @@ class EvalPipeline:
         self,
         snapshot: MarketSnapshot,
         inject_gt_at: Optional[StageID] = None,
+        stage_overrides: Optional[dict[StageID, Any]] = None,
+        reuse_outputs: Optional[dict[StageID, Any]] = None,
     ) -> EpisodeResult:
         """
         Run the full pipeline for one market snapshot.
@@ -564,6 +583,31 @@ class EvalPipeline:
             If logging is enabled, interaction details are also written to disk.
         """
         result = EpisodeResult(decision_date=snapshot.decision_date)
+        overrides = stage_overrides or {}
+        reused = reuse_outputs or {}
+        if self.runtime is not None:
+            from .canonical import canonical_json, sha256_hex
+
+            pit_snapshot = {
+                "decision_date": snapshot.decision_date,
+                "price_data": snapshot.price_data,
+                "return_data": snapshot.return_data,
+                "macro_data": snapshot.macro_data,
+                "news_text": snapshot.news_text,
+                "current_weights": snapshot.current_weights,
+                "portfolio_value": snapshot.portfolio_value,
+                "market_regime": snapshot.market_regime,
+                "correlation_matrix": snapshot.correlation_matrix,
+                "asset_class_map": snapshot.asset_class_map,
+            }
+            snapshot_hash = sha256_hex(canonical_json(pit_snapshot))
+            self.runtime.begin_episode(
+                episode_id=str(snapshot.decision_date),
+                decision_date=str(snapshot.decision_date),
+                snapshot_hash=snapshot_hash,
+            )
+            result.architecture_id = self.runtime.spec.architecture_id
+            result.schema_version = self.runtime.schema_version
         ordered_ids = [
             StageID.S1_MARKET_INTERPRETATION,
             StageID.S2_SIGNAL_GENERATION,
@@ -597,7 +641,11 @@ class EvalPipeline:
             try:
                 stage_start = datetime.now()
 
-                if using_oracle and gt is not None:
+                if sid in overrides:
+                    actual = overrides[sid]
+                elif sid in reused:
+                    actual = reused[sid]
+                elif using_oracle and gt is not None:
                     actual = gt
                 else:
                     actual = stage.run(snapshot, prior_output)
@@ -607,6 +655,9 @@ class EvalPipeline:
                 ).total_seconds() * 1000
 
                 result.stage_outputs[sid] = actual
+                recorder = getattr(self.runtime, "record_stage_output", None)
+                if callable(recorder):
+                    recorder(sid.value, actual)
                 result.stage_scores[sid] = (
                     stage.score(actual, gt) if gt is not None else 1.0
                 )
@@ -638,6 +689,13 @@ class EvalPipeline:
                         duration_ms=duration_ms,
                     )
                 raise RuntimeError(f"Pipeline stage {sid} failed: {exc}") from exc
+
+        if self.runtime is not None:
+            audit = self.runtime.episode_audit()
+            result.resource_usage = dict(audit["usage"])
+            result.resource_usage["by_agent"] = dict(audit.get("agent_usage", {}))
+            result.provenance = dict(audit["provenance"])
+            result.collaboration_trace = list(audit.get("collaboration_trace", []))
 
         # Write episode log if logging is enabled
         if self._logger is not None:
