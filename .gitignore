@@ -210,10 +210,14 @@ __marimo__/
 # Datasets
 datasets/
 outputs/
-EXPERIMENTS*/
+/EXPERIMENTS*/
 figures/
 .claude/
 CLAUDE.md
 scripts/
+tests/fixtures/
+/docs/local_archive/
 rebuttal-plan/
 .cursor/
+.agents/
+AGENTS.md
