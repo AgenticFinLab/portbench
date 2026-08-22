@@ -7,6 +7,8 @@ pyyaml
 
 # Data collection
 yfinance
+# websockets 14+ imports typing.Self and requires Python 3.11.
+websockets>=13,<14; python_version < "3.11"
 akshare
 kaggle
 fredapi
@@ -14,7 +16,7 @@ fredapi
 # LLM agent interface
 litellm
 # anthropic
-openai
+openai>=2.20,<3
 
 # LLM evaluation
 # Uncomment when needed
