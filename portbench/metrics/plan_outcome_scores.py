@@ -7,6 +7,7 @@ single unlabeled ranking column. Use ``portbench.agent_eval.result_gates.assert_
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set
 
 from portbench.agent_eval.contracts import (
@@ -38,6 +39,32 @@ def _clip01(x: float) -> float:
 
 def _mean(vals: Sequence[float]) -> float:
     return float(sum(vals) / len(vals)) if vals else 0.0
+
+
+def ceps_plan_score(plan_scores: Optional[Mapping[str, float]], *, stage: str) -> float:
+    """Reduce one S4/S5 plan-quality dict to the scalar that enters CEPS."""
+    scores = dict(plan_scores or {})
+    if stage == "S4":
+        if "plan_quality" in scores:
+            return _clip01(float(scores["plan_quality"]))
+        keys = [key for key in ("order_legality", "target_tracking") if key in scores]
+        return _clip01(_mean([float(scores[key]) for key in keys]))
+    if stage == "S5":
+        keys = [
+            key
+            for key in ("alert_identification", "action_choice", "corrective_compliance")
+            if key in scores
+        ]
+        return _clip01(_mean([float(scores[key]) for key in keys]))
+    return 0.0
+
+
+def ceps_outcome_score(outcome_scores: Optional[Mapping[str, float]]) -> float:
+    """Reduce one environment-outcome dict; never mix this into CEPS."""
+    scores = dict(outcome_scores or {})
+    if not scores:
+        return 0.0
+    return _clip01(_mean([float(value) for value in scores.values()]))
 
 
 def _weights_from_plan(plan: ExecutionPlan) -> Dict[str, float]:
@@ -97,7 +124,9 @@ def score_s4_plan_quality(
             legal = ok / n if n else 0.0
 
     planned_for_validation = _weights_from_plan(plan)
-    if planned_for_validation and abs(sum(planned_for_validation.values()) - 1.0) > 1e-4:
+    if (plan.metadata or {}).get("parse_error"):
+        legal = 0.0
+    elif planned_for_validation and abs(sum(planned_for_validation.values()) - 1.0) > 1e-3:
         legal = 0.0
 
     planned = _weights_from_plan(plan)
@@ -187,16 +216,24 @@ def score_s5_plan_quality(
     else:
         alert_id = len(pred & ref) / len(ref)
 
-    # Corrective compliance: if reference requires weights, measure L1 match
+    # Corrective compliance: if reference requires weights, measure L1 match.
     ref_cw = reference_decision.corrective_weights
     cw = decision.corrective_weights
-    if ref_cw:
-        if not cw:
+    if (decision.metadata or {}).get("parse_error"):
+        corrective = 0.0
+    elif cw:
+        cw_vals = [float(v) for v in cw.values()]
+        illegal = any((not math.isfinite(v)) or v < 0.0 for v in cw_vals) or abs(sum(cw_vals) - 1.0) > 1e-3
+        if illegal:
             corrective = 0.0
-        else:
+        elif ref_cw:
             corrective = _l1_tracking(cw, ref_cw)
+        else:
+            corrective = 0.8
+    elif ref_cw:
+        corrective = 0.0
     else:
-        corrective = 1.0 if not cw or act == "hold" else 0.8
+        corrective = 1.0 if act == "hold" else 0.8
 
     return {
         "alert_identification": round(_clip01(alert_id), 6),
@@ -251,6 +288,8 @@ __all__ = [
     "S5_ENV_OUTCOME_KEYS",
     "S4S5_SCHEMA_DETERMINISTIC",
     "S4S5_SCHEMA_AGENTIC",
+    "ceps_plan_score",
+    "ceps_outcome_score",
     "score_s4_plan_quality",
     "score_s4_environment_outcome",
     "score_s5_plan_quality",

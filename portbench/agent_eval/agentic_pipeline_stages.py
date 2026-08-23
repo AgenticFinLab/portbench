@@ -5,8 +5,6 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any, Optional
 
-import numpy as np
-
 from portbench.agent_eval.base import (
     MarketSnapshot,
     PipelineStage,
@@ -20,11 +18,7 @@ from portbench.agent_eval.base import (
 from portbench.agent_eval.contracts import S4S5_SCHEMA_AGENTIC
 from portbench.agent_eval.s4_s5_stages import AgenticS4Stage, AgenticS5Stage
 from portbench.agent_eval.stages import S3WeightOptimization, S4ExecutionSimulation, S5RiskMonitoring
-
-
-def _mean_score(values: dict[str, float]) -> float:
-    """Return the mean of one labeled score family."""
-    return float(np.mean(list(values.values()))) if values else 0.0
+from portbench.metrics.plan_outcome_scores import ceps_plan_score
 
 
 class AgenticS4PipelineStage(PipelineStage):
@@ -78,8 +72,7 @@ class AgenticS4PipelineStage(PipelineStage):
         )
 
     def score(self, actual: S4Output, ground_truth: S4Output) -> float:
-        scores = {**actual.plan_scores, **actual.outcome_scores}
-        return _mean_score(scores)
+        return ceps_plan_score(actual.plan_scores, stage="S4")
 
 
 class AgenticS5PipelineStage(PipelineStage):
@@ -139,8 +132,7 @@ class AgenticS5PipelineStage(PipelineStage):
         )
 
     def score(self, actual: S5Output, ground_truth: S5Output) -> float:
-        scores = {**actual.plan_scores, **actual.outcome_scores}
-        return _mean_score(scores)
+        return ceps_plan_score(actual.plan_scores, stage="S5")
 
 
 __all__ = ["AgenticS4PipelineStage", "AgenticS5PipelineStage"]

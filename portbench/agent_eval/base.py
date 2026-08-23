@@ -465,6 +465,9 @@ class EpisodeResult:
     resource_usage: dict[str, Any] = field(default_factory=dict)
     provenance: dict[str, Any] = field(default_factory=dict)
     collaboration_trace: list[dict[str, Any]] = field(default_factory=list)
+    stage_score_plan: dict[StageID, float] = field(default_factory=dict)
+    stage_score_outcome: dict[StageID, float] = field(default_factory=dict)
+    ceps_score: float = 0.0
 
     def to_stage_score_list(self):
         """Convert to a list of StageScore objects for CEPS computation."""
@@ -518,6 +521,7 @@ class EvalPipeline:
         self.stages = {s.stage_id: s for s in stages}
         self.runtime = runtime
         self._logger = None  # Set by enable_logging()
+        self._propagation_weight: float = 0.1
 
     def enable_logging(
         self,
@@ -661,6 +665,18 @@ class EvalPipeline:
                 result.stage_scores[sid] = (
                     stage.score(actual, gt) if gt is not None else 1.0
                 )
+                plan_scores = getattr(actual, "plan_scores", None) or {}
+                outcome_scores = getattr(actual, "outcome_scores", None) or {}
+                if plan_scores:
+                    from ..metrics.plan_outcome_scores import ceps_plan_score
+
+                    result.stage_score_plan[sid] = ceps_plan_score(
+                        plan_scores, stage=sid.value
+                    )
+                if outcome_scores:
+                    from ..metrics.plan_outcome_scores import ceps_outcome_score
+
+                    result.stage_score_outcome[sid] = ceps_outcome_score(outcome_scores)
                 # If the stage returned a refusal fallback, override score to 0
                 if getattr(actual, "refused", False):
                     result.refused_stages.append(sid.name)
@@ -697,6 +713,12 @@ class EvalPipeline:
             result.provenance = dict(audit["provenance"])
             result.collaboration_trace = list(audit.get("collaboration_trace", []))
 
+        from ..metrics.ceps import CEPS
+
+        result.ceps_score = float(
+            CEPS(self._propagation_weight).compute(result.to_stage_score_list()).ceps_score
+        )
+
         # Write episode log if logging is enabled
         if self._logger is not None:
             duration_ms = (datetime.now() - episode_start).total_seconds() * 1000
@@ -705,7 +727,7 @@ class EvalPipeline:
                 prompts=prompts,
                 raw_responses=raw_responses,
                 latencies_ms=latencies_ms,
-                ceps_score=0.0,  # Filled in by run_evaluation.py after CEPS computation
+                ceps_score=result.ceps_score,
                 duration_ms=duration_ms,
             )
 

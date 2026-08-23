@@ -65,6 +65,8 @@ class StageLog:
     parsed_output: dict = field(default_factory=dict)
     ground_truth: dict = field(default_factory=dict)
     score: float = 0.0
+    score_plan: Optional[float] = None
+    score_outcome: Optional[float] = None
     latency_ms: float = 0.0
     error: str = ""
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
@@ -197,6 +199,8 @@ class EvalLogger:
                     parsed_output=self._to_dict(actual),
                     ground_truth=self._to_dict(gt),
                     score=result.stage_scores.get(sid, 0.0),
+                    score_plan=result.stage_score_plan.get(sid),
+                    score_outcome=result.stage_score_outcome.get(sid),
                     latency_ms=latencies_ms.get(sid, 0.0) if latencies_ms else 0.0,
                     error=result.errors.get(sid, ""),
                 )
@@ -313,6 +317,8 @@ class EvalLogger:
                     "stage_id": s.stage_id,
                     "decision_date": s.decision_date,
                     "score": s.score,
+                    "score_plan": s.score_plan,
+                    "score_outcome": s.score_outcome,
                     "latency_ms": s.latency_ms,
                     "error": s.error,
                     "timestamp": s.timestamp,

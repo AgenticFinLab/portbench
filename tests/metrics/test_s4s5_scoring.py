@@ -42,6 +42,18 @@ def test_s4_perfect_match_scores_high():
     assert pq["target_tracking"] >= 0.99
     assert pq["plan_quality"] >= 0.99
 
+    rounded = ExecutionPlan(
+        orders=[
+            OrderIntent(asset="SPY", direction="buy", target_weight=0.3333),
+            OrderIntent(asset="TLT", direction="hold", target_weight=0.3333),
+            OrderIntent(asset="BIL", direction="sell", target_weight=0.3331),
+        ]
+    )
+    rounded_pq = score_s4_plan_quality(
+        rounded, rounded, target_weights={"SPY": 0.3333, "TLT": 0.3333, "BIL": 0.3331}
+    )
+    assert rounded_pq["order_legality"] == 1.0
+
     res = ExecutionResult(
         filled_weights={"SPY": 0.6, "TLT": 0.4},
         implementation_shortfall=0.001,
@@ -73,3 +85,16 @@ def test_s5_perfect_match_scores_high():
     oq = score_s5_environment_outcome(ev, ev)
     assert set(oq) == S5_ENV_OUTCOME_KEYS
     assert all(v >= 0.99 for v in oq.values())
+
+
+def test_s5_off_simplex_corrective_scores_zero_compliance():
+    dec = RiskControlDecision(
+        action="rebalance",
+        corrective_weights={"SPY": 0.6, "BIL": 0.6},
+    )
+    ref = RiskControlDecision(
+        action="rebalance",
+        corrective_weights={"SPY": 0.5, "BIL": 0.5},
+    )
+    pq = score_s5_plan_quality(dec, ref)
+    assert pq["corrective_compliance"] == 0.0

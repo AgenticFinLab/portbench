@@ -87,13 +87,18 @@ def test_reuse_s1_s3_runs_only_agentic_s4_s5(tmp_path):
     returns = {
         "SPY": pd.Series([0.01, -0.02, 0.005] * 10),
         "BIL": pd.Series([0.0001] * 30),
+        "CSHI": pd.Series([0.0001] * 30),
     }
     snapshot = MarketSnapshot(
         decision_date=date(2024, 2, 1),
-        price_data={"SPY": pd.Series([100.0]), "BIL": pd.Series([100.0])},
+        price_data={
+            "SPY": pd.Series([100.0]),
+            "BIL": pd.Series([100.0]),
+            "CSHI": pd.Series([100.0]),
+        },
         return_data=returns,
         macro_data={},
-        current_weights={"SPY": 0.5, "BIL": 0.5},
+        current_weights={"SPY": 0.4, "BIL": 0.4, "CSHI": 0.2},
         portfolio_value=1_000_000.0,
         market_regime="sideways",
     )
@@ -118,7 +123,33 @@ def test_reuse_s1_s3_runs_only_agentic_s4_s5(tmp_path):
     }
     result = pipeline.run_episode(snapshot, reuse_outputs=reused)
     assert adapter.calls == 2
+    s4 = result.stage_outputs[StageID.S4_EXECUTION_SIMULATION]
+    assert abs(s4.executed_weights.get("CSHI", 0.0)) < 1e-6
+    assert abs(s4.executed_weights["SPY"] - 0.6) < 1e-3
     assert result.architecture_id == "SA"
     assert result.resource_usage["request_count"] == 2
-    assert result.stage_outputs[StageID.S4_EXECUTION_SIMULATION].schema_version == "pipeline-v3-collab"
+    assert s4.schema_version == "pipeline-v3-collab"
     assert result.stage_outputs[StageID.S5_RISK_MONITORING].final_weights
+    s5 = result.stage_outputs[StageID.S5_RISK_MONITORING]
+    from portbench.metrics.plan_outcome_scores import (
+        S4_ENV_OUTCOME_KEYS,
+        S5_ENV_OUTCOME_KEYS,
+        ceps_plan_score,
+    )
+    from portbench.agent_eval.agentic_pipeline_stages import (
+        AgenticS4PipelineStage,
+        AgenticS5PipelineStage,
+    )
+
+    assert not (set(s4.plan_scores) & S4_ENV_OUTCOME_KEYS)
+    assert not (set(s5.plan_scores) & S5_ENV_OUTCOME_KEYS)
+    assert AgenticS4PipelineStage(adapter).score(s4, s4) == ceps_plan_score(
+        s4.plan_scores, stage="S4"
+    )
+    assert AgenticS5PipelineStage(adapter).score(s5, s5) == ceps_plan_score(
+        s5.plan_scores, stage="S5"
+    )
+    assert result.stage_scores[StageID.S4_EXECUTION_SIMULATION] == result.stage_score_plan[
+        StageID.S4_EXECUTION_SIMULATION
+    ]
+    assert StageID.S4_EXECUTION_SIMULATION in result.stage_score_outcome
