@@ -53,9 +53,11 @@ class GenerationConfig:
 
 @dataclass
 class ResourceBudgetConfig:
-    """Configure the shared per-episode token budget."""
+    """Configure optional per-episode token and request ceilings.
 
-    # Both architectures use the same hard episode limits for fair comparison.
+    Set a ceiling to 0 to record usage without aborting the episode.
+    """
+
     max_tokens_per_episode: int = 32000
     max_requests_per_episode: int = 24
     config_version: str = "iso-token-v3"

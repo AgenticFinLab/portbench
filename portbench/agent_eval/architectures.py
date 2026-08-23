@@ -218,7 +218,10 @@ def build_ma_role_adapters() -> Dict[str, MARoleAdapter]:
 
 @dataclass(frozen=True)
 class IsoTokenBudget:
-    """Define the token cap and a request-count safety ceiling."""
+    """Define optional per-episode token and request ceilings.
+
+    A non-positive ceiling disables that check. Usage is still recorded.
+    """
 
     max_tokens_per_episode: int = 32000
     max_requests_per_episode: int = 24
@@ -270,7 +273,7 @@ class ResourceLedger:
         logical_call_count: int = 0,
         latency_ms: float = 0.0,
     ) -> None:
-        """Add usage and fail when a frozen ceiling is exceeded."""
+        """Add usage and fail only when a positive ceiling is exceeded."""
         with self._lock:
             # Keep provider, cache, logical-call, and latency counters in one atomic update.
             self.usage.token_exact += int(token_exact)
@@ -282,13 +285,15 @@ class ResourceLedger:
             self.usage.latency_ms += float(latency_ms)
             # Estimated tokens are used only when the provider omits exact usage.
             counted_tokens = self.usage.token_exact + self.usage.token_est
-            if counted_tokens > self.budget.max_tokens_per_episode:
+            token_cap = self.budget.max_tokens_per_episode
+            if token_cap > 0 and counted_tokens > token_cap:
                 raise BudgetExceeded(
-                    f"episode tokens {counted_tokens} exceed {self.budget.max_tokens_per_episode}"
+                    f"episode tokens {counted_tokens} exceed {token_cap}"
                 )
-            if self.usage.request_count > self.budget.max_requests_per_episode:
+            request_cap = self.budget.max_requests_per_episode
+            if request_cap > 0 and self.usage.request_count > request_cap:
                 raise BudgetExceeded(
-                    f"episode requests {self.usage.request_count} exceed {self.budget.max_requests_per_episode}"
+                    f"episode requests {self.usage.request_count} exceed {request_cap}"
                 )
 
 

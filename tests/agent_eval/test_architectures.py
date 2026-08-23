@@ -76,6 +76,14 @@ def test_resource_ledger_keeps_exact_and_estimated_separate():
         ledger.record(token_est=2)
 
 
+def test_resource_ledger_zero_ceiling_is_unlimited():
+    ledger = ResourceLedger(IsoTokenBudget(max_tokens_per_episode=0, max_requests_per_episode=0))
+    ledger.begin_episode()
+    ledger.record(token_exact=50000, token_est=1, request_count=100)
+    assert ledger.usage.token_exact == 50000
+    assert ledger.usage.request_count == 100
+
+
 def test_memory_branch_is_copy_on_write(tmp_path):
     factual_path = tmp_path / "factual.json"
     factual = MemoryStore(factual_path)
