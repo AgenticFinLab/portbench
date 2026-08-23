@@ -504,33 +504,28 @@ class ArchitectureStageAdapter(AgentAdapter):
 
         def call() -> str:
             # Provider-native tools may create extra requests inside the base adapter.
-            if tools is None:
-                response = self.runtime.base_adapter.complete(augmented)
-            else:
+            if tools is not None:
                 response = self.runtime.base_adapter.complete_with_tools(augmented, tools)
+            else:
+                response = self.runtime.base_adapter.complete(augmented)
             captured["provenance"] = self._record_new_call(before, augmented, str(response))
             return str(response)
 
         def provenance_factory() -> ResultProvenance:
             return captured["provenance"]
 
-        if tools is not None:
-            # Tool responses are not replayed because their result hash is unavailable pre-call.
-            response = call()
-            provenance = captured["provenance"]
-            provenance.cache_key = key
-        else:
-            # Plain calls can use the content-addressed persistent cache safely.
-            response, provenance = self.runtime.cache.complete_or_call(
-                key,
-                call,
-                namespace=self.runtime.cache_namespace,
-                schema_version=PIPELINE_V3_COLLAB,
-                provenance_factory=provenance_factory,
-            )
-            if provenance.source == ProvenanceSource.CURRENT_CACHE.value:
-                self.runtime.ledger.record(cache_hit_count=1)
-                self.runtime.record_agent_usage(self.agent_id, cache_hit_count=1)
+        # Tool calls are Point-in-Time deterministic given the snapshot; cache them
+        # with the same content-addressed key as plain completions (includes toolset_hash).
+        response, provenance = self.runtime.cache.complete_or_call(
+            key,
+            call,
+            namespace=self.runtime.cache_namespace,
+            schema_version=PIPELINE_V3_COLLAB,
+            provenance_factory=provenance_factory,
+        )
+        if provenance.source == ProvenanceSource.CURRENT_CACHE.value:
+            self.runtime.ledger.record(cache_hit_count=1)
+            self.runtime.record_agent_usage(self.agent_id, cache_hit_count=1)
         latency_ms = (time.perf_counter() - started) * 1000.0
         self.runtime.ledger.record(latency_ms=latency_ms)
         # Historical cache provenance remains auditable but contributes zero current provider cost.
