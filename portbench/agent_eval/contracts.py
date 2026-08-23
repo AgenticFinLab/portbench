@@ -244,10 +244,8 @@ class RiskControlDecision:
                 raise ValueError("scale_factor must be in [0, 1]")
         if self.corrective_weights is not None:
             values = [float(value) for value in self.corrective_weights.values()]
-            if any(not math.isfinite(value) or value < 0.0 for value in values):
-                raise ValueError("corrective_weights must be finite and non-negative")
-            if values and abs(sum(values) - 1.0) > 1e-4:
-                raise ValueError("corrective_weights must sum to one")
+            if any(not math.isfinite(value) for value in values):
+                raise ValueError("corrective_weights must be finite")
 
 
 @dataclass

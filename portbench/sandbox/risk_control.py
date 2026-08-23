@@ -59,6 +59,20 @@ def _risk_metrics(
     }
 
 
+def _project_to_simplex(
+    weights: Mapping[str, float],
+    fallback: Mapping[str, float],
+) -> Dict[str, float]:
+    """Clip to non-negative and renormalize; keep fallback when mass is non-positive."""
+    clipped = {str(asset): max(0.0, float(weight)) for asset, weight in weights.items()}
+    total = float(sum(clipped.values()))
+    if total <= 0.0:
+        return {str(asset): float(weight) for asset, weight in fallback.items()}
+    if abs(total - 1.0) > 1e-3:
+        return {asset: weight / total for asset, weight in clipped.items()}
+    return clipped
+
+
 def _apply_decision(
     decision: RiskControlDecision, weights: Mapping[str, float]
 ) -> Dict[str, float]:
@@ -68,10 +82,7 @@ def _apply_decision(
         return current
     if decision.corrective_weights:
         # Explicit corrective weights take precedence over scale-down metadata.
-        return {
-            str(asset): float(weight)
-            for asset, weight in decision.corrective_weights.items()
-        }
+        return _project_to_simplex(decision.corrective_weights, current)
     if decision.action != "scale_down" or decision.scale_factor is None:
         raise ValueError("rebalance requires corrective_weights")
     factor = float(decision.scale_factor)
