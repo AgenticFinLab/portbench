@@ -84,6 +84,40 @@ def _retry(fn, max_retries: int = 3, base_delay: float = 2.0):
                 raise
 
 
+def _message_tool_calls(choice) -> list:
+    """Return pending OpenAI-style tool calls, ignoring finish_reason."""
+    message = getattr(choice, "message", None)
+    if message is None:
+        return []
+    return list(getattr(message, "tool_calls", None) or [])
+
+
+def _choice_text(choice) -> str:
+    """Return the assistant text from an OpenAI-style choice."""
+    message = getattr(choice, "message", None)
+    if message is None:
+        return ""
+    return getattr(message, "content", None) or ""
+
+
+def _anthropic_tool_use_blocks(response) -> list:
+    """Return Anthropic tool_use blocks even when stop_reason is end_turn."""
+    return [
+        block
+        for block in (getattr(response, "content", None) or [])
+        if getattr(block, "type", None) == "tool_use"
+    ]
+
+
+def _anthropic_last_text(response) -> str:
+    """Return the last text block from an Anthropic message."""
+    for block in reversed(getattr(response, "content", None) or []):
+        text = getattr(block, "text", None)
+        if text:
+            return text
+    return ""
+
+
 # ---------------------------------------------------------------------------
 # Anthropic (Claude) Adapter
 # ---------------------------------------------------------------------------
@@ -185,24 +219,13 @@ class AnthropicAdapter(AgentAdapter):
                 )
 
             response = _retry(_call, max_retries=self._max_retries)
-
-            if response.stop_reason == "end_turn":
-                # Return the last text block
-                for block in reversed(response.content):
-                    if hasattr(block, "text"):
-                        return block.text
-                return ""
-
-            if response.stop_reason != "tool_use":
-                # Unexpected stop — return whatever text we have
-                for block in reversed(response.content):
-                    if hasattr(block, "text"):
-                        return block.text
-                return ""
+            tool_blocks = _anthropic_tool_use_blocks(response)
+            if not tool_blocks:
+                return _anthropic_last_text(response)
 
             # Execute tool calls and feed results back
             tool_results = []
-            for block in response.content:
+            for block in tool_blocks:
                 if block.type == "tool_use":
                     try:
                         result = dispatch_tool(block.name, block.input, tools)
@@ -400,18 +423,15 @@ class OpenAIAdapter(AgentAdapter):
 
             response = _retry(_call, max_retries=self._max_retries)
             choice = response.choices[0]
+            tool_calls = _message_tool_calls(choice)
+            if not tool_calls:
+                return _choice_text(choice)
 
-            if choice.finish_reason == "stop":
-                return choice.message.content or ""
-
-            if choice.finish_reason != "tool_calls":
-                return choice.message.content or ""
-
-            self._record_tool_calls(len(choice.message.tool_calls or []))
+            self._record_tool_calls(len(tool_calls))
 
             # Execute tool calls
             messages.append(choice.message.model_dump())
-            for tc in choice.message.tool_calls:
+            for tc in tool_calls:
                 try:
                     args = json.loads(tc.function.arguments)
                     result = dispatch_tool(tc.function.name, args, tools)
