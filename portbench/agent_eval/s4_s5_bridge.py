@@ -12,7 +12,11 @@ from portbench.agent_eval.contracts import (
     RiskControlDecision,
     RiskEvaluationResult,
 )
-from portbench.sandbox.execution import simulate_execution
+from portbench.sandbox.execution import (
+    _implied_direction,
+    _prepare_fill_books,
+    simulate_execution,
+)
 
 
 def _snapshot_current_weights(snapshot_ctx: Any) -> Dict[str, float]:
@@ -164,21 +168,29 @@ def run_s4_deterministic_from_weights(
     slippage_rate: float = 0.001,
     commission_rate: float = 0.0005,
 ) -> Tuple[ExecutionPlan, ExecutionResult]:
-    """Convenience v1 path: build plan from target weights and run env."""
+    """Convenience v1 path: build plan from target weights and run env.
+
+    Order directions come from the same projected fill book the simulator
+    will trade, so the reference plan is self-consistent.
+    """
+    original = {str(k): float(v) for k, v in dict(target_weights).items()}
+    stub = ExecutionPlan(
+        orders=[
+            OrderIntent(asset=asset, direction="hold", target_weight=weight)
+            for asset, weight in original.items()
+        ],
+        metadata={"target_weights": original},
+    )
+    current, fill_book, _ = _prepare_fill_books(stub, current_weights or {})
     orders = []
-    current = dict(current_weights or {})
-    for asset, tw in dict(target_weights).items():
+    for asset in sorted(set(current) | set(fill_book)):
         curr = float(current.get(asset, 0.0))
-        targ = float(tw)
+        targ = float(fill_book.get(asset, 0.0))
         delta = targ - curr
-        if abs(delta) < 1e-6:
-            direction = "hold"
-        else:
-            direction = "buy" if delta > 0 else "sell"
         orders.append(
             OrderIntent(
                 asset=str(asset),
-                direction=direction,
+                direction=_implied_direction(delta),
                 target_weight=targ,
                 delta_weight=delta,
             )
@@ -187,7 +199,7 @@ def run_s4_deterministic_from_weights(
     plan = ExecutionPlan(
         orders=orders,
         metadata={
-            "target_weights": {str(k): float(v) for k, v in dict(target_weights).items()},
+            "target_weights": original,
             "schema_version": S4S5_SCHEMA_DETERMINISTIC,
             "source": "run_s4_deterministic_from_weights",
         },

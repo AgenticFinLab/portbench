@@ -204,3 +204,23 @@ def test_agentic_s5_rejects_overweight_incoming_book():
             weights={"SPY": 0.7, "BIL": 0.5},
             return_data=returns,
         )
+
+
+def test_deterministic_s4_off_simplex_does_not_abort():
+    current = {"AMAT": 0.096, "SPY": 0.904}
+    target = {"AMAT": 0.10, "SPY": 0.95}
+    snap = SimpleNamespace(
+        current_weights=current,
+        portfolio_value=100_000.0,
+        price_data={
+            "AMAT": pd.Series([100.0, 100.0]),
+            "SPY": pd.Series([100.0, 101.0]),
+        },
+    )
+    plan, result = run_s4_deterministic_from_weights(
+        target, snap, current, nav=100_000.0
+    )
+    assert abs(sum(result.filled_weights.values()) - 1.0) < 1e-3
+    amat = next(o for o in plan.normalized_orders() if o.asset == "AMAT")
+    assert amat.direction == "sell"
+    assert "AMAT" not in result.metadata.get("direction_conflicts", [])
