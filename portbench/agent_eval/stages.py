@@ -1186,6 +1186,25 @@ class S3WeightOptimization(PipelineStage):
 
 
 # Dual-layer S4/S5 plan vs env: see portbench.agent_eval.s4_s5_* and portbench.sandbox.execution / risk_control (this legacy stage stays pipeline-v1-deterministic).
+def _round_executed_weights(executed):
+    """Round to four decimals without letting rounding overflow above one."""
+    filled = {asset: round(float(weight), 4) for asset, weight in executed.items()}
+    overflow = float(sum(filled.values()) - 1.0)
+    if overflow <= 1e-12:
+        return filled
+    donor = next(
+        (
+            asset
+            for asset in filled
+            if asset == "BIL" or "BIL" in asset or "cash" in asset.lower()
+        ),
+        None,
+    )
+    if donor is None or float(filled.get(donor, 0.0)) < overflow:
+        donor = max(filled, key=filled.get)
+    filled[donor] = max(0.0, float(filled[donor]) - overflow)
+    return filled
+
 class S4ExecutionSimulation(PipelineStage):
     """
     Stage 4: Trade Execution Simulation.
@@ -1274,7 +1293,7 @@ class S4ExecutionSimulation(PipelineStage):
 
         return S4Output(
             orders=orders,
-            executed_weights={a: round(w, 4) for a, w in executed.items()},
+            executed_weights=_round_executed_weights(executed),
             total_cost=round(total_cost, 4),
             turnover=round(total_turnover, 4),
         )

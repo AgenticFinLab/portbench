@@ -572,51 +572,63 @@ def run_episode_interventions(
     propagation_weight: float = 0.1,
 ) -> list[dict[str, Any]]:
     """Run repair/perturb interventions for one factual episode."""
+    if mode not in {"offline", "online"}:
+        raise ValueError(f"mode must be offline or online, got {mode!r}")
     records: list[dict[str, Any]] = []
     for stage_id in stages:
-        if mode == "offline":
-            records.append(
-                run_offline_stage_intervention(
-                    snapshot,
-                    factual,
-                    stage_id,
-                    operator=operator,
-                    pipeline=pipeline,
-                    propagation_weight=propagation_weight,
+        try:
+            if mode == "offline":
+                records.append(
+                    run_offline_stage_intervention(
+                        snapshot,
+                        factual,
+                        stage_id,
+                        operator=operator,
+                        pipeline=pipeline,
+                        propagation_weight=propagation_weight,
+                    )
                 )
+                continue
+            perturb_fn = (
+                (lambda output, sid=stage_id: default_perturb(sid, output))
+                if operator == "perturb"
+                else None
             )
-            continue
-        if mode != "online":
-            raise ValueError(f"mode must be offline or online, got {mode!r}")
-        perturb_fn = (
-            (lambda output, sid=stage_id: default_perturb(sid, output))
-            if operator == "perturb"
-            else None
-        )
-        result = intervene_from_factual(
-            pipeline,
-            snapshot,
-            factual,
-            stage_id,
-            operator=operator,
-            perturb_fn=perturb_fn,
-        )
-        factual_ceps = _ceps_from_scores(factual.stage_scores, propagation_weight)
-        intervened_ceps = _ceps_from_scores(result.intervened.stage_scores, propagation_weight)
-        records.append(
-            {
-                "stage_id": result.stage_id,
-                "operator": operator,
-                "mode": "online",
-                "score_delta": {
-                    key: float(value) for key, value in result.score_delta.items()
-                },
-                "ceps_factual": factual_ceps,
-                "ceps_intervened": intervened_ceps,
-                "ceps_delta": intervened_ceps - factual_ceps,
-                "resource_usage": _usage_counters(result.intervened.resource_usage),
-            }
-        )
+            result = intervene_from_factual(
+                pipeline,
+                snapshot,
+                factual,
+                stage_id,
+                operator=operator,
+                perturb_fn=perturb_fn,
+            )
+            factual_ceps = _ceps_from_scores(factual.stage_scores, propagation_weight)
+            intervened_ceps = _ceps_from_scores(result.intervened.stage_scores, propagation_weight)
+            records.append(
+                {
+                    "stage_id": result.stage_id,
+                    "operator": operator,
+                    "mode": "online",
+                    "score_delta": {
+                        key: float(value) for key, value in result.score_delta.items()
+                    },
+                    "ceps_factual": factual_ceps,
+                    "ceps_intervened": intervened_ceps,
+                    "ceps_delta": intervened_ceps - factual_ceps,
+                    "resource_usage": _usage_counters(result.intervened.resource_usage),
+                }
+            )
+        except Exception as exc:
+            # A counterfactual suffix must not abort the factual episode.
+            records.append(
+                {
+                    "stage_id": _stage(stage_id).value,
+                    "operator": operator,
+                    "mode": mode,
+                    "error": str(exc),
+                    "resource_usage": _usage_counters({}),
+                }
+            )
     return records
 
 
