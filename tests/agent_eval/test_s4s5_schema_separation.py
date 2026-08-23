@@ -59,3 +59,14 @@ def test_ranking_accepts_homogeneous():
     out = build_ranking_rows(rows, score_keys=["plan_quality"])
     assert len(out) == 2
     assert out[0]["schema_version"] == S4S5_SCHEMA_AGENTIC
+
+
+def test_prepare_ceps_ranking_rows_rejects_mixed_schema():
+    from portbench.experiments.figures import prepare_ceps_ranking_rows
+
+    rows = [
+        {"id": "a", "schema_version": S4S5_SCHEMA_DETERMINISTIC, "mean_ceps": 0.2},
+        {"id": "b", "schema_version": S4S5_SCHEMA_AGENTIC, "mean_ceps": 0.1},
+    ]
+    with pytest.raises(SchemaMixError):
+        prepare_ceps_ranking_rows(rows)

@@ -31,7 +31,39 @@ from ..visualization.correlation_plots import (
 )
 from ..visualization.style import save_figure
 from ..agent_eval.investor_profiles import PROFILES
+from ..agent_eval.result_gates import assert_homogeneous_schema_versions
 from .paths import find_normal_dir
+
+
+def prepare_ceps_ranking_rows(rows: list[dict]) -> list[dict]:
+    """Reject mixed-schema CEPS ranking tables before plotting."""
+    normalized = [dict(row) for row in rows]
+    assert_homogeneous_schema_versions(normalized)
+    return normalized
+
+
+def _schema_of_model_profiles(profiles: dict, model_key: str = "") -> str:
+    """Read schema_version from a saved backtest result; default baselines to v1."""
+    for entry in profiles.values():
+        normal = entry.get("normal") if isinstance(entry, dict) else None
+        if isinstance(normal, dict) and normal.get("schema_version"):
+            return str(normal["schema_version"])
+        stress = entry.get("stress") if isinstance(entry, dict) else None
+        if isinstance(stress, dict):
+            for payload in stress.values():
+                if isinstance(payload, dict) and payload.get("schema_version"):
+                    return str(payload["schema_version"])
+    if model_key.startswith("baseline/"):
+        return "pipeline-v1"
+    return "pipeline-v1"
+
+
+def _partition_models_by_schema(model_data: dict) -> dict[str, dict]:
+    buckets: dict[str, dict] = {}
+    for model_key, profiles in model_data.items():
+        schema = _schema_of_model_profiles(profiles, model_key)
+        buckets.setdefault(schema, {})[model_key] = profiles
+    return buckets
 
 
 def _load_normal_nav(p_dir: Path) -> Optional[pd.Series]:
@@ -332,14 +364,40 @@ def render_batch_comparison_figures(
         log("batch comparison: no data found in run directories, skipping")
         return
 
-    # Collect all profiles present
+    from . import paths as _paths
+
+    buckets = _partition_models_by_schema(model_data)
+    for schema, bucket in buckets.items():
+        schema_dir = rebal_dir / "comparison_figures" / schema
+        schema_dir.mkdir(parents=True, exist_ok=True)
+        _render_schema_comparison(
+            schema_dir,
+            bucket,
+            run_timestamps,
+            output_root,
+            rebalance,
+            schema,
+            log,
+        )
+
+
+def _render_schema_comparison(
+    out_dir: Path,
+    model_data: dict,
+    run_timestamps: dict[str, str],
+    output_root: str,
+    rebalance: str,
+    schema: str,
+    log,
+) -> None:
+    from . import paths as _paths
+
     all_profiles: list[str] = []
     for profiles in model_data.values():
         for p in profiles:
             if p not in all_profiles:
                 all_profiles.append(p)
 
-    # Compute sorted model order once: LLM by mean CEPS asc, baselines by mean Sharpe desc
     def _nav_sort_key(mk: str) -> tuple:
         is_baseline = mk.startswith("baseline/")
         vals = []
@@ -354,8 +412,8 @@ def render_batch_comparison_figures(
         return (int(is_baseline), -mean_val if is_baseline else mean_val)
 
     sorted_model_keys = sorted(model_data.keys(), key=_nav_sort_key)
+    include_ceps = any(not key.startswith("baseline/") for key in model_data)
 
-    # Fig A: NAV comparison per profile (with CEPS twin axis for LLM models)
     for profile in all_profiles:
         nav_map: dict[str, pd.Series] = {}
         ceps_map: dict[str, pd.Series] = {}
@@ -363,8 +421,7 @@ def render_batch_comparison_figures(
             entry = model_data[mlabel].get(profile)
             if entry and entry.get("nav") is not None:
                 nav_map[mlabel] = entry["nav"]
-            # Load per-step CEPS for LLM models
-            if not mlabel.startswith("baseline/") and entry and entry.get("nav") is not None:
+            if include_ceps and not mlabel.startswith("baseline/") and entry and entry.get("nav") is not None:
                 prov_name, model_name = mlabel.split("/", 1)
                 ts = run_timestamps.get(mlabel)
                 if ts:
@@ -381,9 +438,8 @@ def render_batch_comparison_figures(
             save_figure(
                 fig, str(out_dir / f"nav_comparison_{profile}.png"), formats=("png",)
             )
-            log(f"figure: nav_comparison_{profile}.png")
+            log(f"figure: {schema}/nav_comparison_{profile}.png")
 
-    # Fig A2: Stress NAV comparison per scenario x profile (with CEPS twin axis)
     stress_scenarios: set[str] = set()
     for profiles in model_data.values():
         for p_data in profiles.values():
@@ -399,7 +455,7 @@ def render_batch_comparison_figures(
                 sn = entry.get("stress_nav") if entry else None
                 if sn and scenario in sn:
                     nav_map[mlabel] = sn[scenario]
-                    if not mlabel.startswith("baseline/"):
+                    if include_ceps and not mlabel.startswith("baseline/"):
                         prov_name, model_name = mlabel.split("/", 1)
                         ts = run_timestamps.get(mlabel)
                         if ts:
@@ -422,9 +478,8 @@ def render_batch_comparison_figures(
                     str(out_dir / f"nav_comparison_stress_{safe_scenario}_{profile}.png"),
                     formats=("png",),
                 )
-                log(f"figure: nav_comparison_stress_{safe_scenario}_{profile}.png")
+                log(f"figure: {schema}/nav_comparison_stress_{safe_scenario}_{profile}.png")
 
-    # Fig B: Metrics comparison per profile  (LLM models only — baselines have CEPS=0)
     for profile in all_profiles:
         metrics_map: dict[str, dict] = {}
         for mlabel, profiles in model_data.items():
@@ -434,6 +489,16 @@ def render_batch_comparison_figures(
             if entry and entry.get("normal"):
                 metrics_map[mlabel] = entry["normal"]
         if metrics_map:
+            prepare_ceps_ranking_rows(
+                [
+                    {
+                        "id": mlabel,
+                        "schema_version": payload.get("schema_version", schema),
+                        "mean_ceps": payload.get("mean_ceps", 0.0),
+                    }
+                    for mlabel, payload in metrics_map.items()
+                ]
+            )
             fig = plot_sandbox_metrics(
                 metrics_map,
                 metric_keys=[
@@ -449,9 +514,8 @@ def render_batch_comparison_figures(
                 str(out_dir / f"metrics_comparison_{profile}.png"),
                 formats=("png",),
             )
-            log(f"figure: metrics_comparison_{profile}.png")
+            log(f"figure: {schema}/metrics_comparison_{profile}.png")
 
-    # Fig C: Stress drawdown heatmap per model
     from ..agent_eval.investor_profiles import PROFILES
 
     for mlabel, profiles in model_data.items():
@@ -478,9 +542,8 @@ def render_batch_comparison_figures(
             save_figure(
                 fig, str(out_dir / f"stress_drawdown_{safe_name}.png"), formats=("png",)
             )
-            log(f"figure: stress_drawdown_{safe_name}.png")
+            log(f"figure: {schema}/stress_drawdown_{safe_name}.png")
 
-    # Fig D: Stress threshold chart (dd_score lollipop with tier reference lines) — cross-model
     continuous_data: dict[str, dict[str, dict[str, dict]]] = {}
     for mlabel, profiles in model_data.items():
         model_entry: dict[str, dict[str, dict]] = {}
@@ -493,7 +556,6 @@ def render_batch_comparison_figures(
             sc_entry: dict[str, dict] = {}
             for sc, payload in stress.items():
                 dd = payload.get("max_drawdown", 0.0)
-                # Retroactively compute dd_score when field is absent or zero
                 stored = payload.get("dd_score")
                 if stored is None or stored == 0.0:
                     dd_score = max(0.0, 1.0 - abs(dd) / max(tol_val, 1e-6))
@@ -517,6 +579,6 @@ def render_batch_comparison_figures(
             save_figure(
                 fig, str(out_dir / "stress.png"), formats=("png",)
             )
-            log("figure: stress.png")
+            log(f"figure: {schema}/stress.png")
         except Exception as exc:
             log(f"stress_drawdown_bars skipped: {exc}")

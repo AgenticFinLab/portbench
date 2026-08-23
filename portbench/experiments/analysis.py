@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import paths
+from .figures import prepare_ceps_ranking_rows
 
 
 def _load_run_summaries(output_root: str, rebalance: str) -> list[dict]:
@@ -339,32 +340,36 @@ def analyze_runs(
 
     figures_written: list[str] = []
 
-    # Fig 1: Risk-first model ranking  (LLM models only — baselines have CEPS=0)
-    ranking_data = []
+    ranking_by_schema: dict[str, list[dict]] = {}
     for model, normal_rows in model_normal.items():
         if model.startswith("baseline/"):
             continue
+        schema = str(normal_rows[0].get("schema_version") or "pipeline-v1")
         ceps_vals = [r.get("mean_ceps", 0.0) for r in normal_rows]
         std_vals = [r.get("std_ceps", 0.0) for r in normal_rows]
         gate_passed = all(r.get("stress_gate_passed", False) for r in normal_rows)
-        ranking_data.append(
+        ranking_by_schema.setdefault(schema, []).append(
             {
                 "model_name": model,
                 "mean_ceps": sum(ceps_vals) / len(ceps_vals) if ceps_vals else 0.0,
                 "std_ceps": sum(std_vals) / len(std_vals) if std_vals else 0.0,
                 "risk_gate_passed": gate_passed,
+                "schema_version": schema,
             }
         )
 
-    if ranking_data:
+    for schema, ranking_data in ranking_by_schema.items():
+        schema_dir = fig_dir / schema
+        schema_dir.mkdir(parents=True, exist_ok=True)
         try:
+            prepare_ceps_ranking_rows(ranking_data)
             fig = plot_risk_ranking(
-                ranking_data, title=f"Risk-First Ranking — {rebalance}"
+                ranking_data, title=f"Risk-First Ranking — {rebalance} — {schema}"
             )
-            save_figure(fig, str(fig_dir / "rankings.png"), formats=("png",))
-            figures_written.append("rankings.png")
+            save_figure(fig, str(schema_dir / "rankings.png"), formats=("png",))
+            figures_written.append(f"{schema}/rankings.png")
         except Exception as exc:
-            log(f"analysis: rankings.png skipped ({exc})")
+            log(f"analysis: {schema}/rankings.png skipped ({exc})")
 
     # Fig 2: S2 vs S4 quadrant  (LLM models only)
     try:
@@ -442,36 +447,59 @@ def analyze_runs(
     # Fig 3: CEPS heatmap  (LLM models only, with per-stage scores from pipeline_logs)
     if model_normal:
         try:
-            ceps_totals: dict[str, float] = {}
+            ceps_by_schema: dict[str, dict[str, float]] = {}
             for model, normal_rows in model_normal.items():
                 if model.startswith("baseline/"):
                     continue
-                ceps_totals[model] = sum(
+                schema = str(normal_rows[0].get("schema_version") or "pipeline-v1")
+                ceps_by_schema.setdefault(schema, {})[model] = sum(
                     r.get("mean_ceps", 0.0) for r in normal_rows
                 ) / len(normal_rows)
-            if ceps_totals:
-                stage_scores = _load_stage_scores(output_root, rebalance)
-                # Fill zeros for models without pipeline_logs
+            stage_scores = _load_stage_scores(output_root, rebalance)
+            for schema, ceps_totals in ceps_by_schema.items():
+                if not ceps_totals:
+                    continue
+                prepare_ceps_ranking_rows(
+                    [
+                        {
+                            "id": model,
+                            "schema_version": schema,
+                            "mean_ceps": score,
+                        }
+                        for model, score in ceps_totals.items()
+                    ]
+                )
+                schema_dir = fig_dir / schema
+                schema_dir.mkdir(parents=True, exist_ok=True)
                 results_map = {m: stage_scores.get(m, {}) for m in ceps_totals}
                 fig = plot_ceps_heatmap(
                     results_map,
                     ceps_totals=ceps_totals,
-                    title=f"CEPS Breakdown — {rebalance}",
+                    title=f"CEPS Breakdown — {rebalance} — {schema}",
                 )
-                save_figure(fig, str(fig_dir / "ceps_breakdown.png"), formats=("png",))
-                figures_written.append("ceps_breakdown.png")
+                save_figure(fig, str(schema_dir / "ceps_breakdown.png"), formats=("png",))
+                figures_written.append(f"{schema}/ceps_breakdown.png")
         except Exception as exc:
             log(f"analysis: ceps_breakdown.png skipped ({exc})")
 
     # Fig 4: Risk-return scatter  (LLM models only — baselines have no CEPS)
     try:
         llm_rows = [r for r in rows if not r.get("model", "").startswith("baseline/")]
-        fig = plot_risk_return_scatter(
-            llm_rows,
-            title=f"Risk vs. Return — {rebalance}",
-        )
-        save_figure(fig, str(fig_dir / "risk_return_scatter.png"), formats=("png",))
-        figures_written.append("risk_return_scatter.png")
+        by_schema: dict[str, list[dict]] = {}
+        for row in llm_rows:
+            schema = str(row.get("schema_version") or "pipeline-v1")
+            by_schema.setdefault(schema, []).append(row)
+        for schema, schema_rows in by_schema.items():
+            if not schema_rows:
+                continue
+            schema_dir = fig_dir / schema
+            schema_dir.mkdir(parents=True, exist_ok=True)
+            fig = plot_risk_return_scatter(
+                schema_rows,
+                title=f"Risk vs. Return — {rebalance} — {schema}",
+            )
+            save_figure(fig, str(schema_dir / "risk_return_scatter.png"), formats=("png",))
+            figures_written.append(f"{schema}/risk_return_scatter.png")
     except Exception as exc:
         log(f"analysis: risk_return_scatter.png skipped ({exc})")
 
