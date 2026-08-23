@@ -67,7 +67,7 @@ normal_periods:
   # - {start: 2022-07-01, end: 2022-12-31, label: conservative_pressure_2022h2}
 
 oracle_mode: lookback
-experiment_tag: agentic_full_hy3_v1
+experiment_tag: agentic_full_hy3_v3
 logging:
   save_pipeline_logs: true
   save_snapshots: true
