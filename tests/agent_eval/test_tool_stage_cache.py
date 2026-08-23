@@ -43,3 +43,4 @@ def test_tool_complete_second_call_hits_replay_adapter(tmp_path):
     assert first == "with-tools"
     assert second == "with-tools"
     assert base.calls == 1
+    assert runtime.provenance["S4-main"]["toolset_hash"]

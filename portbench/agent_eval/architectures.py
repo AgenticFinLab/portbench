@@ -461,7 +461,14 @@ class ArchitectureStageAdapter(AgentAdapter):
             message_bundle_hash=sha256_hex(canonical_json(self.runtime.message_bus.trace())),
         )
 
-    def _record_new_call(self, before: ResourceUsage, prompt: str, response: str) -> ResultProvenance:
+    def _record_new_call(
+        self,
+        before: ResourceUsage,
+        prompt: str,
+        response: str,
+        *,
+        toolset_hash: str = "",
+    ) -> ResultProvenance:
         """Record exact provider deltas or a clearly labeled estimate."""
         after = _usage_snapshot(self.runtime.base_adapter)
         # Convert cumulative provider counters into this call's incremental cost.
@@ -483,6 +490,7 @@ class ArchitectureStageAdapter(AgentAdapter):
             data_version=self.runtime.data_version,
             code_commit=self.runtime.code_commit,
             memory_hash=self._memory().state_hash() if self.runtime.spec.memory_enabled else "",
+            toolset_hash=toolset_hash or None,
             token_exact=exact_delta or None,
             token_est=estimated_delta or None,
             request_count=request_delta,
@@ -508,7 +516,9 @@ class ArchitectureStageAdapter(AgentAdapter):
                 response = self.runtime.base_adapter.complete_with_tools(augmented, tools)
             else:
                 response = self.runtime.base_adapter.complete(augmented)
-            captured["provenance"] = self._record_new_call(before, augmented, str(response))
+            captured["provenance"] = self._record_new_call(
+                before, augmented, str(response), toolset_hash=toolset_hash
+            )
             return str(response)
 
         def provenance_factory() -> ResultProvenance:
