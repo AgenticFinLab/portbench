@@ -460,7 +460,12 @@ def _annotate_suffix_plan_scores(
         )
         plan, result = legacy_s4_to_plan_and_result(s4, snapshot)
         s4.plan = asdict(plan)
-        s4.plan_scores = score_s4_plan_quality(plan, ref_plan, target_weights=s3.weights)
+        s4.plan_scores = score_s4_plan_quality(
+            plan,
+            ref_plan,
+            target_weights=s3.weights,
+            current_weights=snapshot.current_weights,
+        )
         s4.outcome_scores = score_s4_environment_outcome(result, ref_result)
         s4.schema_version = "pipeline-v3-collab"
     s5 = filled.get(StageID.S5_RISK_MONITORING)

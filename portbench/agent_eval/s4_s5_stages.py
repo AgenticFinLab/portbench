@@ -305,7 +305,12 @@ class AgenticS4Stage:
             plan=plan,
             result=result,
             raw_response=str(raw),
-            plan_scores=score_s4_plan_quality(plan, ref_plan, target_weights=target_weights),
+            plan_scores=score_s4_plan_quality(
+                plan,
+                ref_plan,
+                target_weights=target_weights,
+                current_weights=current_weights,
+            ),
             outcome_scores=score_s4_environment_outcome(result, reference_result),
         )
 

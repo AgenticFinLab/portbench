@@ -154,7 +154,9 @@ def _rescore_v3_s4_s5(
     ref_plan, ref_fill = run_s4_deterministic_from_weights(
         target_weights, snapshot, current, nav
     )
-    s4_plan = score_s4_plan_quality(plan, ref_plan, target_weights=target_weights)
+    s4_plan = score_s4_plan_quality(
+        plan, ref_plan, target_weights=target_weights, current_weights=current
+    )
     s4_out = score_s4_environment_outcome(fill, ref_fill)
     s4_score = ceps_plan_score(s4_plan, stage="S4")
 
