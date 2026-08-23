@@ -34,7 +34,7 @@ YAML schema example:
       save_figures: true
 
     on_error: isolate                        # isolate | fail_fast
-    use_tools: false                         # true = S1/S2/S3 call complete_with_tools()
+    complete_with_tools()
 """
 
 from __future__ import annotations

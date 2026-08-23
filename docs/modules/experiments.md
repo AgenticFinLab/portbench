@@ -151,7 +151,6 @@ logging:
   save_figures: true                   # NAV / metrics / stress_drawdown PNGs
 
 on_error: isolate                      # isolate | fail_fast
-use_tools: false                       # true = S1/S2/S3 stages call complete_with_tools()
 output_root: EXPERIMENTS
 propagation_weight: 0.1                # CEPS cascade penalty weight (default 0.1)
 reuse_latest: false                    # true = skip models with existing results in the directory hierarchy
