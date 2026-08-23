@@ -1,0 +1,189 @@
+# PortBench full closed-loop sweep: 2x2x2 architectures × all production models.
+#
+# Matrix:
+#   10 LLM backbones × 8 architecture cells (SA/MA × memory × tools)
+#   + 6 quantitative baselines (no architecture_id; pipeline-v1)
+#   × 3 investor profiles
+#   × 3 stress windows + 2 preregistered normal windows
+#
+# Architecture IDs (topology × memory × tools):
+#   SA, SA-T, SA-M, SA-MT, MA, MA-T, MA-M, MA-MT
+# Model artifacts are stored as {model}__{architecture_id}.
+#
+# This is NOT a drop-in replacement for configs/experiments/default.yaml.
+# default.yaml runs the legacy pipeline-v1 backbone (deterministic S4/S5).
+# This file always uses pipeline-v3-collab for LLM cells (agentic S4/S5).
+#
+# Scale (closed-loop cells): 86 model entries × 3 profiles × 5 windows = 1290 backtests.
+# Dry-run first. Prefer committing this file before launching so code_commit is stable.
+#
+# Launch:
+#   .venv\Scripts\python.exe -m portbench.experiments --config configs/experiments/full.yaml --dry-run
+#   .venv\Scripts\python.exe -m portbench.experiments --config configs/experiments/full.yaml
+
+batch_id: "agentic_full_{date}"
+
+data_provider: processed
+data_version: processed-v1
+data_dir: datasets/processed
+sec_dir: datasets/sec
+rebalance: monthly
+initial_nav: 1000000
+# Required whenever any model sets architecture_id (exact usage attribution).
+workers_per_experiment: 1
+parallel_experiments: 2
+seed: 42
+
+generation:
+  temperature: 0.0
+  max_tokens: 8192
+
+resource_budget:
+  max_tokens_per_episode: 32000
+  max_requests_per_episode: 24
+  config_version: iso-token-v3
+
+models:
+  # --- tencent/hy3-preview ---
+  - {provider: tencent, model: hy3-preview, architecture_id: SA}
+  - {provider: tencent, model: hy3-preview, architecture_id: SA-T}
+  - {provider: tencent, model: hy3-preview, architecture_id: SA-M}
+  - {provider: tencent, model: hy3-preview, architecture_id: SA-MT}
+  - {provider: tencent, model: hy3-preview, architecture_id: MA}
+  - {provider: tencent, model: hy3-preview, architecture_id: MA-T}
+  - {provider: tencent, model: hy3-preview, architecture_id: MA-M}
+  - {provider: tencent, model: hy3-preview, architecture_id: MA-MT}
+
+  # --- deepseek ---
+  - {provider: deepseek, model: deepseek-v4-pro, architecture_id: SA}
+  - {provider: deepseek, model: deepseek-v4-pro, architecture_id: SA-T}
+  - {provider: deepseek, model: deepseek-v4-pro, architecture_id: SA-M}
+  - {provider: deepseek, model: deepseek-v4-pro, architecture_id: SA-MT}
+  - {provider: deepseek, model: deepseek-v4-pro, architecture_id: MA}
+  - {provider: deepseek, model: deepseek-v4-pro, architecture_id: MA-T}
+  - {provider: deepseek, model: deepseek-v4-pro, architecture_id: MA-M}
+  - {provider: deepseek, model: deepseek-v4-pro, architecture_id: MA-MT}
+  - {provider: deepseek, model: deepseek-v4-flash, architecture_id: SA}
+  - {provider: deepseek, model: deepseek-v4-flash, architecture_id: SA-T}
+  - {provider: deepseek, model: deepseek-v4-flash, architecture_id: SA-M}
+  - {provider: deepseek, model: deepseek-v4-flash, architecture_id: SA-MT}
+  - {provider: deepseek, model: deepseek-v4-flash, architecture_id: MA}
+  - {provider: deepseek, model: deepseek-v4-flash, architecture_id: MA-T}
+  - {provider: deepseek, model: deepseek-v4-flash, architecture_id: MA-M}
+  - {provider: deepseek, model: deepseek-v4-flash, architecture_id: MA-MT}
+
+  # --- ark / doubao ---
+  - {provider: ark, model: doubao-seed-2-0-pro-260215, architecture_id: SA}
+  - {provider: ark, model: doubao-seed-2-0-pro-260215, architecture_id: SA-T}
+  - {provider: ark, model: doubao-seed-2-0-pro-260215, architecture_id: SA-M}
+  - {provider: ark, model: doubao-seed-2-0-pro-260215, architecture_id: SA-MT}
+  - {provider: ark, model: doubao-seed-2-0-pro-260215, architecture_id: MA}
+  - {provider: ark, model: doubao-seed-2-0-pro-260215, architecture_id: MA-T}
+  - {provider: ark, model: doubao-seed-2-0-pro-260215, architecture_id: MA-M}
+  - {provider: ark, model: doubao-seed-2-0-pro-260215, architecture_id: MA-MT}
+  - {provider: ark, model: doubao-seed-2-0-lite-260215, architecture_id: SA}
+  - {provider: ark, model: doubao-seed-2-0-lite-260215, architecture_id: SA-T}
+  - {provider: ark, model: doubao-seed-2-0-lite-260215, architecture_id: SA-M}
+  - {provider: ark, model: doubao-seed-2-0-lite-260215, architecture_id: SA-MT}
+  - {provider: ark, model: doubao-seed-2-0-lite-260215, architecture_id: MA}
+  - {provider: ark, model: doubao-seed-2-0-lite-260215, architecture_id: MA-T}
+  - {provider: ark, model: doubao-seed-2-0-lite-260215, architecture_id: MA-M}
+  - {provider: ark, model: doubao-seed-2-0-lite-260215, architecture_id: MA-MT}
+
+  # --- dashscope ---
+  - {provider: dashscope, model: qwen3.7-max, architecture_id: SA}
+  - {provider: dashscope, model: qwen3.7-max, architecture_id: SA-T}
+  - {provider: dashscope, model: qwen3.7-max, architecture_id: SA-M}
+  - {provider: dashscope, model: qwen3.7-max, architecture_id: SA-MT}
+  - {provider: dashscope, model: qwen3.7-max, architecture_id: MA}
+  - {provider: dashscope, model: qwen3.7-max, architecture_id: MA-T}
+  - {provider: dashscope, model: qwen3.7-max, architecture_id: MA-M}
+  - {provider: dashscope, model: qwen3.7-max, architecture_id: MA-MT}
+  - {provider: dashscope, model: qwen3.6-plus, architecture_id: SA}
+  - {provider: dashscope, model: qwen3.6-plus, architecture_id: SA-T}
+  - {provider: dashscope, model: qwen3.6-plus, architecture_id: SA-M}
+  - {provider: dashscope, model: qwen3.6-plus, architecture_id: SA-MT}
+  - {provider: dashscope, model: qwen3.6-plus, architecture_id: MA}
+  - {provider: dashscope, model: qwen3.6-plus, architecture_id: MA-T}
+  - {provider: dashscope, model: qwen3.6-plus, architecture_id: MA-M}
+  - {provider: dashscope, model: qwen3.6-plus, architecture_id: MA-MT}
+  - {provider: dashscope, model: kimi-k2.6, architecture_id: SA}
+  - {provider: dashscope, model: kimi-k2.6, architecture_id: SA-T}
+  - {provider: dashscope, model: kimi-k2.6, architecture_id: SA-M}
+  - {provider: dashscope, model: kimi-k2.6, architecture_id: SA-MT}
+  - {provider: dashscope, model: kimi-k2.6, architecture_id: MA}
+  - {provider: dashscope, model: kimi-k2.6, architecture_id: MA-T}
+  - {provider: dashscope, model: kimi-k2.6, architecture_id: MA-M}
+  - {provider: dashscope, model: kimi-k2.6, architecture_id: MA-MT}
+  - {provider: dashscope, model: glm-5.1, architecture_id: SA}
+  - {provider: dashscope, model: glm-5.1, architecture_id: SA-T}
+  - {provider: dashscope, model: glm-5.1, architecture_id: SA-M}
+  - {provider: dashscope, model: glm-5.1, architecture_id: SA-MT}
+  - {provider: dashscope, model: glm-5.1, architecture_id: MA}
+  - {provider: dashscope, model: glm-5.1, architecture_id: MA-T}
+  - {provider: dashscope, model: glm-5.1, architecture_id: MA-M}
+  - {provider: dashscope, model: glm-5.1, architecture_id: MA-MT}
+  - {provider: dashscope, model: qwen3.6-35b-a3b, architecture_id: SA}
+  - {provider: dashscope, model: qwen3.6-35b-a3b, architecture_id: SA-T}
+  - {provider: dashscope, model: qwen3.6-35b-a3b, architecture_id: SA-M}
+  - {provider: dashscope, model: qwen3.6-35b-a3b, architecture_id: SA-MT}
+  - {provider: dashscope, model: qwen3.6-35b-a3b, architecture_id: MA}
+  - {provider: dashscope, model: qwen3.6-35b-a3b, architecture_id: MA-T}
+  - {provider: dashscope, model: qwen3.6-35b-a3b, architecture_id: MA-M}
+  - {provider: dashscope, model: qwen3.6-35b-a3b, architecture_id: MA-MT}
+
+  # Quantitative references (legacy pipeline; no LLM).
+  - baseline: equal_weight
+  - baseline: risk_parity
+  - baseline: sixty_forty
+  - baseline: cov_risk_parity
+  - baseline: min_variance
+  - baseline: black_litterman
+
+profiles: [conservative, balanced, aggressive]
+stress_scenarios: [2015_china_shock, 2020_covid_flash_crash, 2022_crypto_collapse]
+run_normal: true
+normal_periods:
+  - {start: 2024-01-01, end: 2024-12-31, label: balanced_bull_2024}
+  - {start: 2022-07-01, end: 2022-12-31, label: conservative_pressure_2022h2}
+
+oracle_mode: lookback
+experiment_tag: agentic_full_v1
+logging:
+  save_pipeline_logs: true
+  save_snapshots: true
+  save_figures: true
+
+on_error: isolate
+output_root: EXPERIMENTS
+timeout: 600
+propagation_weight: 0.1
+reuse_latest: true
+
+interventions:
+  enabled: true
+  stages: [S1, S2, S3, S4, S5]
+  # repair  — replace the stage output with the Point-in-Time ground-truth reconstruction
+  # perturb — shock the model's factual output with the built-in +10% stance amplification
+  operator: repair
+  # offline — no extra LLM; deterministic suffix; CEPS / stage-score deltas only (not NAV)
+  # online  — re-run the downstream agent; same CEPS/score-delta family, more expensive
+  mode: offline
+  # true  — also fork NAV from the first rebalance of the window (portfolio-path effect)
+  # cheap with mode=offline (default on); do not pair with mode=online unless you accept extra LLM
+  closed_loop: true
+
+run_qa: false
+qa:
+  dataset_path: datasets/qa_dataset
+  split: test
+  templates: [T1, T2, T3, T4, T5, T6, T7]
+  max_pairs_per_template: 50
+  parallel_questions: 8
+  save_responses: true
+  info_level: both
+  t3t4_redesign: false
+  t3t4_numeric_weight: 0.7
+  t3t4_explanation_weight: 0.3
+
+sigma_ablation_values: [0.0, 0.25, 0.5, 0.75, 1.0]
