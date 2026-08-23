@@ -9,7 +9,6 @@ from pathlib import Path
 SOURCE_PATHS = (
     "portbench",
     "tests",
-    "configs/experiments",
     "requirements.txt",
     "setup.py",
 )
