@@ -506,6 +506,35 @@ class LiteLLMAdapter(AgentAdapter):
         self._max_retries = max_retries
         self._api_base = api_base
         self._extra_params = extra_params or {}
+        self._usage_lock = threading.Lock()
+        self._usage = {
+            "token_exact": 0,
+            "token_est": 0,
+            "request_count": 0,
+            "tool_call_count": 0,
+        }
+
+    def _record_litellm_response(self, response) -> None:
+        """Record exact usage returned by litellm when present."""
+        usage = getattr(response, "usage", None)
+        total_tokens = int(getattr(usage, "total_tokens", 0) or 0)
+        with self._usage_lock:
+            self._usage["token_exact"] += total_tokens
+
+    def _record_request(self) -> None:
+        """Count every provider request, including retries."""
+        with self._usage_lock:
+            self._usage["request_count"] += 1
+
+    def _record_tool_calls(self, count: int) -> None:
+        """Count provider-requested tool invocations."""
+        with self._usage_lock:
+            self._usage["tool_call_count"] += int(count)
+
+    def resource_usage(self) -> dict:
+        """Return cumulative exact provider usage."""
+        with self._usage_lock:
+            return dict(self._usage)
 
     @property
     def model_name(self) -> str:
@@ -529,7 +558,9 @@ class LiteLLMAdapter(AgentAdapter):
         for empty_attempt in range(2):  # 2 attempts total (initial + 1 retry)
             # Re-define _call each iteration so the closure is fresh
             def _call():
+                self._record_request()
                 response = self._litellm.completion(**kwargs)
+                self._record_litellm_response(response)
                 content = response.choices[0].message.content
                 if not content or not content.strip():
                     raise EmptyResponseError("Empty response from API")
@@ -583,27 +614,26 @@ class LiteLLMAdapter(AgentAdapter):
                 kwargs["api_base"] = self._api_base
 
             def _call(kw=kwargs):
-                return self._litellm.completion(**kw)
+                self._record_request()
+                response = self._litellm.completion(**kw)
+                self._record_litellm_response(response)
+                return response
 
             response = _retry(_call, max_retries=self._max_retries)
             choice = response.choices[0]
+            tool_calls = _message_tool_calls(choice)
+            if not tool_calls:
+                return _choice_text(choice)
 
-            if choice.finish_reason == "stop":
-                return choice.message.content or ""
-
-            if choice.finish_reason != "tool_calls":
-                return choice.message.content or ""
-
+            self._record_tool_calls(len(tool_calls))
             messages.append(
                 {
                     "role": "assistant",
                     "content": choice.message.content,
-                    "tool_calls": [
-                        tc.model_dump() for tc in (choice.message.tool_calls or [])
-                    ],
+                    "tool_calls": [tc.model_dump() for tc in tool_calls],
                 }
             )
-            for tc in choice.message.tool_calls or []:
+            for tc in tool_calls:
                 try:
                     args = json.loads(tc.function.arguments)
                     result = dispatch_tool(tc.function.name, args, tools)
