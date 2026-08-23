@@ -56,6 +56,150 @@ def _s5_from_dict(d: dict):
         portfolio_drawdown=float(d.get("portfolio_drawdown", 0.0)),
         weight_drift=float(d.get("weight_drift", 0.0)),
         rebalance_needed=bool(d.get("rebalance_needed", False)),
+        final_weights={
+            k: float(v) for k, v in (d.get("final_weights") or {}).items()
+        },
+        schema_version=str(d.get("schema_version") or "pipeline-v1-deterministic"),
+        decision=dict(d.get("decision") or {}),
+        plan_scores=dict(d.get("plan_scores") or {}),
+        outcome_scores=dict(d.get("outcome_scores") or {}),
+    )
+
+
+PIPELINE_V3 = "pipeline-v3-collab"
+
+
+def _episode_schema_version(episode: dict) -> str:
+    """Return pipeline-v3-collab when the log is agentic; never treat those as v1."""
+    if str(episode.get("schema_version") or "") == PIPELINE_V3:
+        return PIPELINE_V3
+    for record in episode.get("stages") or []:
+        parsed = record.get("parsed_output") or {}
+        version = str(parsed.get("schema_version") or "")
+        if version == PIPELINE_V3:
+            return PIPELINE_V3
+        if record.get("stage_id") in {"S4", "S5"} and (
+            parsed.get("plan") or parsed.get("decision") or parsed.get("plan_scores")
+        ):
+            return PIPELINE_V3
+    return str(episode.get("schema_version") or "pipeline-v1")
+
+
+def _execution_plan_from_parsed(parsed: dict):
+    from ..agent_eval.contracts import ExecutionPlan
+
+    plan = parsed.get("plan") or {}
+    if not plan:
+        return None
+    return ExecutionPlan(
+        order_direction=str(plan.get("order_direction") or ""),
+        target_scale=float(plan.get("target_scale") or 1.0),
+        order_type=str(plan.get("order_type") or "market"),
+        urgency=str(plan.get("urgency") or "normal"),
+        slip_limit=plan.get("slip_limit"),
+        orders=list(plan.get("orders") or []),
+        metadata=dict(plan.get("metadata") or {}),
+    )
+
+
+def _risk_decision_from_parsed(parsed: dict):
+    from ..agent_eval.contracts import RiskControlDecision
+
+    decision = parsed.get("decision") or {}
+    if not decision:
+        return None
+    corrective = decision.get("corrective_weights")
+    return RiskControlDecision(
+        action=str(decision.get("action") or "hold"),
+        alerts=list(decision.get("alerts") or []),
+        corrective_weights=(
+            {str(k): float(v) for k, v in dict(corrective).items()}
+            if isinstance(corrective, dict)
+            else None
+        ),
+        scale_factor=decision.get("scale_factor"),
+        metadata=dict(decision.get("metadata") or {}),
+    )
+
+
+def _rescore_v3_s4_s5(
+    snapshot,
+    s3_actual,
+    s4_parsed: dict,
+    s5_parsed: dict,
+    profile=None,
+) -> tuple[float, float, dict, dict]:
+    """Rescore agentic S4/S5 from logged plans; CEPS uses plan-quality only."""
+    from ..agent_eval.s4_s5_bridge import run_s4_deterministic_from_weights
+    from ..agent_eval.s4_s5_stages import _reference_risk_decision
+    from ..agent_eval.stages import S5RiskMonitoring
+    from ..metrics.plan_outcome_scores import (
+        ceps_outcome_score,
+        ceps_plan_score,
+        score_s4_environment_outcome,
+        score_s4_plan_quality,
+        score_s5_environment_outcome,
+        score_s5_plan_quality,
+    )
+    from ..sandbox.execution import simulate_execution
+    from ..sandbox.risk_control import evaluate_risk, summarize_pre_action_risk
+
+    plan = _execution_plan_from_parsed(s4_parsed)
+    if plan is None:
+        raise ValueError("pipeline-v3-collab S4 log is missing a plan; refusing legacy rescore")
+    target_weights = dict(s3_actual.weights or {})
+    nav = float(snapshot.portfolio_value or 1_000_000.0)
+    current = dict(snapshot.current_weights or {})
+    fill = simulate_execution(plan, snapshot, current, nav)
+    ref_plan, ref_fill = run_s4_deterministic_from_weights(
+        target_weights, snapshot, current, nav
+    )
+    s4_plan = score_s4_plan_quality(plan, ref_plan, target_weights=target_weights)
+    s4_out = score_s4_environment_outcome(fill, ref_fill)
+    s4_score = ceps_plan_score(s4_plan, stage="S4")
+
+    weights = dict(fill.filled_weights or target_weights)
+    decision = _risk_decision_from_parsed(s5_parsed)
+    if decision is None:
+        raise ValueError("pipeline-v3-collab S5 log is missing a decision; refusing legacy rescore")
+    var_limit = profile.var_limit if profile is not None else S5RiskMonitoring.VAR_LIMIT
+    drawdown_limit = (
+        -profile.max_drawdown_tolerance
+        if profile is not None
+        else S5RiskMonitoring.DRAWDOWN_LIMIT
+    )
+    drift_limit = S5RiskMonitoring.DRIFT_LIMIT
+    pre_risk = summarize_pre_action_risk(weights, snapshot.return_data)
+    eval_result = evaluate_risk(
+        decision,
+        weights,
+        snapshot.return_data,
+        var_limit=var_limit,
+        drawdown_limit=drawdown_limit,
+        drift_limit=drift_limit,
+    )
+    ref_decision = _reference_risk_decision(
+        weights, pre_risk, var_limit, drawdown_limit, drift_limit
+    )
+    ref_eval = evaluate_risk(
+        ref_decision,
+        weights,
+        snapshot.return_data,
+        var_limit=var_limit,
+        drawdown_limit=drawdown_limit,
+        drift_limit=drift_limit,
+    )
+    s5_plan = score_s5_plan_quality(decision, ref_decision)
+    s5_out = score_s5_environment_outcome(eval_result, ref_eval)
+    s5_score = ceps_plan_score(s5_plan, stage="S5")
+    return (
+        s4_score,
+        s5_score,
+        {"S4": s4_plan, "S5": s5_plan, "S4_outcome": s4_out, "S5_outcome": s5_out},
+        {
+            "S4": ceps_outcome_score(s4_out),
+            "S5": ceps_outcome_score(s5_out),
+        },
     )
 
 
@@ -71,13 +215,14 @@ def _rescore_episode(
     propagation_weight: float,
     profile=None,
     current_weights: dict = None,
+    intervention_cfg=None,
 ) -> Optional[tuple[float, dict]]:
     """
     Rescore one episode using updated S3 GT.
 
     Returns (ceps_score, {S1: score, ..., S5: score}), or None if insufficient data.
-    Accepts optional `current_weights` so gt_turnover is computed from the correct
-    starting portfolio rather than an empty one.
+    Mutates `episode` in place with updated scores, plan/outcome scores, and
+    offline intervention deltas. Agentic logs are never scored as pipeline-v1.
     """
     from ..agent_eval.stages import (
         S3WeightOptimization,
@@ -94,6 +239,7 @@ def _rescore_episode(
         return None
 
     dec_date = date.fromisoformat(episode["decision_date"])
+    schema = _episode_schema_version(episode)
 
     # Rebuild snapshot with future_return_data and (optionally) correct current_weights
     try:
@@ -110,42 +256,55 @@ def _rescore_episode(
     if not snapshot.return_data:
         return None
 
-    # Instantiate scorer stages (no LLM adapter — only GT computation and score())
     s3_stage = S3WeightOptimization()
     s3_stage._last_snapshot = snapshot  # needed for correlation-awareness scoring
-    s4_stage = S4ExecutionSimulation()
-    s5_stage = S5RiskMonitoring(profile=profile)
 
-    # Compute new GTs for S3, S4, S5
     try:
         s3_gt = s3_stage.compute_ground_truth(snapshot)
-        s4_gt = s4_stage.compute_ground_truth(snapshot)
-        s5_gt = s5_stage.compute_ground_truth(snapshot)
     except Exception as exc:
         log.debug("GT computation failed for %s: %s", dec_date, exc)
         return None
 
-    # Reconstruct actual outputs from episode JSON
     s3_actual = _s3_from_dict(s3_log.get("parsed_output", {}))
-    s4_log = stages_by_id.get("S4", {})
-    s5_log = stages_by_id.get("S5", {})
-    s4_actual = _s4_from_dict(s4_log.get("parsed_output", {})) if s4_log else None
-    s5_actual = _s5_from_dict(s5_log.get("parsed_output", {})) if s5_log else None
-
-    # Re-score S3, S4, S5; keep S1/S2 scores from episode file
     s1_score = float(stages_by_id.get("S1", {}).get("score", 0.0))
     s2_score = float(stages_by_id.get("S2", {}).get("score", 0.0))
     s3_score = s3_stage.score(s3_actual, s3_gt)
-    s4_score = (
-        s4_stage.score(s4_actual, s4_gt)
-        if s4_actual
-        else float(stages_by_id.get("S4", {}).get("score", 0.0))
-    )
-    s5_score = (
-        s5_stage.score(s5_actual, s5_gt)
-        if s5_actual
-        else float(stages_by_id.get("S5", {}).get("score", 0.0))
-    )
+    plan_outcome = {}
+    outcome_scalars = {}
+
+    if schema == PIPELINE_V3:
+        s4_parsed = (stages_by_id.get("S4") or {}).get("parsed_output") or {}
+        s5_parsed = (stages_by_id.get("S5") or {}).get("parsed_output") or {}
+        try:
+            s4_score, s5_score, plan_outcome, outcome_scalars = _rescore_v3_s4_s5(
+                snapshot, s3_actual, s4_parsed, s5_parsed, profile=profile
+            )
+        except Exception as exc:
+            log.debug("v3 S4/S5 rescore failed for %s: %s", dec_date, exc)
+            return None
+    else:
+        s4_stage = S4ExecutionSimulation()
+        s5_stage = S5RiskMonitoring(profile=profile)
+        try:
+            s4_gt = s4_stage.compute_ground_truth(snapshot)
+            s5_gt = s5_stage.compute_ground_truth(snapshot)
+        except Exception as exc:
+            log.debug("GT computation failed for %s: %s", dec_date, exc)
+            return None
+        s4_log = stages_by_id.get("S4", {})
+        s5_log = stages_by_id.get("S5", {})
+        s4_actual = _s4_from_dict(s4_log.get("parsed_output", {})) if s4_log else None
+        s5_actual = _s5_from_dict(s5_log.get("parsed_output", {})) if s5_log else None
+        s4_score = (
+            s4_stage.score(s4_actual, s4_gt)
+            if s4_actual
+            else float(stages_by_id.get("S4", {}).get("score", 0.0))
+        )
+        s5_score = (
+            s5_stage.score(s5_actual, s5_gt)
+            if s5_actual
+            else float(stages_by_id.get("S5", {}).get("score", 0.0))
+        )
 
     stage_scores = [
         StageScore(
@@ -162,6 +321,48 @@ def _rescore_episode(
         "S1": s1_score, "S2": s2_score, "S3": s3_score,
         "S4": s4_score, "S5": s5_score,
     }
+
+    episode["ceps_score"] = round(float(ceps_score), 6)
+    episode["schema_version"] = schema
+    for record in episode.get("stages") or []:
+        sid = record.get("stage_id")
+        if sid in per_stage:
+            record["score"] = round(float(per_stage[sid]), 6)
+        if sid in {"S4", "S5"} and plan_outcome:
+            record["score_plan"] = round(float(per_stage[sid]), 6)
+            record["score_outcome"] = round(float(outcome_scalars.get(sid, 0.0)), 6)
+            parsed = record.get("parsed_output") or {}
+            if sid == "S4" and plan_outcome.get("S4"):
+                parsed["plan_scores"] = plan_outcome["S4"]
+                parsed["outcome_scores"] = plan_outcome.get("S4_outcome") or {}
+            if sid == "S5" and plan_outcome.get("S5"):
+                parsed["plan_scores"] = plan_outcome["S5"]
+                parsed["outcome_scores"] = plan_outcome.get("S5_outcome") or {}
+            record["parsed_output"] = parsed
+
+    if intervention_cfg is not None and getattr(intervention_cfg, "enabled", False):
+        try:
+            from ..agent_eval.base import StageID
+            from ..agent_eval.intervention import (
+                episode_from_log,
+                run_episode_interventions,
+            )
+
+            gt_map = {StageID.S3_WEIGHT_OPTIMIZATION: s3_gt}
+            factual = episode_from_log(episode, stage_scores=per_stage, gt_outputs=gt_map)
+            factual.schema_version = schema
+            episode["interventions"] = run_episode_interventions(
+                pipeline=None,
+                snapshot=snapshot,
+                factual=factual,
+                stages=list(intervention_cfg.stages),
+                operator=str(intervention_cfg.operator),
+                mode="offline",
+                propagation_weight=propagation_weight,
+            )
+        except Exception as exc:
+            log.debug("offline intervention rescore failed for %s: %s", dec_date, exc)
+
     return ceps_score, per_stage
 
 
@@ -201,6 +402,7 @@ def _rescore_profile(
     forward_days: int,
     propagation_weight: float,
     profile_name: Optional[str] = None,
+    intervention_cfg=None,
 ) -> Optional[tuple[list[float], dict[str, float]]]:
     """
     Rescore all episodes in a profile's pipeline_logs.
@@ -235,12 +437,20 @@ def _rescore_profile(
         result = _rescore_episode(
             episode, snapshot_builder, forward_days, propagation_weight,
             profile=profile, current_weights=cur_w,
+            intervention_cfg=intervention_cfg,
         )
         if result is not None:
             ceps, per_stage = result
             new_ceps.append(ceps)
             for sid, sc in per_stage.items():
                 stage_accum.setdefault(sid, []).append(sc)
+            try:
+                ep_path.write_text(
+                    json.dumps(episode, indent=2, default=str),
+                    encoding="utf-8",
+                )
+            except Exception:
+                pass
 
     if not new_ceps:
         return None
@@ -366,9 +576,11 @@ def rescore_ceps(
     seed = 42
     lookback_days = 60
     asset_class_map_path = None
+    intervention_cfg = None
 
     if config_path:
         import yaml
+        from .config import _parse_intervention_config
 
         with open(config_path, encoding="utf-8") as f:
             raw = yaml.safe_load(f)
@@ -377,6 +589,7 @@ def rescore_ceps(
         sec_dir = raw.get("sec_dir", sec_dir)
         seed = raw.get("seed", seed)
         lookback_days = raw.get("lookback_days", lookback_days)
+        intervention_cfg = _parse_intervention_config(raw.get("interventions") or {})
 
     # ── Build data provider ───────────────────────────────────────────────────
     if data_provider_kind == "processed":
@@ -457,6 +670,7 @@ def rescore_ceps(
                         forward_days,
                         propagation_weight,
                         profile_name=profile_name,
+                        intervention_cfg=intervention_cfg,
                     )
                     if result is None:
                         _log(f"  {profile_name}: no pipeline_logs — skipped")
@@ -481,6 +695,7 @@ def rescore_ceps(
                                 forward_days,
                                 propagation_weight,
                                 profile_name=profile_name,
+                                intervention_cfg=intervention_cfg,
                             )
                             if stress_result is not None:
                                 s_ceps, s_stage = stress_result
