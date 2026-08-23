@@ -467,6 +467,7 @@ class EpisodeResult:
     collaboration_trace: list[dict[str, Any]] = field(default_factory=list)
     stage_score_plan: dict[StageID, float] = field(default_factory=dict)
     stage_score_outcome: dict[StageID, float] = field(default_factory=dict)
+    interventions: list[dict[str, Any]] = field(default_factory=list)
     ceps_score: float = 0.0
 
     def to_stage_score_list(self):
@@ -521,7 +522,14 @@ class EvalPipeline:
         self.stages = {s.stage_id: s for s in stages}
         self.runtime = runtime
         self._logger = None  # Set by enable_logging()
+        self._intervention: Optional[dict[str, Any]] = None
         self._propagation_weight: float = 0.1
+
+    def configure_interventions(self, spec: Optional[dict[str, Any]]) -> None:
+        """Attach batch intervention settings (enabled, stages, operator, mode)."""
+        self._intervention = dict(spec or {})
+        if "propagation_weight" in self._intervention:
+            self._propagation_weight = float(self._intervention["propagation_weight"])
 
     def enable_logging(
         self,
@@ -573,6 +581,7 @@ class EvalPipeline:
         inject_gt_at: Optional[StageID] = None,
         stage_overrides: Optional[dict[StageID, Any]] = None,
         reuse_outputs: Optional[dict[StageID, Any]] = None,
+        run_interventions: bool = True,
     ) -> EpisodeResult:
         """
         Run the full pipeline for one market snapshot.
@@ -719,8 +728,22 @@ class EvalPipeline:
             CEPS(self._propagation_weight).compute(result.to_stage_score_list()).ceps_score
         )
 
+        spec = self._intervention or {}
+        if run_interventions and spec.get("enabled"):
+            from .intervention import run_episode_interventions
+
+            result.interventions = run_episode_interventions(
+                self,
+                snapshot,
+                result,
+                stages=list(spec.get("stages") or ["S1", "S2", "S3", "S4", "S5"]),
+                operator=str(spec.get("operator") or "repair"),
+                mode=str(spec.get("mode") or "offline"),
+                propagation_weight=float(spec.get("propagation_weight") or 0.1),
+            )
+
         # Write episode log if logging is enabled
-        if self._logger is not None:
+        if run_interventions and self._logger is not None:
             duration_ms = (datetime.now() - episode_start).total_seconds() * 1000
             self._logger.log_episode(
                 result=result,

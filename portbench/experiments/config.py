@@ -99,6 +99,63 @@ class ModelSpec:
 
 
 @dataclass
+class InterventionConfig:
+    """Causal stage interventions applied after each factual episode.
+
+    operator:
+      repair  — replace the stage output with the Point-in-Time ground-truth reconstruction
+      perturb — shock the model's factual output with the built-in +10% stance amplification
+    mode:
+      offline — no extra LLM; deterministic suffix; CEPS / stage-score deltas only (not NAV)
+      online  — re-run the downstream agent; same CEPS/score-delta family, more expensive
+    closed_loop:
+      true — also fork NAV from the first rebalance of the window (portfolio-path effect)
+    """
+
+    enabled: bool = False
+    stages: list[str] = field(
+        default_factory=lambda: ["S1", "S2", "S3", "S4", "S5"]
+    )
+    operator: str = "repair"
+    mode: str = "offline"
+    closed_loop: Optional[bool] = None
+
+    def __post_init__(self) -> None:
+        if self.operator not in {"repair", "perturb"}:
+            raise ValueError(f"interventions.operator must be repair or perturb, got {self.operator!r}")
+        if self.mode not in {"offline", "online"}:
+            raise ValueError(f"interventions.mode must be offline or online, got {self.mode!r}")
+        if self.closed_loop is None:
+            self.closed_loop = self.mode == "offline"
+        unknown = [stage for stage in self.stages if stage not in {"S1", "S2", "S3", "S4", "S5"}]
+        if unknown:
+            raise ValueError(f"unsupported intervention stages: {unknown}")
+
+    def to_spec(self, propagation_weight: float = 0.1) -> dict:
+        return {
+            "enabled": bool(self.enabled),
+            "stages": list(self.stages),
+            "operator": self.operator,
+            "mode": self.mode,
+            "closed_loop": bool(self.closed_loop),
+            "propagation_weight": float(propagation_weight),
+        }
+
+
+def _parse_intervention_config(raw: dict) -> InterventionConfig:
+    if not raw:
+        return InterventionConfig()
+    closed = raw.get("closed_loop")
+    return InterventionConfig(
+        enabled=bool(raw.get("enabled", False)),
+        stages=list(raw.get("stages") or ["S1", "S2", "S3", "S4", "S5"]),
+        operator=str(raw.get("operator") or "repair"),
+        mode=str(raw.get("mode") or "offline"),
+        closed_loop=None if closed is None else bool(closed),
+    )
+
+
+@dataclass
 class LoggingConfig:
     save_pipeline_logs: bool = True
     save_snapshots: bool = True
@@ -172,6 +229,7 @@ class ExperimentConfig:
     sigma_ablation_values: list = field(
         default_factory=lambda: [0.0, 0.25, 0.5, 0.75, 1.0]
     )
+    interventions: InterventionConfig = field(default_factory=InterventionConfig)
 
     def __post_init__(self):
         # Concurrent scenarios would mix provider usage deltas across threads.
@@ -276,6 +334,7 @@ class ExperimentConfig:
             sigma_ablation_values=list(
                 raw.get("sigma_ablation_values", [0.0, 0.25, 0.5, 0.75, 1.0])
             ),
+            interventions=_parse_intervention_config(raw.get("interventions") or {}),
         )
 
     def resolved_stress_scenarios(self) -> list[str]:

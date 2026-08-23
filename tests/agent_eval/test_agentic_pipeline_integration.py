@@ -153,3 +153,67 @@ def test_reuse_s1_s3_runs_only_agentic_s4_s5(tmp_path):
         StageID.S4_EXECUTION_SIMULATION
     ]
     assert StageID.S4_EXECUTION_SIMULATION in result.stage_score_outcome
+
+
+def test_offline_interventions_do_not_call_adapter(tmp_path):
+    adapter = TwoStageAdapter()
+    pipeline = build_default_pipeline(
+        adapter,
+        architecture_id="SA",
+        cache_dir=str(tmp_path / "cache"),
+        budget=IsoTokenBudget(max_tokens_per_episode=5000, max_requests_per_episode=2),
+        provider="test",
+        profile_name="balanced",
+        data_version="test-v1",
+        code_commit="test-tree",
+        oracle_mode="lookback",
+    )
+    pipeline.configure_interventions(
+        {
+            "enabled": True,
+            "stages": ["S3"],
+            "operator": "repair",
+            "mode": "offline",
+            "closed_loop": False,
+        }
+    )
+    returns = {
+        "SPY": pd.Series([0.01, -0.02, 0.005] * 10),
+        "BIL": pd.Series([0.0001] * 30),
+    }
+    snapshot = MarketSnapshot(
+        decision_date=date(2024, 2, 1),
+        price_data={"SPY": pd.Series([100.0]), "BIL": pd.Series([100.0])},
+        return_data=returns,
+        macro_data={},
+        current_weights={"SPY": 0.5, "BIL": 0.5},
+        portfolio_value=1_000_000.0,
+        market_regime="sideways",
+    )
+    reused = {
+        StageID.S1_MARKET_INTERPRETATION: S1Output(
+            asset_views={"SPY": 0.2, "BIL": 0.0},
+            macro_summary="cached",
+            detected_regime="sideways",
+            confidence=0.5,
+        ),
+        StageID.S2_SIGNAL_GENERATION: S2Output(
+            signals={"SPY": "buy", "BIL": "hold"},
+            strengths={"SPY": 0.5, "BIL": 0.0},
+            reasoning="cached",
+        ),
+        StageID.S3_WEIGHT_OPTIMIZATION: S3Output(
+            weights={"SPY": 0.6, "BIL": 0.4},
+            expected_return=0.0,
+            expected_vol=0.0,
+            sharpe_estimate=0.0,
+        ),
+    }
+    nested = pipeline.run_episode(snapshot, reuse_outputs=reused, run_interventions=False)
+    assert nested.interventions == []
+    assert adapter.calls == 2
+    result = pipeline.run_episode(snapshot, reuse_outputs=reused)
+    assert adapter.calls == 2
+    assert result.interventions
+    assert result.interventions[0]["mode"] == "offline"
+    assert "score_delta" in result.interventions[0]

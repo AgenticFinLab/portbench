@@ -97,6 +97,7 @@ class BacktestEngine:
         data_version: str = "",
         code_commit: str = "",
         resource_budget=None,
+        intervention_spec: Optional[dict] = None,
     ):
         self.strategy = strategy
         self._snapshot_dump_dir: Optional[str] = snapshot_dump_dir
@@ -117,6 +118,9 @@ class BacktestEngine:
         self._architecture_id = architecture_id
         self._data_version = data_version
         self._code_commit = code_commit
+        self._intervention_spec: dict = dict(intervention_spec or {})
+        self._rebalance_records: list[tuple] = []
+        self.closed_loop_interventions: list[dict] = []
         self._alignment_scorer = (
             ProfileAlignmentScorer(asset_class_map)
             if (profile is not None and asset_class_map)
@@ -153,6 +157,9 @@ class BacktestEngine:
                 data_version=data_version,
                 code_commit=code_commit,
             )
+            spec = dict(self._intervention_spec)
+            spec.setdefault("propagation_weight", self._propagation_weight)
+            self._pipeline.configure_interventions(spec)
 
         # Per-rebalance collection (populated in _get_target_weights)
         self._episode_results = []
@@ -305,6 +312,8 @@ class BacktestEngine:
         if self._pipeline is not None and self._pipeline_log_dir:
             self._pipeline.finalize_logging()
 
+        self._run_closed_loop_interventions()
+
         return BacktestResult(
             model_name=self.strategy.model_name,
             start_date=self.start_date,
@@ -356,6 +365,7 @@ class BacktestEngine:
 
             result = self._pipeline.run_episode(snapshot)
             self._episode_results.append(result)
+            self._rebalance_records.append((snapshot, result))
             self._resource_audit.append(
                 {
                     "decision_date": date_key,
@@ -408,6 +418,32 @@ class BacktestEngine:
             "Pipeline produced no usable target weights and strategy is not a "
             "BaselineStrategy — refusing to fall back to equal-weight."
         )
+
+    def _run_closed_loop_interventions(self) -> None:
+        """Fork NAV from the first valid rebalance; write separately from CEPS."""
+        spec = self._intervention_spec
+        if not spec.get("enabled") or not spec.get("closed_loop"):
+            return
+        if not self._rebalance_records:
+            return
+        from ..agent_eval.intervention import run_offline_closed_loop
+
+        stages = list(spec.get("stages") or ["S1", "S2", "S3", "S4", "S5"])
+        operator = str(spec.get("operator") or "repair")
+        weight = float(spec.get("propagation_weight") or self._propagation_weight)
+        branches = []
+        for stage_id in stages:
+            branches.append(
+                run_offline_closed_loop(
+                    self._rebalance_records,
+                    stage_id=stage_id,
+                    operator=operator,
+                    intervention_index=0,
+                    pipeline=self._pipeline,
+                    propagation_weight=weight,
+                )
+            )
+        self.closed_loop_interventions = branches
 
     def _write_step_cache(
         self,

@@ -20,6 +20,17 @@ def test_large_scale_configs_cover_eight_cells():
         assert config.oracle_mode == "lookback"
 
 
+def test_perturb_operator_loads_from_yaml():
+    config = ExperimentConfig.from_dict(
+        {
+            "models": [{"provider": "tencent", "model": "hy3-preview"}],
+            "interventions": {"enabled": True, "operator": "perturb", "mode": "offline"},
+        }
+    )
+    assert config.interventions.operator == "perturb"
+    assert config.interventions.closed_loop is True
+
+
 def test_parallel_scenarios_rejected_for_architecture_usage_accounting():
     with pytest.raises(ValueError, match="workers_per_experiment=1"):
         ExperimentConfig.from_dict(

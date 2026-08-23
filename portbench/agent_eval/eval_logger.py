@@ -99,6 +99,7 @@ class EpisodeLog:
     resource_usage: dict = field(default_factory=dict)
     provenance: dict = field(default_factory=dict)
     collaboration_trace: list[dict] = field(default_factory=list)
+    interventions: list[dict] = field(default_factory=list)
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
 
 
@@ -219,6 +220,7 @@ class EvalLogger:
             resource_usage=dict(result.resource_usage),
             provenance=dict(result.provenance),
             collaboration_trace=list(result.collaboration_trace),
+            interventions=list(result.interventions),
         )
 
         # Serialize and write
@@ -311,6 +313,7 @@ class EvalLogger:
             "resource_usage": ep.resource_usage,
             "provenance": ep.provenance,
             "collaboration_trace": ep.collaboration_trace,
+            "interventions": ep.interventions,
             "timestamp": ep.timestamp,
             "stages": [
                 {

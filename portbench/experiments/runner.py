@@ -89,6 +89,23 @@ def _resource_budget(cfg: ExperimentConfig) -> IsoTokenBudget:
     )
 
 
+def _intervention_spec(cfg: ExperimentConfig) -> dict:
+    return cfg.interventions.to_spec(cfg.propagation_weight)
+
+
+def _persist_closed_loop(engine, out_dir: Path) -> None:
+    """Write NAV-fork artifacts next to backtest_result.json; never mix into CEPS."""
+    branches = getattr(engine, "closed_loop_interventions", None) or []
+    if not branches:
+        return
+    dest = out_dir / "intervention"
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "closed_loop.json").write_text(
+        json.dumps(branches, indent=2, default=str),
+        encoding="utf-8",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -310,6 +327,7 @@ def _run_one_scenario(
         data_version=cfg.data_version,
         code_commit=_current_code_commit(),
         resource_budget=_resource_budget(cfg) if spec.architecture_id else None,
+        intervention_spec=_intervention_spec(cfg),
     )
     if pipeline_log_dir is not None:
         engine.enable_pipeline_logging(
@@ -318,6 +336,7 @@ def _run_one_scenario(
         )
 
     result = engine.run()
+    _persist_closed_loop(engine, out_dir)
     passed = abs(result.max_drawdown) <= profile_obj.max_drawdown_tolerance
     # Direction A: continuous drawdown score ∈ [0, 1]
     dd_score = max(
@@ -394,6 +413,7 @@ def _run_normal(
         data_version=cfg.data_version,
         code_commit=_current_code_commit(),
         resource_budget=_resource_budget(cfg) if spec.architecture_id else None,
+        intervention_spec=_intervention_spec(cfg),
     )
     if pipeline_log_dir is not None:
         engine.enable_pipeline_logging(
@@ -401,6 +421,7 @@ def _run_normal(
             run_id=f"normal_{label}" if label else "normal",
         )
     result = engine.run()
+    _persist_closed_loop(engine, out_dir)
     paths.save_backtest_result(result, out_dir)
     return result
 
