@@ -109,7 +109,9 @@ class InterventionConfig:
       offline — no extra LLM; deterministic suffix; CEPS / stage-score deltas only (not NAV)
       online  — re-run the downstream agent; same CEPS/score-delta family, more expensive
     closed_loop:
-      true — also fork NAV from the first rebalance of the window (portfolio-path effect)
+      true — also fork NAV from the first rebalance of the window (portfolio-path effect).
+              This NAV fork is always the cheap offline suffix, even when mode is online.
+              Episode-level CEPS interventions still follow ``mode``.
     """
 
     enabled: bool = False
