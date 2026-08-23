@@ -161,6 +161,7 @@ reuse_latest: false                    # true = skip models with existing result
 - `batch_id` is a metadata label only — it is stored in run files but **not** used for directory naming.
 - A `ModelSpec` element must have exactly one of `provider`, `baseline`, `mock`. Mixing them raises in `ModelSpec.kind()`.
 - `stress_scenarios: all` resolves at runtime via `STRESS_SCENARIOS` (currently `2015_china_shock`, `2020_covid_flash_crash`, `2022_crypto_collapse`).
+- Stress windows use the same `rebalance` frequency as normal windows (YAML `rebalance:`). They are not hardcoded to weekly.
 - When `data_provider: processed` is requested but `datasets/processed/equities.csv` is missing, the runner refuses to silently fall back to mock — set `data_provider: mock` explicitly if that is what you want.
 - `use_tools: true` enables native tool-calling for S1/S2/S3 stages. Has no effect on baseline or mock models.
 - `propagation_weight` controls the CEPS cascade penalty: `ceps = mean_stage_scores - weight × Σmax(score[i]-score[i+1], 0)`.

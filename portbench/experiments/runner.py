@@ -312,7 +312,7 @@ def _run_one_scenario(
         provider=provider,
         start_date=scenario.start,
         end_date=scenario.end,
-        rebalance_freq="weekly",
+        rebalance_freq=cfg.rebalance,
         initial_nav=cfg.initial_nav,
         use_pipeline=use_pipeline,
         use_tools=cfg.use_tools and use_pipeline,

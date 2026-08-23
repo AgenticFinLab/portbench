@@ -135,3 +135,13 @@ def test_closed_loop_cache_requires_current_contract():
         mutant = dict(artifact)
         mutant[field] = changed
         assert not _cache_contract_matches(mutant, config, spec)
+
+
+def test_stress_scenario_uses_yaml_rebalance():
+    import inspect
+
+    from portbench.experiments.runner import _run_one_scenario
+
+    source = inspect.getsource(_run_one_scenario)
+    assert 'rebalance_freq="weekly"' not in source
+    assert "rebalance_freq=cfg.rebalance" in source
