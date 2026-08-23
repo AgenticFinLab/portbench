@@ -15,7 +15,9 @@ from portbench.agent_eval.contracts import (
     RiskControlDecision,
     RiskEvaluationResult,
 )
+from portbench.agent_eval.prompts import build_format_correction_suffix, format_contract
 from portbench.agent_eval.s4_s5_bridge import run_s4_deterministic_from_weights
+from portbench.agent_eval.stages import _JSON_RETRY_LIMIT
 from portbench.agent_eval.tools import get_tools
 from portbench.metrics.plan_outcome_scores import (
     score_s4_environment_outcome,
@@ -173,6 +175,44 @@ def _complete(adapter: Any, prompt: str, *, use_tools: bool, snapshot: Any = Non
     return adapter.complete(prompt)
 
 
+def _complete_json(
+    adapter: Any,
+    prompt: str,
+    *,
+    use_tools: bool,
+    snapshot: Any,
+    parse,
+) -> tuple[Any, str, Optional[Exception]]:
+    """Retry JSON parse like S1–S3. Return (parsed, raw, error); parsed is None on failure."""
+    last_err: Optional[Exception] = None
+    last_raw = ""
+    for attempt in range(_JSON_RETRY_LIMIT + 1):
+        full_prompt = (
+            prompt
+            if attempt == 0
+            else prompt + build_format_correction_suffix(str(last_err))
+        )
+        last_raw = _complete(adapter, full_prompt, use_tools=use_tools, snapshot=snapshot)
+        try:
+            return parse(_extract_json(str(last_raw))), last_raw, None
+        except (AgenticStageError, ValueError, TypeError) as exc:
+            last_err = exc
+    return None, last_raw, last_err
+
+
+S5_DECISION_POLICY = (
+    "alerts must be a list of these tokens only: var_breach, drawdown, weight_drift "
+    "(omit a token if that limit is not breached). "
+    "If VaR or drawdown breaches its limit: action=scale_down with scale_factor in [0,1] "
+    "and include the matching alert tokens. "
+    "If only weight_drift exceeds its limit: action=rebalance with non-negative "
+    "corrective_weights that sum to exactly 1.0 and alerts=[\"weight_drift\"]. "
+    "If no limit is breached: action=hold, alerts=[], corrective_weights=null. "
+    "corrective_weights are required only for rebalance and must be non-negative "
+    "and sum to 1.0; otherwise null."
+)
+
+
 class AgenticS4Stage:
     """Ask the model for an execution plan and simulate its fills."""
 
@@ -210,23 +250,25 @@ class AgenticS4Stage:
         }
         self.last_prompt = (
             "You are the execution-planning stage. Use only the supplied Point-in-Time context. "
-            "Return exactly one JSON object with keys orders, order_type, urgency, slip_limit, rationale. "
             "orders must contain every target asset with asset, direction, target_weight, order_type, urgency, slip_limit. "
             "Copy each supplied target weight and expected direction exactly. "
-            f"Context: {json.dumps(context, ensure_ascii=False, default=str)}"
+            f"Context: {json.dumps(context, ensure_ascii=False, default=str)}\n"
+            f"{format_contract(self.use_tools)}"
         )
         try:
-            raw = _complete(
-                self.adapter, self.last_prompt, use_tools=self.use_tools, snapshot=snapshot_like
+            plan, raw, parse_err = _complete_json(
+                self.adapter,
+                self.last_prompt,
+                use_tools=self.use_tools,
+                snapshot=snapshot_like,
+                parse=_plan_from_payload,
             )
         except Exception as exc:
             raise AgenticStageError(f"S4 model call failed: {exc}") from exc
-        try:
-            plan = _plan_from_payload(_extract_json(str(raw)))
-        except (AgenticStageError, ValueError, TypeError) as exc:
+        if plan is None:
             plan = ExecutionPlan(
                 orders=[],
-                metadata={"parse_error": str(exc), "rationale": ""},
+                metadata={"parse_error": str(parse_err), "rationale": ""},
             )
         try:
             result = simulate_execution(
@@ -307,10 +349,11 @@ class AgenticS5Stage:
         }
         self.last_prompt = (
             "You are the portfolio risk-control stage. Use only the supplied Point-in-Time risk summary. "
-            "Return exactly one JSON object with action, alerts, corrective_weights, scale_factor, rationale. "
-            "action must be hold, scale_down, or rebalance. Rebalance requires non-negative weights summing to one; "
-            "scale_down requires a scale_factor in [0,1]. "
-            f"Context: {json.dumps(context, ensure_ascii=False, default=str)}"
+            "Return a JSON object with action, alerts, corrective_weights, scale_factor, rationale. "
+            "action must be hold, scale_down, or rebalance. "
+            f"{S5_DECISION_POLICY} "
+            f"Context: {json.dumps(context, ensure_ascii=False, default=str)}\n"
+            f"{format_contract(self.use_tools)}"
         )
         bind_snapshot = snapshot_like
         if bind_snapshot is None:
@@ -326,20 +369,19 @@ class AgenticS5Stage:
                 },
             )()
         try:
-            raw = _complete(
+            decision, raw, parse_err = _complete_json(
                 self.adapter,
                 self.last_prompt,
                 use_tools=self.use_tools,
                 snapshot=bind_snapshot,
+                parse=_decision_from_payload,
             )
         except Exception as exc:
             raise AgenticStageError(f"S5 model call failed: {exc}") from exc
-        try:
-            decision = _decision_from_payload(_extract_json(str(raw)))
-        except (AgenticStageError, ValueError, TypeError) as exc:
+        if decision is None:
             decision = RiskControlDecision(
                 action="hold",
-                metadata={"parse_error": str(exc), "rationale": ""},
+                metadata={"parse_error": str(parse_err), "rationale": ""},
             )
         decision.metadata.setdefault("schema_version", S4S5_SCHEMA_AGENTIC)
         try:

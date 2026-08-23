@@ -269,6 +269,7 @@ class S4Output:
     total_cost: float = 0.0
     turnover: float = 0.0
     raw_llm_output: str = ""
+    refused: bool = False
     schema_version: str = "pipeline-v1-deterministic"
     plan: dict[str, Any] = field(default_factory=dict)
     plan_scores: dict[str, float] = field(default_factory=dict)

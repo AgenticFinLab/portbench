@@ -65,6 +65,7 @@ class AgenticS4PipelineStage(PipelineStage):
             total_cost=float(bundle.result.cost),
             turnover=float(bundle.result.turnover),
             raw_llm_output=bundle.raw_response,
+            refused=bool((bundle.plan.metadata or {}).get("parse_error")),
             schema_version=S4S5_SCHEMA_AGENTIC,
             plan=asdict(bundle.plan),
             plan_scores=dict(bundle.plan_scores),

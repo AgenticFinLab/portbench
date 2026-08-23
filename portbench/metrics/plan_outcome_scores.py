@@ -96,6 +96,12 @@ def score_s4_plan_quality(
     target_weights: Optional[Mapping[str, float]] = None,
 ) -> Dict[str, float]:
     """Subscores for the agent execution *plan* (not the fill)."""
+    if (plan.metadata or {}).get("parse_error"):
+        return {
+            "order_legality": 0.0,
+            "target_tracking": 0.0,
+            "plan_quality": 0.0,
+        }
     orders = plan.normalized_orders()
     legal = 0.0
     if not orders and not (plan.metadata or {}).get("target_weights"):
@@ -124,9 +130,7 @@ def score_s4_plan_quality(
             legal = ok / n if n else 0.0
 
     planned_for_validation = _weights_from_plan(plan)
-    if (plan.metadata or {}).get("parse_error"):
-        legal = 0.0
-    elif planned_for_validation and abs(sum(planned_for_validation.values()) - 1.0) > 1e-3:
+    if planned_for_validation and abs(sum(planned_for_validation.values()) - 1.0) > 1e-3:
         legal = 0.0
 
     planned = _weights_from_plan(plan)

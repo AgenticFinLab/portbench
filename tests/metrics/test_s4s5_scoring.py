@@ -98,3 +98,15 @@ def test_s5_off_simplex_corrective_scores_zero_compliance():
     )
     pq = score_s5_plan_quality(dec, ref)
     assert pq["corrective_compliance"] == 0.0
+
+
+def test_s4_parse_error_zeros_all_plan_keys():
+    plan = ExecutionPlan(orders=[], metadata={"parse_error": "invalid JSON"})
+    pq = score_s4_plan_quality(
+        plan,
+        plan,
+        target_weights={"SPY": 0.6, "BIL": 0.4},
+    )
+    assert pq["order_legality"] == 0.0
+    assert pq["target_tracking"] == 0.0
+    assert pq["plan_quality"] == 0.0
