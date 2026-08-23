@@ -731,7 +731,7 @@ class EvalPipeline:
 
         spec = self._intervention or {}
         if run_interventions and spec.get("enabled"):
-            from .intervention import run_episode_interventions
+            from .intervention import run_episode_interventions, sum_intervention_usage
 
             result.interventions = run_episode_interventions(
                 self,
@@ -742,6 +742,10 @@ class EvalPipeline:
                 mode=str(spec.get("mode") or "offline"),
                 propagation_weight=float(spec.get("propagation_weight") or 0.1),
             )
+            if result.interventions:
+                usage = dict(result.resource_usage or {})
+                usage["intervention"] = sum_intervention_usage(result.interventions)
+                result.resource_usage = usage
 
         # Write episode log if logging is enabled
         if run_interventions and self._logger is not None:

@@ -1,4 +1,8 @@
-"""Simulator interventions over factual stage outputs and closed-loop branches."""
+"""Simulator interventions over factual stage outputs and closed-loop branches.
+
+Episode-level CEPS interventions follow ``mode`` (offline or online). The
+window-level ``closed_loop`` NAV fork is always the cheap offline suffix.
+"""
 
 from __future__ import annotations
 
@@ -31,6 +35,35 @@ STAGE_ORDER = (
     StageID.S5_RISK_MONITORING,
 )
 STAGE_BY_TEXT = {stage.value: stage for stage in STAGE_ORDER}
+_USAGE_KEYS = (
+    "token_exact",
+    "token_est",
+    "request_count",
+    "tool_call_count",
+    "cache_hit_count",
+    "logical_call_count",
+    "latency_ms",
+)
+
+
+def _usage_counters(raw: Mapping[str, Any] | None) -> Dict[str, Any]:
+    """Copy numeric usage fields; ignore nested keys such as by_agent."""
+    src = dict(raw or {})
+    out: Dict[str, Any] = {}
+    for key in _USAGE_KEYS:
+        value = src.get(key, 0) or 0
+        out[key] = float(value) if key == "latency_ms" else int(value)
+    return out
+
+
+def sum_intervention_usage(records: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+    """Sum nested intervention usage without mutating factual episode counters."""
+    total = _usage_counters({})
+    for record in records:
+        part = _usage_counters(record.get("resource_usage"))
+        for key, value in part.items():
+            total[key] += value
+    return total
 
 
 @dataclass
@@ -519,6 +552,7 @@ def run_offline_stage_intervention(
         "ceps_factual": factual_ceps,
         "ceps_intervened": intervened_ceps,
         "ceps_delta": intervened_ceps - factual_ceps,
+        "resource_usage": _usage_counters({}),
     }
 
 
@@ -575,6 +609,7 @@ def run_episode_interventions(
                 "ceps_factual": factual_ceps,
                 "ceps_intervened": intervened_ceps,
                 "ceps_delta": intervened_ceps - factual_ceps,
+                "resource_usage": _usage_counters(result.intervened.resource_usage),
             }
         )
     return records
@@ -589,7 +624,11 @@ def run_offline_closed_loop(
     pipeline: Optional[EvalPipeline] = None,
     propagation_weight: float = 0.1,
 ) -> Dict[str, Any]:
-    """Fork NAV from one rebalance using a deterministic suffix (no LLM)."""
+    """Fork NAV from one rebalance using a deterministic suffix (no LLM).
+
+    Episode-level CEPS interventions may still run in ``mode=online``; this
+    NAV fork remains offline even when ``closed_loop`` is true.
+    """
     if not records:
         raise ValueError("closed-loop intervention requires rebalance records")
     if not 0 <= intervention_index < len(records):
@@ -919,6 +958,7 @@ __all__ = [
     "run_offline_stage_intervention",
     "run_episode_interventions",
     "run_offline_closed_loop",
+    "sum_intervention_usage",
     "episode_from_log",
     "compute_descriptive_delta",
     "store_intervention_result",

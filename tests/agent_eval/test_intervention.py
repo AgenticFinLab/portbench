@@ -17,6 +17,7 @@ from portbench.agent_eval.intervention import (
     run_episode_interventions,
     run_offline_stage_intervention,
     store_intervention_result,
+    sum_intervention_usage,
 )
 from portbench.agent_eval.replay_adapter import INTERVENTION_NAMESPACE, ReplayAdapter
 from portbench.agent_eval.stages import (
@@ -136,4 +137,59 @@ def test_run_episode_interventions_offline_does_not_need_pipeline():
     )
     assert len(records) == 2
     assert all(item["mode"] == "offline" for item in records)
+    assert all("resource_usage" in item for item in records)
     assert StageID.S1_MARKET_INTERPRETATION in factual.stage_outputs
+
+
+def test_sum_intervention_usage_adds_nested_counters():
+    total = sum_intervention_usage(
+        [
+            {"resource_usage": {"request_count": 3, "token_exact": 10}},
+            {"resource_usage": {"request_count": 2, "token_exact": 5, "tool_call_count": 1}},
+        ]
+    )
+    assert total["request_count"] == 5
+    assert total["token_exact"] == 15
+    assert total["tool_call_count"] == 1
+
+
+def test_online_intervention_records_resource_usage():
+    snapshot = _snapshot()
+    factual = _factual_from_gt(snapshot)
+
+    class UsagePipeline:
+        def run_episode(
+            self,
+            snapshot,
+            stage_overrides=None,
+            reuse_outputs=None,
+            run_interventions=True,
+        ):
+            result = EpisodeResult(decision_date=snapshot.decision_date)
+            result.stage_outputs = dict(factual.stage_outputs)
+            if stage_overrides:
+                result.stage_outputs.update(stage_overrides)
+            result.gt_outputs = dict(factual.gt_outputs)
+            result.stage_scores = dict(factual.stage_scores)
+            result.resource_usage = {
+                "token_exact": 40,
+                "token_est": 0,
+                "request_count": 3,
+                "tool_call_count": 1,
+                "cache_hit_count": 0,
+                "logical_call_count": 3,
+                "latency_ms": 1.5,
+            }
+            return result
+
+    records = run_episode_interventions(
+        UsagePipeline(),
+        snapshot,
+        factual,
+        stages=["S5"],
+        operator="repair",
+        mode="online",
+    )
+    assert records[0]["mode"] == "online"
+    assert records[0]["resource_usage"]["request_count"] == 3
+    assert records[0]["resource_usage"]["tool_call_count"] == 1
