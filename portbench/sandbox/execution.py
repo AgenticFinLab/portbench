@@ -137,6 +137,37 @@ def _round_filled_weights(executed: Mapping[str, float]) -> Dict[str, float]:
     return filled
 
 
+def _implied_direction(delta: float, *, eps: float = 1e-6) -> str:
+    """Map a signed weight delta to buy / sell / hold."""
+    if abs(delta) < eps:
+        return "hold"
+    return "buy" if delta > 0.0 else "sell"
+
+
+def _prepare_fill_books(
+    plan: ExecutionPlan,
+    current_weights: Mapping[str, float],
+) -> tuple[Dict[str, float], Dict[str, float], Dict[str, Any]]:
+    """Project the incoming book if needed, then resolve and project plan targets."""
+    current = {str(k): float(v) for k, v in dict(current_weights).items()}
+    simplex_notes: Dict[str, Any] = {}
+    current_total = float(sum(current.values()))
+    if any(weight < 0.0 for weight in current.values()) or current_total > 1.0 + 1e-3:
+        # An illegal incoming book cannot be filled; project it before applying the plan.
+        clipped_current = {asset: max(0.0, weight) for asset, weight in current.items()}
+        current, current_notes = _project_to_simplex(clipped_current, clipped_current)
+        simplex_notes["current_projected"] = True
+        simplex_notes.update(current_notes)
+    target = resolve_target_weights(plan, current)
+    off_simplex = any(not 0.0 <= weight <= 1.0 for weight in target.values()) or (
+        bool(target) and abs(sum(target.values()) - 1.0) > 1e-3
+    )
+    if off_simplex:
+        target, target_notes = _project_to_simplex(target, current)
+        simplex_notes.update(target_notes)
+    return current, target, simplex_notes
+
+
 def resolve_target_weights(
     plan: ExecutionPlan,
     current_weights: Mapping[str, float],
@@ -212,29 +243,18 @@ def simulate_execution(
 
     Linear slippage and commission match legacy S4 economics. Cost drag is
     charged to a cash-like sleeve when one is present.
+
+    Fill follows the projected target book. ``direction`` / ``hold`` on the
+    plan are labels (recorded in ``metadata['direction_conflicts']`` when they
+    disagree with the fill delta); they do not veto a trade. Limit, urgency,
+    and ``slip_limit`` still decide whether a leg fills.
     """
-    current = {str(k): float(v) for k, v in dict(current_weights).items()}
     nav_f = float(nav)
     if not nav_f > 0.0:
         raise ValueError("nav must be positive")
-    simplex_notes: Dict[str, Any] = {}
-    current_total = float(sum(current.values()))
-    if any(weight < 0.0 for weight in current.values()) or current_total > 1.0 + 1e-3:
-        # An illegal incoming book cannot be filled; project it before applying the plan.
-        clipped_current = {asset: max(0.0, weight) for asset, weight in current.items()}
-        current, current_notes = _project_to_simplex(clipped_current, clipped_current)
-        simplex_notes["current_projected"] = True
-        simplex_notes.update(current_notes)
-    target = resolve_target_weights(plan, current)
-    # Project invalid books onto the simplex so a bad S4 plan scores low instead of aborting the episode.
-    off_simplex = any(not 0.0 <= weight <= 1.0 for weight in target.values()) or (
-        bool(target) and abs(sum(target.values()) - 1.0) > 1e-3
-    )
-    if off_simplex:
-        target, target_notes = _project_to_simplex(target, current)
-        simplex_notes.update(target_notes)
+    current, target, simplex_notes = _prepare_fill_books(plan, current_weights)
 
-    # Index declared intents by asset for direction and execution-policy validation.
+    # Index declared intents by asset for execution-policy (not fill vetoes).
     intents = {
         intent.asset: intent for intent in plan.normalized_orders() if intent.asset
     }
@@ -243,20 +263,20 @@ def simulate_execution(
     fillable: set[str] = set()
     order_logs: list[dict] = []
     intended_trade: set[str] = set()
+    direction_conflicts: list[str] = []
 
     for asset in sorted(all_assets):
         curr = current.get(asset, 0.0)
         targ = target.get(asset, 0.0)
         delta = targ - curr
+        implied = _implied_direction(delta)
+        intent = intents.get(asset)
+        if intent is not None and intent.direction != implied:
+            direction_conflicts.append(asset)
         if abs(delta) < 1e-6:
             continue
         intended_trade.add(asset)
-        direction = "buy" if delta > 0 else "sell"
-        intent = intents.get(asset)
-        if intent is not None and intent.direction not in {direction, "hold"}:
-            raise ValueError(f"order direction conflicts with target for {asset}")
-        if intent is not None and intent.direction == "hold":
-            continue
+        direction = implied
         urgency = intent.urgency if intent is not None else plan.urgency
         urgency_multiplier = {"low": 0.75, "normal": 1.0, "high": 1.25}.get(urgency)
         if urgency_multiplier is None:
@@ -335,6 +355,8 @@ def simulate_execution(
         )
     if buy_fill_scale < 1.0 - 1e-12:
         simplex_notes["partial_fills"] = True
+    if direction_conflicts:
+        simplex_notes["direction_conflicts"] = sorted(set(direction_conflicts))
 
     cost_drag = total_cost / nav_f if nav_f else 0.0
     cash_key = _cash_like_key(executed)

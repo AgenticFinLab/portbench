@@ -294,3 +294,33 @@ def test_off_simplex_corrective_weights_are_projected():
     assert abs(sum(final.values()) - 1.0) < 1e-6
     assert abs(final["SPY"] - 0.5) < 1e-6
     assert abs(final["BIL"] - 0.5) < 1e-6
+
+
+def test_fill_follows_projected_book_despite_direction_labels():
+    """Projection may flip a small name; fill still follows the book."""
+    plan = ExecutionPlan(
+        orders=[
+            OrderIntent(asset="AMAT", direction="buy", target_weight=0.10),
+            OrderIntent(asset="SPY", direction="buy", target_weight=0.95),
+        ]
+    )
+    current = {"AMAT": 0.096, "SPY": 0.904}
+    snap = _snap()
+    snap.price_data["AMAT"] = pd.Series([100.0, 100.0])
+    result = simulate_execution(plan, snap, current, nav=100_000.0)
+    assert abs(sum(result.filled_weights.values()) - 1.0) < 1e-3
+    assert result.filled_weights["AMAT"] < current["AMAT"]
+    assert "AMAT" in result.metadata.get("direction_conflicts", [])
+
+
+def test_hold_label_does_not_veto_nonzero_fill():
+    plan = ExecutionPlan(
+        orders=[
+            OrderIntent(asset="SPY", direction="hold", target_weight=0.7),
+            OrderIntent(asset="BIL", direction="sell", target_weight=0.3),
+        ]
+    )
+    current = {"SPY": 0.5, "BIL": 0.5}
+    result = simulate_execution(plan, _snap(), current, nav=100_000.0)
+    assert result.filled_weights["SPY"] > 0.6
+    assert "SPY" in result.metadata.get("direction_conflicts", [])
