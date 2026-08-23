@@ -24,10 +24,10 @@ from portbench.metrics.plan_outcome_scores import ceps_plan_score
 class AgenticS4PipelineStage(PipelineStage):
     """Expose agentic execution planning through the standard pipeline API."""
 
-    def __init__(self, adapter: Any, oracle_mode: str = "lookback") -> None:
+    def __init__(self, adapter: Any, oracle_mode: str = "lookback", use_tools: bool = False) -> None:
         self.adapter = adapter
         self.oracle_mode = oracle_mode
-        self._stage = AgenticS4Stage(adapter)
+        self._stage = AgenticS4Stage(adapter, use_tools=use_tools)
 
     @property
     def stage_id(self) -> StageID:
@@ -78,9 +78,9 @@ class AgenticS4PipelineStage(PipelineStage):
 class AgenticS5PipelineStage(PipelineStage):
     """Expose agentic risk control through the standard pipeline API."""
 
-    def __init__(self, adapter: Any, profile: Any = None) -> None:
+    def __init__(self, adapter: Any, profile: Any = None, use_tools: bool = False) -> None:
         self.adapter = adapter
-        self._stage = AgenticS5Stage(adapter)
+        self._stage = AgenticS5Stage(adapter, use_tools=use_tools)
         self._var_limit = profile.var_limit if profile is not None else S5RiskMonitoring.VAR_LIMIT
         self._drawdown_limit = (
             -profile.max_drawdown_tolerance
@@ -102,6 +102,7 @@ class AgenticS5PipelineStage(PipelineStage):
         bundle = self._stage.run(
             weights=prior_output.executed_weights,
             return_data=snapshot.return_data,
+            snapshot_like=snapshot,
             var_limit=self._var_limit,
             drawdown_limit=self._drawdown_limit,
             drift_limit=self._drift_limit,

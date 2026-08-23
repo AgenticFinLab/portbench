@@ -117,8 +117,12 @@ def build_default_pipeline(
         S1MarketInterpretation(runtime.stage_adapter("S1"), use_tools=tools_enabled),
         S2SignalGeneration(runtime.stage_adapter("S2"), use_tools=tools_enabled),
         s3_stage,
-        AgenticS4PipelineStage(runtime.stage_adapter("S4"), oracle_mode=oracle_mode),
-        AgenticS5PipelineStage(runtime.stage_adapter("S5"), profile=profile),
+        AgenticS4PipelineStage(
+            runtime.stage_adapter("S4"), oracle_mode=oracle_mode, use_tools=tools_enabled
+        ),
+        AgenticS5PipelineStage(
+            runtime.stage_adapter("S5"), profile=profile, use_tools=tools_enabled
+        ),
     ]
     return EvalPipeline(stages, runtime=runtime)
 

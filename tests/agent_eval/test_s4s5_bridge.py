@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 
 from portbench.agent_eval.contracts import S4S5_SCHEMA_DETERMINISTIC
 from portbench.agent_eval.s4_s5_bridge import (
@@ -66,3 +67,57 @@ def test_legacy_s5_bridge_schema():
     assert ev.metadata["schema_version"] == S4S5_SCHEMA_DETERMINISTIC
     assert decision.action == "rebalance"
     assert "drawdown" in decision.alerts
+
+
+def test_agentic_s5_accepts_off_simplex_corrective():
+    import json
+
+    from portbench.agent_eval.s4_s5_stages import AgenticS5Stage
+
+    class Adapter:
+        @property
+        def model_name(self) -> str:
+            return "s5-bad-sum"
+
+        def complete(self, prompt: str) -> str:
+            return json.dumps(
+                {
+                    "action": "rebalance",
+                    "alerts": ["drawdown"],
+                    "corrective_weights": {"SPY": 0.7, "BIL": 0.7},
+                    "scale_factor": None,
+                    "rationale": "does not sum to one",
+                }
+            )
+
+    returns = {
+        "SPY": pd.Series([0.04, -0.08, 0.03, -0.06] * 8),
+        "BIL": pd.Series([0.0001] * 32),
+    }
+    bundle = AgenticS5Stage(Adapter()).run(
+        weights={"SPY": 0.9, "BIL": 0.1},
+        return_data=returns,
+    )
+    final = bundle.eval_result.metadata["final_weights"]
+    assert abs(sum(final.values()) - 1.0) < 1e-6
+    assert bundle.plan_scores["corrective_compliance"] == 0.0
+
+
+def test_agentic_s5_rejects_overweight_incoming_book():
+    import json
+
+    from portbench.agent_eval.s4_s5_stages import AgenticS5Stage, AgenticStageError
+
+    class Adapter:
+        def complete(self, prompt: str) -> str:
+            raise AssertionError("S5 must not call the model on an illegal S4 book")
+
+    returns = {
+        "SPY": pd.Series([0.04, -0.08, 0.03, -0.06] * 8),
+        "BIL": pd.Series([0.0001] * 32),
+    }
+    with pytest.raises(AgenticStageError, match="sum above one"):
+        AgenticS5Stage(Adapter()).run(
+            weights={"SPY": 0.7, "BIL": 0.5},
+            return_data=returns,
+        )

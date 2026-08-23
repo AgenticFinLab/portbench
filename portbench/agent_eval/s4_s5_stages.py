@@ -16,6 +16,7 @@ from portbench.agent_eval.contracts import (
     RiskEvaluationResult,
 )
 from portbench.agent_eval.s4_s5_bridge import run_s4_deterministic_from_weights
+from portbench.agent_eval.tools import get_tools
 from portbench.metrics.plan_outcome_scores import (
     score_s4_environment_outcome,
     score_s4_plan_quality,
@@ -84,15 +85,18 @@ def _plan_from_payload(payload: Mapping[str, Any]) -> ExecutionPlan:
     for item in orders_raw:
         if not isinstance(item, Mapping):
             raise AgenticStageError("each S4 order must be an object")
-        order = OrderIntent(
-            asset=str(item.get("asset", "")),
-            direction=str(item.get("direction", "hold")),
-            target_weight=item.get("target_weight"),
-            delta_weight=item.get("delta_weight"),
-            order_type=str(item.get("order_type", payload.get("order_type", "market"))),
-            urgency=str(item.get("urgency", payload.get("urgency", "normal"))),
-            slip_limit=item.get("slip_limit", payload.get("slip_limit")),
-        )
+        try:
+            order = OrderIntent(
+                asset=str(item.get("asset", "")),
+                direction=str(item.get("direction", "hold")),
+                target_weight=item.get("target_weight"),
+                delta_weight=item.get("delta_weight"),
+                order_type=str(item.get("order_type", payload.get("order_type", "market"))),
+                urgency=str(item.get("urgency", payload.get("urgency", "normal"))),
+                slip_limit=item.get("slip_limit", payload.get("slip_limit")),
+            )
+        except (TypeError, ValueError) as exc:
+            raise AgenticStageError(f"invalid S4 order: {exc}") from exc
         if not order.asset or order.asset in assets:
             raise AgenticStageError("S4 orders require unique non-empty assets")
         assets.add(order.asset)
@@ -162,13 +166,21 @@ def _reference_risk_decision(
     return RiskControlDecision(action="hold")
 
 
+def _complete(adapter: Any, prompt: str, *, use_tools: bool, snapshot: Any = None) -> str:
+    """Call complete or complete_with_tools for one agentic stage."""
+    if use_tools:
+        return adapter.complete_with_tools(prompt, get_tools(snapshot=snapshot))
+    return adapter.complete(prompt)
+
+
 class AgenticS4Stage:
     """Ask the model for an execution plan and simulate its fills."""
 
-    def __init__(self, adapter: Any):
+    def __init__(self, adapter: Any, use_tools: bool = False):
         if adapter is None or not hasattr(adapter, "complete"):
             raise ValueError("AgenticS4Stage requires an adapter")
         self.adapter = adapter
+        self.use_tools = bool(use_tools)
         self.last_prompt = ""
 
     def run(
@@ -204,18 +216,33 @@ class AgenticS4Stage:
             f"Context: {json.dumps(context, ensure_ascii=False, default=str)}"
         )
         try:
-            raw = self.adapter.complete(self.last_prompt)
+            raw = _complete(
+                self.adapter, self.last_prompt, use_tools=self.use_tools, snapshot=snapshot_like
+            )
         except Exception as exc:
             raise AgenticStageError(f"S4 model call failed: {exc}") from exc
-        plan = _plan_from_payload(_extract_json(str(raw)))
-        result = simulate_execution(
-            plan,
-            snapshot_like,
-            current_weights,
-            nav,
-            slippage_rate=slippage_rate,
-            commission_rate=commission_rate,
-        )
+        try:
+            plan = _plan_from_payload(_extract_json(str(raw)))
+        except (AgenticStageError, ValueError, TypeError) as exc:
+            plan = ExecutionPlan(
+                orders=[],
+                metadata={"parse_error": str(exc), "rationale": ""},
+            )
+        try:
+            result = simulate_execution(
+                plan,
+                snapshot_like,
+                current_weights,
+                nav,
+                slippage_rate=slippage_rate,
+                commission_rate=commission_rate,
+            )
+        except ValueError as exc:
+            held = {str(k): round(float(v), 4) for k, v in dict(current_weights).items()}
+            result = ExecutionResult(
+                filled_weights=held,
+                metadata={"execution_error": str(exc), "held_current": True},
+            )
         result.metadata["schema_version"] = S4S5_SCHEMA_AGENTIC
         plan.metadata["schema_version"] = S4S5_SCHEMA_AGENTIC
         ref_plan = reference_plan
@@ -244,10 +271,11 @@ class AgenticS4Stage:
 class AgenticS5Stage:
     """Ask the model for a risk action and evaluate its post-action outcome."""
 
-    def __init__(self, adapter: Any):
+    def __init__(self, adapter: Any, use_tools: bool = False):
         if adapter is None or not hasattr(adapter, "complete"):
             raise ValueError("AgenticS5Stage requires an adapter")
         self.adapter = adapter
+        self.use_tools = bool(use_tools)
         self.last_prompt = ""
 
     def run(
@@ -255,12 +283,22 @@ class AgenticS5Stage:
         *,
         weights: Mapping[str, float],
         return_data: Mapping[str, Any],
+        snapshot_like: Any = None,
         reference_decision: Optional[RiskControlDecision] = None,
         reference_eval: Optional[RiskEvaluationResult] = None,
         var_limit: float = -0.02,
         drawdown_limit: float = -0.10,
         drift_limit: float = 0.05,
     ) -> S5AgenticBundle:
+        book = {str(asset): float(weight) for asset, weight in dict(weights).items()}
+        if any(weight < 0.0 for weight in book.values()):
+            raise AgenticStageError("S4 executed weights must be non-negative")
+        total_weight = float(sum(book.values()))
+        if total_weight > 1.0 + 1e-3:
+            raise AgenticStageError(
+                f"S4 executed weights must not sum above one (sum={total_weight:.6f})"
+            )
+        weights = book
         pre_risk = summarize_pre_action_risk(weights, return_data)
         context = {
             "weights": dict(weights),
@@ -274,20 +312,55 @@ class AgenticS5Stage:
             "scale_down requires a scale_factor in [0,1]. "
             f"Context: {json.dumps(context, ensure_ascii=False, default=str)}"
         )
+        bind_snapshot = snapshot_like
+        if bind_snapshot is None:
+            bind_snapshot = type(
+                "LookbackSnapshot",
+                (),
+                {
+                    "return_data": return_data,
+                    "current_weights": dict(weights),
+                    "price_data": {},
+                    "decision_date": "",
+                    "portfolio_value": 0.0,
+                },
+            )()
         try:
-            raw = self.adapter.complete(self.last_prompt)
+            raw = _complete(
+                self.adapter,
+                self.last_prompt,
+                use_tools=self.use_tools,
+                snapshot=bind_snapshot,
+            )
         except Exception as exc:
             raise AgenticStageError(f"S5 model call failed: {exc}") from exc
-        decision = _decision_from_payload(_extract_json(str(raw)))
-        decision.metadata["schema_version"] = S4S5_SCHEMA_AGENTIC
-        eval_result = evaluate_risk(
-            decision,
-            weights,
-            return_data,
-            var_limit=var_limit,
-            drawdown_limit=drawdown_limit,
-            drift_limit=drift_limit,
-        )
+        try:
+            decision = _decision_from_payload(_extract_json(str(raw)))
+        except (AgenticStageError, ValueError, TypeError) as exc:
+            decision = RiskControlDecision(
+                action="hold",
+                metadata={"parse_error": str(exc), "rationale": ""},
+            )
+        decision.metadata.setdefault("schema_version", S4S5_SCHEMA_AGENTIC)
+        try:
+            eval_result = evaluate_risk(
+                decision,
+                weights,
+                return_data,
+                var_limit=var_limit,
+                drawdown_limit=drawdown_limit,
+                drift_limit=drift_limit,
+            )
+        except ValueError as exc:
+            eval_result = evaluate_risk(
+                RiskControlDecision(action="hold"),
+                weights,
+                return_data,
+                var_limit=var_limit,
+                drawdown_limit=drawdown_limit,
+                drift_limit=drift_limit,
+            )
+            eval_result.metadata["execution_error"] = str(exc)
         eval_result.metadata["schema_version"] = S4S5_SCHEMA_AGENTIC
         ref_decision = reference_decision or _reference_risk_decision(
             weights, pre_risk, var_limit, drawdown_limit, drift_limit
