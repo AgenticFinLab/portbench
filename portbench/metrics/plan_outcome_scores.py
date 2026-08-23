@@ -90,10 +90,19 @@ def _l1_tracking(actual: Mapping[str, float], target: Mapping[str, float]) -> fl
     return _clip01(1.0 - err / 2.0)
 
 
+def _implied_direction(delta: float, *, eps: float = 1e-6) -> str:
+    """Map a signed weight delta to buy / sell / hold."""
+    if abs(delta) < eps:
+        return "hold"
+    return "buy" if delta > 0.0 else "sell"
+
+
 def score_s4_plan_quality(
     plan: ExecutionPlan,
     reference_plan: Optional[ExecutionPlan] = None,
     target_weights: Optional[Mapping[str, float]] = None,
+    *,
+    current_weights: Optional[Mapping[str, float]] = None,
 ) -> Dict[str, float]:
     """Subscores for the agent execution *plan* (not the fill)."""
     if (plan.metadata or {}).get("parse_error"):
@@ -102,6 +111,11 @@ def score_s4_plan_quality(
             "target_tracking": 0.0,
             "plan_quality": 0.0,
         }
+    current = (
+        {str(k): float(v) for k, v in dict(current_weights).items()}
+        if current_weights is not None
+        else None
+    )
     orders = plan.normalized_orders()
     legal = 0.0
     if not orders and not (plan.metadata or {}).get("target_weights"):
@@ -122,7 +136,24 @@ def score_s4_plan_quality(
             weight_ok = o.target_weight is None or 0.0 <= float(o.target_weight) <= 1.0
             slip_ok = o.slip_limit is None or float(o.slip_limit) >= 0.0
             order_type_ok = o.order_type in {"market", "limit"}
-            if direction_ok and has_size and asset_ok and weight_ok and slip_ok and order_type_ok:
+            consistent = True
+            if current is not None:
+                curr = float(current.get(o.asset, 0.0))
+                if o.target_weight is not None:
+                    consistent = o.direction == _implied_direction(
+                        float(o.target_weight) - curr
+                    )
+                elif o.delta_weight is not None:
+                    consistent = o.direction == _implied_direction(float(o.delta_weight))
+            if (
+                direction_ok
+                and has_size
+                and asset_ok
+                and weight_ok
+                and slip_ok
+                and order_type_ok
+                and consistent
+            ):
                 ok += 1
         if n == 0 and (plan.metadata or {}).get("target_weights"):
             legal = 1.0

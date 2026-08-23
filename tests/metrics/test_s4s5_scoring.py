@@ -110,3 +110,51 @@ def test_s4_parse_error_zeros_all_plan_keys():
     assert pq["order_legality"] == 0.0
     assert pq["target_tracking"] == 0.0
     assert pq["plan_quality"] == 0.0
+
+
+def test_s4_direction_mismatch_fails_legality():
+    current = {"SPY": 0.5, "BIL": 0.5}
+    bad = ExecutionPlan(
+        orders=[
+            OrderIntent(asset="SPY", direction="buy", target_weight=0.4),
+            OrderIntent(asset="BIL", direction="sell", target_weight=0.6),
+        ]
+    )
+    pq_bad = score_s4_plan_quality(
+        bad,
+        target_weights={"SPY": 0.4, "BIL": 0.6},
+        current_weights=current,
+    )
+    assert pq_bad["order_legality"] == 0.0
+
+    good = ExecutionPlan(
+        orders=[
+            OrderIntent(asset="SPY", direction="sell", target_weight=0.4),
+            OrderIntent(asset="BIL", direction="buy", target_weight=0.6),
+        ]
+    )
+    pq_good = score_s4_plan_quality(
+        good,
+        target_weights={"SPY": 0.4, "BIL": 0.6},
+        current_weights=current,
+    )
+    assert pq_good["order_legality"] == 1.0
+
+    mixed = ExecutionPlan(
+        orders=[
+            OrderIntent(asset="SPY", direction="hold", target_weight=0.7),
+            OrderIntent(asset="BIL", direction="sell", target_weight=0.3),
+        ]
+    )
+    pq_mixed = score_s4_plan_quality(
+        mixed,
+        target_weights={"SPY": 0.7, "BIL": 0.3},
+        current_weights=current,
+    )
+    assert pq_mixed["order_legality"] == 0.5
+
+    # Without current_weights the mismatch is not scored.
+    pq_unchecked = score_s4_plan_quality(
+        mixed, target_weights={"SPY": 0.7, "BIL": 0.3}
+    )
+    assert pq_unchecked["order_legality"] == 1.0
