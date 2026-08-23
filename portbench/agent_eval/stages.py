@@ -631,6 +631,7 @@ class S1MarketInterpretation(PipelineStage):
             macro_block=macro_block,
             corr_block=corr_block,
             trailing_days=trailing_days,
+            use_tools=self.use_tools,
         )
 
         self._last_prompt = prompt
@@ -770,7 +771,9 @@ class S2SignalGeneration(PipelineStage):
         # Real LLM path
         # ----------------------------------------------------------------
         assets = list(s1.asset_views.keys())
-        prompt = build_s2_prompt(snapshot=snapshot, s1=s1, assets=assets)
+        prompt = build_s2_prompt(
+            snapshot=snapshot, s1=s1, assets=assets, use_tools=self.use_tools
+        )
 
         self._last_prompt = prompt
         try:
@@ -969,7 +972,11 @@ class S3WeightOptimization(PipelineStage):
         assets = list(s2.signals.keys())
         corr_block = _format_correlation(snapshot)
         prompt = build_s3_prompt(
-            snapshot=snapshot, s2=s2, assets=assets, corr_block=corr_block
+            snapshot=snapshot,
+            s2=s2,
+            assets=assets,
+            corr_block=corr_block,
+            use_tools=self.use_tools,
         )
 
         self._last_prompt = prompt

@@ -3,11 +3,12 @@ Centralized prompt templates for the S1–S3 LLM stages.
 
 Design rules:
   - Each builder takes only the runtime values it needs and returns a string.
-  - All prompts end with the same hard JSON-format contract (FORMAT_CONTRACT).
-  - The contract is intentionally repetitive: it tells the model to emit a
-    single JSON object, no prose, no code fences, starts with `{` and ends
-    with `}`. This is the same contract enforced by _call_with_json_retry's
-    correction message in stages.py.
+  - All prompts end with the same hard JSON-format contract (`format_contract`).
+  - Without tools, the contract tells the model to emit a single JSON object,
+    no prose, no code fences, starts with `{` and ends with `}`.
+  - With tools, the model may call tools first; the *final* assistant message
+    must still be exactly one JSON object. This is the same contract enforced
+    by _call_with_json_retry's correction message in stages.py.
 
 If a model still violates the contract on first try, _call_with_json_retry
 re-issues the prompt with an even stronger reminder appended.
@@ -36,6 +37,25 @@ OUTPUT FORMAT — STRICT:
      JSON numbers (no quotes, no `%`, no commas).
   6. Every key listed in the schema below MUST appear exactly once.
 """
+
+TOOL_FORMAT_CONTRACT = """\
+OUTPUT FORMAT — STRICT:
+  1. You MAY call the provided tools first to inspect Point-in-Time data.
+  2. After any tool rounds, your FINAL assistant message must be EXACTLY ONE
+     JSON object and nothing else.
+  3. The very first character of that final message MUST be `{` and the very
+     last character MUST be `}`. No leading whitespace, no trailing newline text.
+  4. Do NOT wrap the object in markdown code fences (no ```json, no ```).
+  5. Do NOT add any explanation, preamble, or commentary before/after the JSON.
+  6. Use double quotes for all keys and string values; numbers must be raw
+     JSON numbers (no quotes, no `%`, no commas).
+  7. Every key listed in the schema below MUST appear exactly once.
+"""
+
+
+def format_contract(use_tools: bool = False) -> str:
+    """Return the JSON output contract, optionally allowing a tool round first."""
+    return TOOL_FORMAT_CONTRACT if use_tools else FORMAT_CONTRACT
 
 
 def _schema_block(schema_lines: Iterable[str]) -> str:
@@ -113,6 +133,7 @@ def build_s1_prompt(
     macro_block: str,
     corr_block: str,
     trailing_days: int,
+    use_tools: bool = False,
 ) -> str:
     """Prompt for Stage 1: structured asset views + regime + macro summary."""
     news_block = (
@@ -151,7 +172,7 @@ Identify the overall market regime: one of "bull", "bear", "sideways", "high-vol
 
 {schema}
 
-{FORMAT_CONTRACT}"""
+{format_contract(use_tools)}"""
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +184,7 @@ def build_s2_prompt(
     snapshot: MarketSnapshot,
     s1: S1Output,
     assets: list[str],
+    use_tools: bool = False,
 ) -> str:
     """Prompt for Stage 2: discrete buy/hold/sell signals + strengths."""
     views_str = "\n".join(f"  {a}: view={v:+.3f}" for a, v in s1.asset_views.items())
@@ -200,7 +222,7 @@ Signal strength should reflect conviction (0.0 = low, 1.0 = high).
 
 {schema}
 
-{FORMAT_CONTRACT}"""
+{format_contract(use_tools)}"""
 
 
 # ---------------------------------------------------------------------------
@@ -213,6 +235,7 @@ def build_s3_prompt(
     s2: S2Output,
     assets: list[str],
     corr_block: str,
+    use_tools: bool = False,
 ) -> str:
     """Prompt for Stage 3: portfolio weight allocation summing to 1.0."""
     signals_str = "\n".join(
@@ -252,7 +275,7 @@ Constraints:
 
 {schema}
 
-{FORMAT_CONTRACT}"""
+{format_contract(use_tools)}"""
 
 
 # ---------------------------------------------------------------------------
