@@ -44,6 +44,16 @@ def data_snapshot_hash(data_dir: str | Path, data_version: str) -> str:
     return _sha256_text(_canonical({"data_version": data_version, "files": entries}))
 
 
+def _legacy_source_config_hash(source_root: str) -> str:
+    """Hash the archived generation configuration used by legacy prompt reuse."""
+    if not source_root:
+        return ""
+    path = Path(source_root) / "monthly" / "_last_run_config.yaml"
+    if not path.exists():
+        return _sha256_text(_canonical({"missing": str(path)}))
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def build_freeze_manifest(cfg: ExperimentConfig, spec: ModelSpec) -> dict[str, Any]:
     """Build the resume contract from fields that can change observed behavior."""
     normal_periods = [
@@ -88,6 +98,10 @@ def build_freeze_manifest(cfg: ExperimentConfig, spec: ModelSpec) -> dict[str, A
             "rebalance": cfg.rebalance,
             "max_rebalances_per_window": cfg.max_rebalances_per_window,
             "factual_pit_prefix_stages": list(cfg.factual_pit_prefix_stages),
+            "legacy_stage_reuse_root": cfg.legacy_stage_reuse_root,
+            "legacy_source_config_hash": _legacy_source_config_hash(
+                cfg.legacy_stage_reuse_root
+            ),
             "initial_nav": cfg.initial_nav,
             "seed": cfg.seed,
         },

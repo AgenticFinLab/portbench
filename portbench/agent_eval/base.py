@@ -584,6 +584,7 @@ class EvalPipeline:
         stage_overrides: Optional[dict[StageID, Any]] = None,
         reuse_outputs: Optional[dict[StageID, Any]] = None,
         reused_stage_sources: Optional[dict[StageID, str]] = None,
+        reused_prompts: Optional[dict[StageID, str]] = None,
         run_interventions: bool = True,
     ) -> EpisodeResult:
         """
@@ -602,6 +603,7 @@ class EvalPipeline:
         overrides = stage_overrides or {}
         reused = reuse_outputs or {}
         reuse_sources = reused_stage_sources or {}
+        reuse_prompts = reused_prompts or {}
         if self.runtime is not None:
             from .canonical import canonical_json, sha256_hex
 
@@ -699,8 +701,10 @@ class EvalPipeline:
                 # Extract prompt and raw response from stage output if present
                 if hasattr(actual, "raw_llm_output") and actual.raw_llm_output:
                     raw_responses[sid] = actual.raw_llm_output
+                if sid in reuse_prompts:
+                    prompts[sid] = reuse_prompts[sid]
                 # Prompts are injected by stages that support logging (see stages.py)
-                if hasattr(stage, "_last_prompt"):
+                elif hasattr(stage, "_last_prompt"):
                     prompts[sid] = stage._last_prompt
 
             except Exception as exc:

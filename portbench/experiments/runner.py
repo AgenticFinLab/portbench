@@ -36,6 +36,7 @@ from tqdm.auto import tqdm
 from ..agent_eval.base import AgentAdapter
 from ..agent_eval.architectures import IsoTokenBudget
 from ..agent_eval.investor_profiles import PROFILES
+from ..agent_eval.legacy_stage_reuse import LegacyStageReuseStore
 from ..agent_eval.stress_scenarios import STRESS_SCENARIOS
 from ..qa_builder.mock_data import MockDataProvider
 from ..qa_builder.processed_data import ProcessedDataProvider
@@ -276,6 +277,7 @@ def _run_one_scenario(
     profile_obj,
     scenario_name: str,
     out_dir: Path,
+    legacy_stage_reuse=None,
 ):
     """Run one stress scenario; persist artifacts; return (result, passed, dd_score, ceps_tier).
 
@@ -346,6 +348,7 @@ def _run_one_scenario(
         retry_failed_calls=cfg.retry_failed_calls,
         schema_version=cfg.pipeline_schema_version,
         call_artifact_dir=cfg.call_artifact_root or None,
+        legacy_stage_reuse=legacy_stage_reuse,
     )
     if pipeline_log_dir is not None:
         engine.enable_pipeline_logging(
@@ -385,6 +388,7 @@ def _run_normal(
     out_dir: Path,
     period=None,
     label: str = "",
+    legacy_stage_reuse=None,
 ):
     from ..sandbox.result import BacktestResult as _BR
 
@@ -438,6 +442,7 @@ def _run_normal(
         retry_failed_calls=cfg.retry_failed_calls,
         schema_version=cfg.pipeline_schema_version,
         call_artifact_dir=cfg.call_artifact_root or None,
+        legacy_stage_reuse=legacy_stage_reuse,
     )
     if pipeline_log_dir is not None:
         engine.enable_pipeline_logging(
@@ -460,6 +465,7 @@ def _run_profile(
     p_dir: Path,
     logger: logging.Logger,
     model_label: str = "",
+    legacy_stage_reuse=None,
 ) -> dict:
     """Run Phase A + Phase B for one (model, profile). Returns summary dict."""
     profile_obj = PROFILES[profile_name]
@@ -489,6 +495,7 @@ def _run_profile(
                 profile_obj,
                 sc_name,
                 p_dir / f"stress_{sc_name}",
+                legacy_stage_reuse,
             ): sc_name
             for sc_name in scenarios
         }
@@ -547,6 +554,7 @@ def _run_profile(
                 np_out_dir,
                 period=np_item,
                 label=np_label,
+                legacy_stage_reuse=legacy_stage_reuse,
             )
             normal_dicts.append({
                 "label": np_label,
@@ -599,6 +607,7 @@ def _run_one_model(
     timestamp: str,
     errors_lock: threading.Lock,
     already_done: list[str] | None = None,
+    legacy_stage_reuse=None,
 ) -> dict:
     """
     Run all pending profiles for one (provider, model_name) and persist artifacts.
@@ -698,6 +707,7 @@ def _run_one_model(
                 p_dir,
                 p_logger,
                 model_label=f"{prov_name}/{model_name}",
+                legacy_stage_reuse=legacy_stage_reuse,
             )
             profile_results[profile_name] = summary
             completed.append(profile_name)
@@ -831,6 +841,17 @@ class BatchRunner:
 
         data_provider = _build_provider(cfg)
         asset_class_map = _build_asset_class_map(data_provider)
+        legacy_stage_reuse = None
+        if cfg.legacy_stage_reuse_root:
+            legacy_stage_reuse = LegacyStageReuseStore(
+                cfg.legacy_stage_reuse_root,
+                temperature=cfg.generation.temperature,
+                max_tokens=cfg.generation.max_tokens,
+            )
+            print(
+                "[legacy-reuse] indexed prompt-exact S1-S3 candidates from "
+                f"{cfg.legacy_stage_reuse_root}"
+            )
 
         # Resolve (provider, model_name) for every spec
         model_specs: list[tuple[ModelSpec, str, str]] = (
@@ -932,6 +953,7 @@ class BatchRunner:
                     timestamp,
                     errors_lock,
                     already_done=already_done,
+                    legacy_stage_reuse=legacy_stage_reuse,
                 )
                 if failed_profiles:
                     n_failed += 1

@@ -198,3 +198,72 @@ def test_provider_errors_count_toward_the_persisted_attempt_limit(tmp_path):
         )
     attempts = store.attempts(request)
     assert len([item for item in attempts if item["event"] == "provider_error"]) == 3
+
+
+def test_resume_marks_an_interrupted_provider_attempt_before_reissuing(tmp_path):
+    store = CallArtifactStore(tmp_path)
+    request = _request()
+    store._append_attempt(
+        request.namespace,
+        request.call_key,
+        {"event": "request_recorded", "request_hash": request.call_key},
+    )
+    store._append_attempt(
+        request.namespace,
+        request.call_key,
+        {"event": "provider_started", "attempt": 1},
+    )
+    calls = {"count": 0}
+
+    def call():
+        calls["count"] += 1
+        return '{"answer": 0.5}'
+
+    parsed, _, hit = store.complete_or_call(
+        request,
+        parser_version="schema-v1",
+        parse=lambda raw: json.loads(raw),
+        call_fn=call,
+        backoff_seconds=(0.0, 0.0),
+    )
+
+    assert parsed == {"answer": 0.5}
+    assert not hit
+    assert calls["count"] == 1
+    attempts = store.attempts(request)
+    assert any(
+        item.get("event") == "interrupted" and item.get("attempt") == 1
+        for item in attempts
+    )
+    assert any(
+        item.get("event") == "provider_started" and item.get("attempt") == 2
+        for item in attempts
+    )
+
+
+def test_resume_counts_a_legacy_unstarted_request_conservatively(tmp_path):
+    store = CallArtifactStore(tmp_path)
+    request = _request()
+    store._append_attempt(
+        request.namespace,
+        request.call_key,
+        {"event": "request_recorded", "request_hash": request.call_key},
+    )
+
+    store.complete_or_call(
+        request,
+        parser_version="schema-v1",
+        parse=lambda raw: json.loads(raw),
+        call_fn=lambda: '{"answer": 0.5}',
+        backoff_seconds=(0.0, 0.0),
+    )
+
+    attempts = store.attempts(request)
+    assert any(
+        item.get("event") == "interrupted" and item.get("attempt") == 1
+        for item in attempts
+    )
+    assert any(
+        item.get("event") == "provider_started" and item.get("attempt") == 2
+        for item in attempts
+    )

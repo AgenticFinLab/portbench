@@ -1,10 +1,10 @@
-# Factual SA-only v4 matrix. Causal repair calls are run by sa_upgrade_causal.yaml.
-batch_id: "sa_upgrade_full_{date}"
+# Protocol-C online repair branches for the weekly stress factual state.
+batch_id: "sa_upgrade_causal_c_stress_{date}"
 data_provider: processed
 data_version: processed-v1
 data_dir: datasets/processed
 sec_dir: datasets/sec
-rebalance: monthly
+rebalance: weekly
 initial_nav: 1000000
 pipeline_schema_version: pipeline-v4-sa-causal
 sa_only: true
@@ -18,7 +18,7 @@ call_max_attempts: 3
 retry_failed_calls: false
 generation:
   temperature: 0.0
-  max_tokens: 8192
+  max_tokens: 4096
 resource_budget:
   max_tokens_per_episode: 0
   max_requests_per_episode: 0
@@ -34,27 +34,17 @@ models:
   - {provider: dashscope, model: kimi-k2.6, architecture_id: SA}
   - {provider: dashscope, model: glm-5.1, architecture_id: SA}
   - {provider: dashscope, model: qwen3.6-35b-a3b, architecture_id: SA}
-profiles: [conservative, balanced, aggressive]
+profiles: [balanced]
 stress_scenarios: [2015_china_shock, 2020_covid_flash_crash, 2022_crypto_collapse]
-run_normal: true
-normal_periods:
-  - {start: 2024-01-01, end: 2024-12-31, label: balanced_bull_2024}
+run_normal: false
 max_rebalances_per_window: 0
 oracle_mode: lookback
-experiment_tag: sa_upgrade_full_v1
-logging:
-  save_pipeline_logs: true
-  save_snapshots: true
-  save_figures: true
+experiment_tag: sa_upgrade_causal_c_stress_v1
+logging: {save_pipeline_logs: true, save_snapshots: true, save_figures: true}
 on_error: isolate
 output_root: EXPERIMENTS
 timeout: 600
 propagation_weight: 0.1
-reuse_latest: true
-interventions:
-  enabled: false
-  stages: [S1, S2, S3, S4, S5]
-  operator: repair
-  mode: online
-  closed_loop: false
+reuse_latest: false
+interventions: {enabled: true, stages: [S1, S2, S3, S4, S5], operator: repair, mode: online, closed_loop: false}
 run_qa: false

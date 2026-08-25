@@ -210,6 +210,7 @@ class ExperimentConfig:
     )
     max_rebalances_per_window: int = 0
     factual_pit_prefix_stages: list[str] = field(default_factory=list)
+    legacy_stage_reuse_root: str = ""
     oracle_mode: str = "ex_post"  # "ex_post" | "lookback" | "equal_weight"
     experiment_tag: str = ""  # appended to output_root for experiment isolation
                               # e.g. "rebuttal_lookback" → EXPERIMENTS_rebuttal_lookback/
@@ -253,6 +254,10 @@ class ExperimentConfig:
         allowed_prefix = ["S1", "S2", "S3"]
         if self.factual_pit_prefix_stages != allowed_prefix[: len(self.factual_pit_prefix_stages)]:
             raise ValueError("factual_pit_prefix_stages must be an S1-S3 prefix")
+        if self.legacy_stage_reuse_root and self.factual_pit_prefix_stages:
+            raise ValueError(
+                "legacy_stage_reuse_root cannot be combined with factual_pit_prefix_stages"
+            )
         # Concurrent scenarios would mix provider usage deltas across threads.
         if any(model.architecture_id for model in self.models) and self.workers_per_experiment != 1:
             raise ValueError(
@@ -343,6 +348,7 @@ class ExperimentConfig:
             normal_periods=np_objs,
             max_rebalances_per_window=int(raw.get("max_rebalances_per_window", 0)),
             factual_pit_prefix_stages=list(raw.get("factual_pit_prefix_stages") or []),
+            legacy_stage_reuse_root=str(raw.get("legacy_stage_reuse_root") or ""),
             oracle_mode=str(raw.get("oracle_mode", "ex_post")),
             experiment_tag=str(raw.get("experiment_tag", "")),
             data_provider=raw.get("data_provider", "processed"),

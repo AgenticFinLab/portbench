@@ -110,6 +110,7 @@ class BacktestEngine:
         retry_failed_calls: bool = False,
         schema_version: str = "pipeline-v3-collab",
         call_artifact_dir: Optional[str] = None,
+        legacy_stage_reuse=None,
     ):
         self.strategy = strategy
         self._snapshot_dump_dir: Optional[str] = snapshot_dump_dir
@@ -135,10 +136,12 @@ class BacktestEngine:
         self._progress = progress
         self._profile = profile
         self._architecture_id = architecture_id
+        self._provider_name = provider_name
         self._schema_version = str(schema_version)
         self._data_version = data_version
         self._code_commit = code_commit
         self._intervention_spec: dict = dict(intervention_spec or {})
+        self._legacy_stage_reuse = legacy_stage_reuse
         self._rebalance_records: list[tuple] = []
         self.closed_loop_interventions: list[dict] = []
         self._alignment_scorer = (
@@ -473,11 +476,31 @@ class BacktestEngine:
                 stage: pit_repair.VERSION.replace("_", "-")
                 for stage in prefix_outputs
             }
+            legacy_resolution = None
+            if self._legacy_stage_reuse is not None and self._profile is not None:
+                legacy_resolution = self._legacy_stage_reuse.resolve(
+                    snapshot,
+                    provider=self._provider_name,
+                    model=self.strategy.model_name,
+                    profile=self._profile.name,
+                )
+                overlap = set(prefix_outputs).intersection(legacy_resolution.outputs)
+                if overlap:
+                    raise RuntimeError("Point-in-Time and legacy stage reuse cannot overlap")
+                prefix_outputs.update(legacy_resolution.outputs)
+                prefix_sources.update(legacy_resolution.sources)
             result = self._pipeline.run_episode(
                 snapshot,
                 reuse_outputs=prefix_outputs,
                 reused_stage_sources=prefix_sources,
+                reused_prompts=(legacy_resolution.prompts if legacy_resolution else None),
             )
+            if legacy_resolution is not None:
+                result.provenance["legacy_stage_reuse"] = {
+                    "policy_version": "legacy-prompt-hash-v1",
+                    "decisions": legacy_resolution.decisions,
+                    "matches": legacy_resolution.provenance,
+                }
             self._episode_results.append(result)
             self._rebalance_records.append((snapshot, result))
             self._resource_audit.append(

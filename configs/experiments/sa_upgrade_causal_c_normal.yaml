@@ -1,5 +1,5 @@
-# Online paired simulator repair branches for the balanced SA-only v4 analysis.
-batch_id: "sa_upgrade_causal_{date}"
+# Protocol-C online repair branches for the monthly 2024-normal factual state.
+batch_id: "sa_upgrade_causal_c_normal_{date}"
 data_provider: processed
 data_version: processed-v1
 data_dir: datasets/processed
@@ -18,7 +18,7 @@ call_max_attempts: 3
 retry_failed_calls: false
 generation:
   temperature: 0.0
-  max_tokens: 8192
+  max_tokens: 4096
 resource_budget:
   max_tokens_per_episode: 0
   max_requests_per_episode: 0
@@ -35,26 +35,18 @@ models:
   - {provider: dashscope, model: glm-5.1, architecture_id: SA}
   - {provider: dashscope, model: qwen3.6-35b-a3b, architecture_id: SA}
 profiles: [balanced]
-stress_scenarios: [2015_china_shock, 2020_covid_flash_crash, 2022_crypto_collapse]
+stress_scenarios: []
 run_normal: true
 normal_periods:
   - {start: 2024-01-01, end: 2024-12-31, label: balanced_bull_2024}
 max_rebalances_per_window: 0
 oracle_mode: lookback
-experiment_tag: sa_upgrade_causal_v1
-logging:
-  save_pipeline_logs: true
-  save_snapshots: true
-  save_figures: true
+experiment_tag: sa_upgrade_causal_c_normal_v1
+logging: {save_pipeline_logs: true, save_snapshots: true, save_figures: true}
 on_error: isolate
 output_root: EXPERIMENTS
 timeout: 600
 propagation_weight: 0.1
 reuse_latest: false
-interventions:
-  enabled: true
-  stages: [S1, S2, S3, S4, S5]
-  operator: repair
-  mode: online
-  closed_loop: false
+interventions: {enabled: true, stages: [S1, S2, S3, S4, S5], operator: repair, mode: online, closed_loop: false}
 run_qa: false

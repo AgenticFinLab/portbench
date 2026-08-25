@@ -309,7 +309,8 @@ class CallArtifactStore:
                     return parsed_output, existing, True
 
             ledger = self.attempts(request)
-            if not any(item.get("event") == "request_recorded" for item in ledger):
+            recorded_now = not any(item.get("event") == "request_recorded" for item in ledger)
+            if recorded_now:
                 self._append_attempt(
                     request.namespace,
                     request.call_key,
@@ -356,21 +357,68 @@ class CallArtifactStore:
                     },
                 )
                 return parsed_output, artifact, True
-            provider_attempts = [
-                item
+            completed_attempts = {
+                int(item["attempt"])
                 for item in ledger
                 if item.get("event") in {"received", "provider_error"}
-            ]
-            if len(provider_attempts) >= max_attempts and not retry_failed:
+                and isinstance(item.get("attempt"), int)
+            }
+            started_attempts = {
+                int(item["attempt"])
+                for item in ledger
+                if item.get("event") == "provider_started"
+                and isinstance(item.get("attempt"), int)
+            }
+            interrupted_attempts = {
+                int(item["attempt"])
+                for item in ledger
+                if item.get("event") == "interrupted"
+                and isinstance(item.get("attempt"), int)
+            }
+            if not recorded_now and not started_attempts and not completed_attempts:
+                self._append_attempt(
+                    request.namespace,
+                    request.call_key,
+                    {
+                        "timestamp": _now(),
+                        "event": "interrupted",
+                        "attempt": 1,
+                        "error": "legacy request had no persisted provider-start event",
+                    },
+                )
+                started_attempts.add(1)
+                interrupted_attempts.add(1)
+            for stale_attempt in sorted(started_attempts - completed_attempts - interrupted_attempts):
+                self._append_attempt(
+                    request.namespace,
+                    request.call_key,
+                    {
+                        "timestamp": _now(),
+                        "event": "interrupted",
+                        "attempt": stale_attempt,
+                        "error": "process exited before a provider outcome was persisted",
+                    },
+                )
+            attempted_numbers = started_attempts | completed_attempts
+            if len(attempted_numbers) >= max_attempts and not retry_failed:
                 raise TerminalCallFailure(
                     f"call {request.call_key} exhausted {max_attempts} persisted attempts"
                 )
-            attempt_number = len(provider_attempts)
+            attempt_number = max(attempted_numbers, default=0)
             limit = max_attempts + (1 if retry_failed else 0)
 
             while attempt_number < limit:
                 attempt_number += 1
                 started = time.perf_counter()
+                self._append_attempt(
+                    request.namespace,
+                    request.call_key,
+                    {
+                        "timestamp": _now(),
+                        "event": "provider_started",
+                        "attempt": attempt_number,
+                    },
+                )
                 try:
                     raw_response = str(call_fn())
                 except Exception as exc:
