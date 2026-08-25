@@ -135,6 +135,35 @@ def test_agentic_s5_prompt_lists_contract_without_answer_policy():
     assert "Explain the risk evidence" in prompt
 
 
+def test_agentic_s5_rejects_non_tradable_corrective_asset():
+    import json
+
+    from portbench.agent_eval.s4_s5_stages import AgenticS5Stage
+
+    class Adapter:
+        def complete(self, prompt: str) -> str:
+            return json.dumps(
+                {
+                    "action": "rebalance",
+                    "alerts": ["drawdown"],
+                    "corrective_weights": {"CASH": 1.0},
+                    "scale_factor": None,
+                    "rationale": "move to cash",
+                }
+            )
+
+    returns = {"SPY": pd.Series([0.001] * 32), "BIL": pd.Series([0.0001] * 32)}
+    bundle = AgenticS5Stage(Adapter()).run(
+        weights={"SPY": 0.6, "BIL": 0.4},
+        return_data=returns,
+    )
+
+    assert bundle.decision.action == "hold"
+    assert bundle.decision.metadata.get("parse_error")
+    assert set(bundle.eval_result.metadata["final_weights"]) == {"SPY", "BIL"}
+    assert all(value == 0.0 for value in bundle.plan_scores.values())
+
+
 def test_agentic_s4_retries_then_marks_parse_error_and_zeros_plan():
     from portbench.agent_eval.agentic_pipeline_stages import AgenticS4PipelineStage
     from portbench.agent_eval.base import MarketSnapshot, S3Output
@@ -209,6 +238,26 @@ def test_agentic_s4_normalizes_order_enum_casing():
     assert order.direction == "sell"
     assert order.order_type == "market"
     assert order.urgency == "high"
+
+
+def test_agentic_s4_rejects_non_tradable_order_asset():
+    from portbench.agent_eval.s4_s5_stages import AgenticStageError, _plan_from_payload
+
+    with pytest.raises(AgenticStageError, match="visible assets"):
+        _plan_from_payload(
+            {
+                "orders": [
+                    {
+                        "asset": "CASH",
+                        "direction": "buy",
+                        "target_weight": 1.0,
+                        "order_type": "market",
+                        "urgency": "normal",
+                    }
+                ]
+            },
+            allowed_assets={"SPY", "BIL"},
+        )
 
 
 def test_agentic_s5_rejects_overweight_incoming_book():

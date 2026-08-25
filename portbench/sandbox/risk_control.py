@@ -11,6 +11,27 @@ from portbench.metrics.base import MetricsConfig
 from portbench.metrics.risk_metrics import cvar, max_drawdown, var
 
 
+def _cash_proxy(
+    weights: Mapping[str, float], available_assets: Mapping[str, Any] | None = None
+) -> str | None:
+    """Return a tradable cash proxy from holdings or available return data."""
+    for candidates in (weights, available_assets or {}):
+        for asset in candidates:
+            if str(asset).upper() == "BIL":
+                return str(asset)
+        proxy = next(
+            (
+                str(asset)
+                for asset in candidates
+                if "BIL" in str(asset).upper() or "CASH" in str(asset).upper()
+            ),
+            None,
+        )
+        if proxy is not None:
+            return proxy
+    return None
+
+
 def _portfolio_returns(
     weights: Mapping[str, float], return_data: Mapping[str, Any]
 ) -> pd.Series:
@@ -74,7 +95,9 @@ def _project_to_simplex(
 
 
 def _apply_decision(
-    decision: RiskControlDecision, weights: Mapping[str, float]
+    decision: RiskControlDecision,
+    weights: Mapping[str, float],
+    cash_proxy: str | None = None,
 ) -> Dict[str, float]:
     """Apply a validated risk-control decision to portfolio weights."""
     current = {str(asset): float(weight) for asset, weight in weights.items()}
@@ -88,10 +111,9 @@ def _apply_decision(
     factor = float(decision.scale_factor)
     # Scale every current position before moving the residual into cash.
     final = {asset: weight * factor for asset, weight in current.items()}
-    cash_key = next(
-        (asset for asset in final if asset.upper() == "CASH" or "BIL" in asset),
-        "CASH",
-    )
+    cash_key = cash_proxy or _cash_proxy(final)
+    if cash_key is None:
+        return _project_to_simplex(final, current)
     non_cash = sum(weight for asset, weight in final.items() if asset != cash_key)
     final[cash_key] = max(0.0, 1.0 - non_cash)
     return final
@@ -125,14 +147,17 @@ def evaluate_risk(
     if any(weight < 0.0 for weight in initial.values()):
         raise ValueError("weights must be non-negative")
     total_weight = sum(initial.values())
+    cash_proxy = _cash_proxy(initial, return_data)
     if total_weight > 1.0 + 1e-3:
         raise ValueError("weights must not sum above one")
     if initial and total_weight < 1.0:
-        # Materialize undeclared residual weight as cash before evaluating the action.
-        initial["CASH"] = initial.get("CASH", 0.0) + 1.0 - total_weight
+        if cash_proxy is None:
+            initial = _project_to_simplex(initial, initial)
+        else:
+            initial[cash_proxy] = initial.get(cash_proxy, 0.0) + 1.0 - total_weight
     # Compare risk before and after the action using the same lookback data.
     pre = _risk_metrics(initial, return_data)
-    final = _apply_decision(decision, initial)
+    final = _apply_decision(decision, initial, cash_proxy=cash_proxy)
     post = _risk_metrics(final, return_data)
     violations = _violations(post, var_limit, drawdown_limit, drift_limit)
     # Persist both sides of the deterministic action for plan and outcome scoring.

@@ -78,7 +78,9 @@ def _extract_json(text: str) -> Mapping[str, Any]:
     return payload
 
 
-def _plan_from_payload(payload: Mapping[str, Any]) -> ExecutionPlan:
+def _plan_from_payload(
+    payload: Mapping[str, Any], *, allowed_assets: Optional[set[str]] = None
+) -> ExecutionPlan:
     """Parse and validate a multi-asset execution plan."""
     orders_raw = payload.get("orders")
     if not isinstance(orders_raw, list) or not orders_raw:
@@ -106,6 +108,11 @@ def _plan_from_payload(payload: Mapping[str, Any]) -> ExecutionPlan:
             raise AgenticStageError(f"invalid S4 order: {exc}") from exc
         if not order.asset or order.asset in assets:
             raise AgenticStageError("S4 orders require unique non-empty assets")
+        if allowed_assets is not None and order.asset not in allowed_assets:
+            raise AgenticStageError(
+                "S4 orders may only reference visible assets: "
+                f"{order.asset}"
+            )
         assets.add(order.asset)
         orders.append(order)
     return ExecutionPlan(
@@ -118,11 +125,20 @@ def _plan_from_payload(payload: Mapping[str, Any]) -> ExecutionPlan:
     )
 
 
-def _decision_from_payload(payload: Mapping[str, Any]) -> RiskControlDecision:
+def _decision_from_payload(
+    payload: Mapping[str, Any], *, allowed_assets: Optional[set[str]] = None
+) -> RiskControlDecision:
     """Parse and validate an S5 control decision."""
     corrective = payload.get("corrective_weights")
     if corrective is not None and not isinstance(corrective, Mapping):
         raise AgenticStageError("corrective_weights must be an object or null")
+    if isinstance(corrective, Mapping) and allowed_assets is not None:
+        unknown_assets = sorted(set(corrective) - allowed_assets)
+        if unknown_assets:
+            raise AgenticStageError(
+                "corrective_weights may only reference visible assets: "
+                f"{', '.join(unknown_assets)}"
+            )
     try:
         return RiskControlDecision(
             action=str(payload.get("action", "")),
@@ -276,8 +292,9 @@ class AgenticS4Stage:
         slippage_rate: float = 0.001,
         commission_rate: float = 0.0005,
     ) -> S4AgenticBundle:
+        market_context = _snapshot_context(snapshot_like)
         context = {
-            "market": _snapshot_context(snapshot_like),
+            "market": market_context,
             "current_weights": dict(current_weights),
             "target_weights": dict(target_weights),
             "nav": float(nav),
@@ -291,6 +308,7 @@ class AgenticS4Stage:
             "Determine trade direction and size from current and target books yourself. "
             "Return a JSON object with orders and rationale. Each order must include asset, direction, "
             "target_weight or delta_weight, order_type, urgency, and slip_limit. "
+            "Orders must reference only assets listed in market.prices. "
             "Consider volatility, liquidity, and the supplied transaction-cost model when selecting order policy. "
             f"Context: {json.dumps(context, ensure_ascii=False, default=str)}\n"
             f"{format_contract(self.use_tools)}"
@@ -302,7 +320,10 @@ class AgenticS4Stage:
                 self.last_prompt,
                 use_tools=self.use_tools,
                 snapshot=snapshot_like,
-                parse=_plan_from_payload,
+                parse=lambda payload: _plan_from_payload(
+                    payload,
+                    allowed_assets=set(market_context["prices"]),
+                ),
             )
         except Exception as exc:
             plan, raw, parse_err = None, "", exc
@@ -414,7 +435,7 @@ class AgenticS5Stage:
             "Return a JSON object with action, alerts, corrective_weights, scale_factor, rationale. "
             "action must be hold, scale_down, or rebalance. "
             "alerts must use only var_breach, drawdown, and weight_drift. "
-            "For a rebalance, corrective_weights must be non-negative and sum to one. "
+            "For a rebalance, corrective_weights must use only the assets in weights, be non-negative, and sum to one. "
             "For scale_down, provide a scale_factor in [0,1]. Explain the risk evidence and proposed action briefly. "
             f"Context: {json.dumps(context, ensure_ascii=False, default=str)}\n"
             f"{format_contract(self.use_tools)}"
@@ -439,7 +460,10 @@ class AgenticS5Stage:
                 self.last_prompt,
                 use_tools=self.use_tools,
                 snapshot=bind_snapshot,
-                parse=_decision_from_payload,
+                parse=lambda payload: _decision_from_payload(
+                    payload,
+                    allowed_assets=set(return_data),
+                ),
             )
         except Exception as exc:
             decision, raw, parse_err = None, "", exc
