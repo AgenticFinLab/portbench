@@ -54,9 +54,13 @@ _parser.add_argument(
 )
 _parser.add_argument(
     "--template-version",
-    choices=["legacy", "constraint-v2"],
+    choices=[
+        "legacy",
+        "constraint-v2",
+        "constraint-decision-v2",
+    ],
     default="legacy",
-    help="Use constraint-v2 for the redesigned T3/T4 while keeping other templates unchanged.",
+    help="Use a versioned constraint template for T3/T4 while keeping other templates unchanged.",
 )
 _parser.add_argument(
     "--output-dir",
@@ -64,9 +68,17 @@ _parser.add_argument(
     default="datasets/qa_dataset",
     help="Output directory (default: datasets/qa_dataset)",
 )
+_parser.add_argument(
+    "--templates",
+    nargs="+",
+    choices=["T1", "T2", "T3", "T4", "T5", "T6", "T7"],
+    default=["T1", "T2", "T3", "T4", "T5", "T6", "T7"],
+    help="Build only the selected templates while preserving the default full dataset.",
+)
 _args = _parser.parse_args()
 T3T4_REDESIGN = bool(_args.t3t4_redesign)
 TEMPLATE_VERSION = str(_args.template_version)
+SELECTED_TEMPLATES = set(_args.templates)
 
 OUTPUT_DIR = Path(_args.output_dir)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -168,6 +180,7 @@ BUILDERS = [
     T6RebalancingDecision(provider, config),
     T7RegimeDetection(provider, config),
 ]
+BUILDERS = [builder for builder in BUILDERS if builder.template_id in SELECTED_TEMPLATES]
 
 all_pairs = []
 stats = {}

@@ -155,14 +155,23 @@ def test_stress_scenario_uses_yaml_rebalance():
 def test_sa_upgrade_configs_pin_single_agent_without_tools_or_memory():
     configs = {
         "pilot": ExperimentConfig.from_yaml("configs/experiments/sa_upgrade_pilot.yaml"),
-        "full": ExperimentConfig.from_yaml("configs/experiments/sa_upgrade_full.yaml"),
-        "causal": ExperimentConfig.from_yaml("configs/experiments/sa_upgrade_causal.yaml"),
-        "qa": ExperimentConfig.from_yaml("configs/experiments/sa_upgrade_qa_v2.yaml"),
-        "qa_pilot": ExperimentConfig.from_yaml(
-            "configs/experiments/sa_upgrade_qa_v2_pilot.yaml"
+        "qa_decision": ExperimentConfig.from_yaml(
+            "configs/experiments/sa_upgrade_qa_decision.yaml"
+        ),
+        "full_c_stress": ExperimentConfig.from_yaml(
+            "configs/experiments/sa_upgrade_full_c_stress.yaml"
+        ),
+        "full_c_normal": ExperimentConfig.from_yaml(
+            "configs/experiments/sa_upgrade_full_c_normal.yaml"
+        ),
+        "causal_c_stress": ExperimentConfig.from_yaml(
+            "configs/experiments/sa_upgrade_causal_c_stress.yaml"
+        ),
+        "causal_c_normal": ExperimentConfig.from_yaml(
+            "configs/experiments/sa_upgrade_causal_c_normal.yaml"
         ),
     }
-    for config in configs.values():
+    for name, config in configs.items():
         assert config.sa_only is True
         assert config.pipeline_schema_version == "pipeline-v4-sa-causal"
         assert config.use_tools is False
@@ -170,28 +179,22 @@ def test_sa_upgrade_configs_pin_single_agent_without_tools_or_memory():
         assert {model.architecture_id for model in config.models} == {"SA"}
         assert config.call_max_attempts == 3
         assert config.generation.temperature == 0.0
-        assert config.generation.max_tokens == 8192
-    assert len(configs["full"].models) == 10
-    assert [period.label for period in configs["full"].normal_periods] == [
-        "balanced_bull_2024"
-    ]
-    assert configs["full"].max_rebalances_per_window == 0
-    assert configs["full"].factual_pit_prefix_stages == []
-    assert configs["causal"].profiles == ["balanced"]
-    assert [period.label for period in configs["causal"].normal_periods] == [
-        "balanced_bull_2024"
-    ]
-    assert configs["causal"].max_rebalances_per_window == 0
-    assert configs["causal"].factual_pit_prefix_stages == []
-    assert configs["causal"].interventions.mode == "online"
-    assert configs["causal"].interventions.closed_loop is False
+        expected_max_tokens = 8192 if name == "pilot" else 4096
+        assert config.generation.max_tokens == expected_max_tokens
     assert configs["pilot"].max_rebalances_per_window == 1
     assert configs["pilot"].factual_pit_prefix_stages == ["S1", "S2", "S3"]
     assert configs["pilot"].interventions.stages == ["S4", "S5"]
-    assert configs["qa"].run_sandbox is False
-    assert configs["qa"].qa.template_version == "constraint-v2"
-    assert configs["qa"].qa.templates == ["T3", "T4"]
-    assert configs["qa"].qa.freeze_manifest.endswith("constraint_v2_test_manifest.json")
-    assert configs["qa_pilot"].qa.split == "test"
-    assert configs["qa_pilot"].qa.max_pairs_per_template == 20
-    assert configs["qa_pilot"].qa.freeze_manifest.endswith("constraint_v2_test_manifest.json")
+    assert configs["qa_decision"].qa.template_version == "constraint-decision-v2"
+    assert configs["qa_decision"].qa.split == "test"
+    assert configs["qa_decision"].qa.max_pairs_per_template == 50
+    assert configs["qa_decision"].qa.freeze_manifest.endswith(
+        "constraint_decision_v2_test_manifest.json"
+    )
+    assert len(configs["full_c_stress"].models) == 10
+    assert configs["full_c_stress"].rebalance == "weekly"
+    assert not configs["full_c_stress"].run_normal
+    assert configs["full_c_stress"].legacy_stage_reuse_root == ""
+    assert configs["full_c_normal"].rebalance == "monthly"
+    assert configs["full_c_normal"].stress_scenarios == []
+    assert configs["causal_c_stress"].profiles == ["balanced"]
+    assert configs["causal_c_normal"].interventions.mode == "online"

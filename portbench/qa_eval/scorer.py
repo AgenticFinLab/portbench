@@ -435,6 +435,40 @@ def _score_t4_constraint_v2(response: str, metadata: Mapping[str, Any]) -> float
     )
 
 
+def _score_constraint_decision(
+    response: str,
+    metadata: Mapping[str, Any],
+    template_id: str,
+) -> float:
+    """Score compact T3-D and T4-D base and stress decisions."""
+    payload = _json_object(response)
+    solution = metadata.get("constraint_decision") or {}
+    if payload is None or not solution:
+        return 0.0
+    prefix = "plan" if template_id == "T3" else "candidate"
+    expected = {
+        f"base_{prefix}_id": solution.get("base_selected_id"),
+        f"stress_{prefix}_id": solution.get("stress_selected_id"),
+        "base_feasible_ids": solution.get("base_feasible_ids"),
+        "stress_feasible_ids": solution.get("stress_feasible_ids"),
+        "base_binding_constraint": solution.get("base_binding_constraint"),
+        "stress_binding_constraint": solution.get("stress_binding_constraint"),
+    }
+    weights = {
+        f"base_{prefix}_id": 0.25,
+        f"stress_{prefix}_id": 0.25,
+        "base_feasible_ids": 0.15,
+        "stress_feasible_ids": 0.15,
+        "base_binding_constraint": 0.10,
+        "stress_binding_constraint": 0.10,
+    }
+    return sum(
+        weight
+        for key, weight in weights.items()
+        if payload.get(key) == expected.get(key)
+    )
+
+
 def _score_t5(gt_answer: str, response: str, assets: list[str] = None, **kw) -> float:
     return _score_t4(gt_answer, response, assets=assets)
 
@@ -538,6 +572,8 @@ def score_response(
             return _score_t3_constraint_v2(llm_response, metadata or {})
         if base_tid == "T4":
             return _score_t4_constraint_v2(llm_response, metadata or {})
+    if template_version == "constraint-decision-v2" and base_tid in {"T3", "T4"}:
+        return _score_constraint_decision(llm_response, metadata or {}, base_tid)
     scorer = _SCORERS.get(base_tid)
     if scorer is None:
         return 0.0

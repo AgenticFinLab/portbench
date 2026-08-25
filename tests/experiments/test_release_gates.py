@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from portbench.experiments.config import ExperimentConfig
 from portbench.experiments.gates import _check_episode_logs, evaluate_qa_validation
 from portbench.qa_eval.paths import qa_template_dir
@@ -37,7 +39,11 @@ def test_qa_validation_gate_requires_complete_and_variable_scores(tmp_path):
             records = [
                 {
                     "qa_id": f"{template}-{index}",
-                    "score": 0.6 if index % 2 else 0.8,
+                    "score": (
+                        (0.5 if index % 2 else 0.7)
+                        if spec.provider == "tencent"
+                        else (0.7 if index % 2 else 0.9)
+                    ),
                     "template_version": "constraint-v2",
                 }
                 for index in range(20)
@@ -48,6 +54,7 @@ def test_qa_validation_gate_requires_complete_and_variable_scores(tmp_path):
             )
     verdict = evaluate_qa_validation(config)
     assert verdict["passed"] is True
+    assert verdict["template_mean_ranges"] == pytest.approx({"T3": 0.2, "T4": 0.2})
 
 
 def test_qa_validation_gate_rejects_near_perfect_locked_test_pilot(tmp_path):

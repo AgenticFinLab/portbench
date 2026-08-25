@@ -120,13 +120,23 @@ def _load_qa_pairs(dataset_path: str, split: str) -> list[dict]:
     return pairs
 
 
-def _apply_freeze_manifest(pairs: list[dict], manifest_path: str) -> list[dict]:
-    """Select and verify the locked constraint-v2 test items before any call."""
+def _apply_freeze_manifest(
+    pairs: list[dict],
+    manifest_path: str,
+    expected_template_version: str = "",
+) -> list[dict]:
+    """Select and verify the locked constraint test items before any call."""
     if not manifest_path:
         return pairs
     manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
-    if manifest.get("template_version") != "constraint-v2":
-        raise ValueError("QA freeze manifest must declare template_version=constraint-v2")
+    manifest_version = str(manifest.get("template_version", ""))
+    if manifest_version not in {
+        "constraint-v2",
+        "constraint-decision-v2",
+    }:
+        raise ValueError("QA freeze manifest has an unsupported template version")
+    if expected_template_version and manifest_version != expected_template_version:
+        raise ValueError("QA freeze manifest does not match the requested template version")
     indexed = {
         str(pair.get("qa_id", pair.get("id", ""))): pair
         for pair in pairs
@@ -180,13 +190,19 @@ def _build_eval_prompt(
     question = pair.get("question", "")
     tid = pair.get("template_id", pair.get("template", ""))
     meta = pair.get("metadata") or {}
-    use_constraint_v2 = template_version == "constraint-v2" and tid in ("T3", "T4")
+    use_constraint_template = template_version in {
+        "constraint-v2",
+        "constraint-decision-v2",
+    } and tid in (
+        "T3",
+        "T4",
+    )
     use_json = bool(t3t4_redesign or meta.get("t3t4_redesign")) and tid in (
         "T3",
         "T4",
         "T4_restricted",
     )
-    if use_constraint_v2:
+    if use_constraint_template:
         instructions = (
             "Instructions:\n"
             "- Reply with a single JSON object only.\n"
@@ -226,12 +242,17 @@ def _parse_qa_response(raw: str, template_version: str, template_id: str) -> dic
     response = str(raw or "").strip()
     if not response:
         raise ValueError("empty QA response")
-    if template_version != "constraint-v2":
+    if template_version not in {
+        "constraint-v2",
+        "constraint-decision-v2",
+    }:
         return {"raw_response": response}
     payload = json.loads(response)
     if not isinstance(payload, dict):
-        raise ValueError("constraint-v2 response must be a JSON object")
+        raise ValueError("constraint response must be a JSON object")
     base_tid = template_id.replace("_restricted", "")
+    if template_version == "constraint-decision-v2":
+        return _validate_constraint_decision_payload(payload, base_tid)
     if base_tid == "T3":
         required = {"position_size", "binding_constraint", "constraint_margins"}
     elif base_tid == "T4":
@@ -288,13 +309,51 @@ def _parse_qa_response(raw: str, template_version: str, template_id: str) -> dic
     return payload
 
 
+def _validate_constraint_decision_payload(payload: dict, template_id: str) -> dict:
+    """Validate the compact T3-D or T4-D decision response schema."""
+    prefix = "plan" if template_id == "T3" else "candidate"
+    required = {
+        f"base_{prefix}_id",
+        f"stress_{prefix}_id",
+        "base_feasible_ids",
+        "stress_feasible_ids",
+        "base_binding_constraint",
+        "stress_binding_constraint",
+    }
+    missing = required - set(payload)
+    if missing:
+        raise ValueError(f"constraint-decision response missing keys: {sorted(missing)}")
+    for key in (f"base_{prefix}_id", f"stress_{prefix}_id"):
+        if not isinstance(payload[key], str) or not payload[key]:
+            raise ValueError(f"constraint-decision {key} must be a non-empty string")
+    for key in ("base_feasible_ids", "stress_feasible_ids"):
+        values = payload[key]
+        if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
+            raise ValueError(f"constraint-decision {key} must be a list of strings")
+        if len(values) != len(set(values)):
+            raise ValueError(f"constraint-decision {key} must not repeat IDs")
+    for key in ("base_binding_constraint", "stress_binding_constraint"):
+        if not isinstance(payload[key], str) or not payload[key]:
+            raise ValueError(f"constraint-decision {key} must be a non-empty string")
+    return payload
+
+
+def _checkpoint_key(request: CallRequest) -> str:
+    """Use the complete effective QA request as the resume checkpoint key."""
+    return request.call_key
+
+
 class QAEvaluator:
     def __init__(self, cfg: ExperimentConfig, raw_yaml: Optional[str] = None):
         self.cfg = cfg
         self._raw_yaml = raw_yaml
 
         all_pairs = _load_qa_pairs(cfg.qa.dataset_path, cfg.qa.split)
-        all_pairs = _apply_freeze_manifest(all_pairs, cfg.qa.freeze_manifest)
+        all_pairs = _apply_freeze_manifest(
+            all_pairs,
+            cfg.qa.freeze_manifest,
+            cfg.qa.template_version,
+        )
 
         # Filter by templates (support both "template_id" and "template" field names)
         templates = set(cfg.qa.templates)
@@ -505,35 +564,12 @@ class QAEvaluator:
         is_restricted = template_id.endswith("_restricted")
         base_tid = template_id.replace("_restricted", "") if is_restricted else template_id
 
-        # Fast path: all pairs already evaluated → rebuild summary from results.jsonl
-        # (avoids stale zero-value summaries written by earlier broken resume runs).
-        if pairs and all(
-            f"{cfg.qa.template_version}:{template_id}:{p.get('qa_id', p.get('id', ''))}"
-            in completed_keys
-            for p in pairs
-        ):
-            summary = _rebuild_summary_from_results(t_dir, template_id)
-            if summary is not None:
-                # Overwrite stale summary.json with correct values
-                (t_dir / "summary.json").write_text(
-                    json.dumps(summary, indent=2), encoding="utf-8"
-                )
-                pbar.update(len(pairs))
-                tqdm.write(f"     {template_id} skipped (all {len(pairs)} cached)  accuracy={summary.get('accuracy', 0):.3f}")
-                return summary
-
         scores: list[float] = []
         by_regime: dict[str, list[float]] = {}
         results_lock = threading.Lock()
 
         def _eval_one(pair: dict) -> None:
             qa_id = pair.get("qa_id", pair.get("id", ""))
-            ck = f"{cfg.qa.template_version}:{template_id}:{qa_id}"
-
-            if ck in completed_keys:
-                pbar.update(1)
-                return
-
             t0 = time.time()
             try:
                 eval_pair = (
@@ -565,6 +601,10 @@ class QAEvaluator:
                     },
                     data_version=str((pair.get("metadata") or {}).get("generator_version", "")),
                 )
+                ck = _checkpoint_key(request)
+                if ck in completed_keys:
+                    pbar.update(1)
+                    return
                 _, call_artifact, _ = artifact_store.complete_or_call(
                     request,
                     parser_version=f"qa-{cfg.qa.template_version}-parser-v1",

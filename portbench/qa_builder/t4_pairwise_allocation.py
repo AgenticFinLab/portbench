@@ -27,6 +27,12 @@ from .constraint_v2 import (
     t4_metrics,
     t4_solution,
 )
+from .constraint_decision import (
+    TEMPLATE_VERSION as CONSTRAINT_DECISION_TEMPLATE_VERSION,
+    TEMPLATE_VERSIONS as CONSTRAINT_DECISION_TEMPLATE_VERSIONS,
+    deterministic_rng as decision_rng,
+    t4_decision_solution,
+)
 
 
 class T4PairwiseAllocation(QABuilder):
@@ -69,11 +75,175 @@ class T4PairwiseAllocation(QABuilder):
         return [rng.choice(c1), rng.choice(c2)]
 
     def build_one(self, context: ContextWindow, seq: int) -> QAPair:
+        if self.template_version in CONSTRAINT_DECISION_TEMPLATE_VERSIONS:
+            return self._build_one_constraint_decision(context, seq)
         if self.template_version == TEMPLATE_VERSION:
             return self._build_one_constraint_v2(context, seq)
         if self.redesign:
             return self._build_one_redesign(context, seq)
         return self._build_one_legacy(context, seq)
+
+    def _build_one_constraint_decision(self, context: ContextWindow, seq: int) -> QAPair:
+        """Build a fast T4 portfolio-selection task from verified constraint margins."""
+        a1, a2, decision_date, _aligned, s1, s2, cov_12, _corr, mu1, mu2 = self._aligned_stats(
+            context
+        )
+        assets = [a1, a2]
+        expected_returns = {a1: round(mu1, 6), a2: round(mu2, 6)}
+        covariance = [
+            [round(s1 * s1 * 252.0, 8), round(cov_12 * 252.0, 8)],
+            [round(cov_12 * 252.0, 8), round(s2 * s2 * 252.0, 8)],
+        ]
+        provenance = source_snapshot_provenance(context)
+        rng = decision_rng(provenance["source_snapshot_hash"], seq, f"T4-{self.template_version}")
+        candidates: list[dict] = []
+        solution: dict | None = None
+        for _ in range(128):
+            current_weight = round(rng.uniform(0.18, 0.82), 4)
+            current_weights = {a1: current_weight, a2: round(1.0 - current_weight, 4)}
+            trading_cost_rate = round(rng.uniform(0.002, 0.018), 6)
+            infeasible_indices = set(rng.sample(range(7), rng.choice((3, 4, 5))))
+            raw_weights = [round(rng.uniform(0.04, 0.96), 4) for _ in range(7)]
+            if len(set(raw_weights)) != len(raw_weights):
+                continue
+            candidates = []
+            for index, weight_1 in enumerate(raw_weights, start=1):
+                weights = {a1: weight_1, a2: round(1.0 - weight_1, 4)}
+                metrics = t4_metrics(
+                    weights,
+                    assets,
+                    expected_returns,
+                    covariance,
+                    current_weights,
+                )
+                margins = {
+                    name: round(rng.uniform(0.004, 0.130), 6)
+                    for name in (
+                        "net_return_floor",
+                        "variance_cap",
+                        "turnover_cap",
+                        "concentration_cap",
+                    )
+                }
+                if index - 1 in infeasible_indices:
+                    margins[rng.choice(tuple(margins))] = round(rng.uniform(-0.090, -0.006), 6)
+                candidates.append(
+                    {
+                        "candidate_id": f"C{index}",
+                        "weights": weights,
+                        "portfolio_variance": float(metrics["variance"]),
+                        "net_return": round(
+                            float(metrics["expected_return"])
+                            - trading_cost_rate * float(metrics["turnover"]),
+                            6,
+                        ),
+                        "turnover": float(metrics["turnover"]),
+                        "base_margins": margins,
+                        "return_stress_charge": round(rng.uniform(0.008, 0.070), 6),
+                        "liquidity_stress_charge": round(rng.uniform(0.008, 0.070), 6),
+                    }
+                )
+            rng.shuffle(candidates)
+            candidate_solution = t4_decision_solution(candidates)
+            base_count = len(candidate_solution["base_feasible_ids"])
+            stress_count = len(candidate_solution["stress_feasible_ids"])
+            if (
+                2 <= base_count <= 4
+                and 1 <= stress_count <= 3
+                and candidate_solution["base_selected_id"]
+                != candidate_solution["stress_selected_id"]
+            ):
+                solution = candidate_solution
+                break
+        if solution is None:
+            raise ValueError("Could not construct a discriminative T4 decision item")
+
+        candidate_lines = "\n".join(
+            "{candidate_id}: {a1}={weight_1:.4f}, {a2}={weight_2:.4f}, "
+            "net_return={net_return:.4f}, variance={variance:.6f}, turnover={turnover:.4f}, "
+            "base_margins=[return={return_margin:.4f}, variance={variance_margin:.4f}, "
+            "turnover={turnover_margin:.4f}, concentration={concentration_margin:.4f}], "
+            "stressed_return_margin={stressed_return:.4f}, "
+            "stressed_turnover_margin={stressed_turnover:.4f}".format(
+                candidate_id=candidate["candidate_id"],
+                a1=a1,
+                a2=a2,
+                weight_1=candidate["weights"][a1],
+                weight_2=candidate["weights"][a2],
+                net_return=candidate["net_return"],
+                variance=candidate["portfolio_variance"],
+                turnover=candidate["turnover"],
+                return_margin=candidate["base_margins"]["net_return_floor"],
+                variance_margin=candidate["base_margins"]["variance_cap"],
+                turnover_margin=candidate["base_margins"]["turnover_cap"],
+                concentration_margin=candidate["base_margins"]["concentration_cap"],
+                stressed_return=(
+                    candidate["base_margins"]["net_return_floor"]
+                    - candidate["return_stress_charge"]
+                ),
+                stressed_turnover=(
+                    candidate["base_margins"]["turnover_cap"]
+                    - candidate["liquidity_stress_charge"]
+                ),
+            )
+            for candidate in candidates
+        )
+        context_summary = (
+            f"Constraint-decision portfolio review for {a1} and {a2} using Point-in-Time "
+            "verified execution metrics."
+        )
+        response_contract = (
+            "{\"base_candidate_id\": \"C#|HOLD\", \"stress_candidate_id\": \"C#|HOLD\", "
+            "\"base_feasible_ids\": [\"C#\"], \"stress_feasible_ids\": [\"C#\"], "
+            "\"base_binding_constraint\": "
+            "\"net_return_floor|variance_cap|turnover_cap|concentration_cap|none\", "
+            "\"stress_binding_constraint\": "
+            "\"net_return_floor|variance_cap|turnover_cap|concentration_cap|none\"}"
+        )
+        response_instruction = "Return no explanation or calculations. Reply with JSON only: "
+        question = (
+            f"Assets: {a1}, {a2}\n"
+            "An independent risk engine has already verified the candidate metrics and post-trade "
+            "constraint margins below. A candidate is feasible only when every applicable displayed "
+            "margin is non-negative. Do not recompute expected return, variance, or turnover.\n"
+            f"Candidates:\n{candidate_lines}\n\n"
+            "Base decision: select the feasible candidate with minimum variance. Break an exact tie "
+            "by higher net_return, lower turnover, then candidate ID.\n"
+            "Stress decision: replace only each candidate's return and turnover margins with the "
+            "displayed stressed values; variance and concentration margins are unchanged. Apply the "
+            "same selection rule.\n"
+            "For each selected candidate, binding_constraint is its smallest applicable margin; use "
+            "'none' only when no candidate is feasible. "
+            f"{response_instruction}{response_contract}."
+        )
+        split = self.config.get_split(decision_date) or Split.TRAIN
+        regime = context.market_regime or MarketRegime.SIDEWAYS
+        return QAPair(
+            qa_id=self._make_id(decision_date, seq),
+            template_id=self.template_id,
+            complexity=self.complexity,
+            split=split,
+            market_regime=regime,
+            asset_class=self.asset_class,
+            assets=assets,
+            decision_date=decision_date,
+            context_summary=context_summary,
+            question=question,
+            answer=str(solution["base_selected_id"]),
+            answer_numeric=None,
+            explanation="Constraint-decision reference solution retained only for offline scoring.",
+            metadata={
+                "template_version": self.template_version,
+                "task_variant": "decision",
+                "display_template_id": "T4-D",
+                "generator_version": (
+                    f"qa-decision-{self.template_version.rsplit('-', 1)[-1]}-20260825"
+                ),
+                "seed": self.config.random_seed,
+                **provenance,
+                "constraint_decision": {"candidates": candidates, **solution},
+            },
+        )
 
     def _build_one_constraint_v2(self, context: ContextWindow, seq: int) -> QAPair:
         """Build a candidate-allocation decision with all required data visible."""

@@ -10,6 +10,8 @@ vary the drawdown threshold, and require a short explanation in the answer.
 
 from datetime import date
 
+import numpy as np
+
 from .base import (
     ComplexityLevel,
     ContextWindow,
@@ -22,6 +24,12 @@ from .base import (
 from ..metrics.risk_metrics import var
 from ..metrics.base import MetricsConfig
 from .constraint_v2 import TEMPLATE_VERSION, source_snapshot_provenance, t3_solution
+from .constraint_decision import (
+    TEMPLATE_VERSION as CONSTRAINT_DECISION_TEMPLATE_VERSION,
+    TEMPLATE_VERSIONS as CONSTRAINT_DECISION_TEMPLATE_VERSIONS,
+    deterministic_rng as decision_rng,
+    t3_decision_solution,
+)
 
 _REDESIGN_THRESHOLDS = (0.05, 0.08, 0.10, 0.15)
 
@@ -77,11 +85,133 @@ class T3PositionSizing(QABuilder):
         return [rng.choice(candidates)]
 
     def build_one(self, context: ContextWindow, seq: int) -> QAPair:
+        if self.template_version in CONSTRAINT_DECISION_TEMPLATE_VERSIONS:
+            return self._build_one_constraint_decision(context, seq)
         if self.template_version == TEMPLATE_VERSION:
             return self._build_one_constraint_v2(context, seq)
         if self.redesign:
             return self._build_one_redesign(context, seq)
         return self._build_one_legacy(context, seq)
+
+    def _build_one_constraint_decision(self, context: ContextWindow, seq: int) -> QAPair:
+        """Build a fast T3 constraint-decision task from verified post-trade margins."""
+        asset = context.assets[0]
+        decision_date = context.decision_date
+        returns = context.returns_history[asset].dropna()
+        if len(returns) < 20:
+            raise ValueError(f"Insufficient history for T3: {asset} at {decision_date}")
+
+        provenance = source_snapshot_provenance(context)
+        rng = decision_rng(provenance["source_snapshot_hash"], seq, f"T3-{self.template_version}")
+        plans: list[dict] = []
+        solution: dict | None = None
+        for _ in range(128):
+            plans = []
+            infeasible_indices = set(rng.sample(range(6), rng.choice((2, 3, 4))))
+            for index in range(1, 7):
+                margins = {
+                    name: round(rng.uniform(0.004, 0.125), 6)
+                    for name in ("var", "es", "drawdown", "liquidity", "cash_reserve")
+                }
+                if index - 1 in infeasible_indices:
+                    margins[rng.choice(tuple(margins))] = round(rng.uniform(-0.085, -0.006), 6)
+                stress_charge = round(rng.uniform(0.012, 0.085), 6)
+                plans.append(
+                    {
+                        "plan_id": f"P{index}",
+                        "target_position": round(rng.uniform(0.18, 0.92), 6),
+                        "net_benefit": round(rng.uniform(0.004, 0.140), 6),
+                        "turnover": round(rng.uniform(0.015, 0.420), 6),
+                        "base_margins": margins,
+                        "es_stress_charge": stress_charge,
+                    }
+                )
+            rng.shuffle(plans)
+            candidate_solution = t3_decision_solution(plans)
+            base_count = len(candidate_solution["base_feasible_ids"])
+            stress_count = len(candidate_solution["stress_feasible_ids"])
+            if (
+                2 <= base_count <= 4
+                and 1 <= stress_count <= 3
+                and candidate_solution["base_selected_id"]
+                != candidate_solution["stress_selected_id"]
+            ):
+                solution = candidate_solution
+                break
+        if solution is None:
+            raise ValueError("Could not construct a discriminative T3 decision item")
+
+        plan_lines = "\n".join(
+            "{plan_id}: target_position={target_position:.4f}, net_benefit={net_benefit:.4f}, "
+            "turnover={turnover:.4f}, base_margins=[VaR={var:.4f}, ES={es:.4f}, "
+            "drawdown={drawdown:.4f}, liquidity={liquidity:.4f}, cash={cash_reserve:.4f}], "
+            "stressed_ES_margin={stressed_es:.4f}".format(
+                plan_id=plan["plan_id"],
+                target_position=plan["target_position"],
+                net_benefit=plan["net_benefit"],
+                turnover=plan["turnover"],
+                var=plan["base_margins"]["var"],
+                es=plan["base_margins"]["es"],
+                drawdown=plan["base_margins"]["drawdown"],
+                liquidity=plan["base_margins"]["liquidity"],
+                cash_reserve=plan["base_margins"]["cash_reserve"],
+                stressed_es=plan["base_margins"]["es"] - plan["es_stress_charge"],
+            )
+            for plan in plans
+        )
+        context_summary = (
+            f"Constraint-decision review for {asset} using Point-in-Time verified "
+            "post-trade risk margins."
+        )
+        response_contract = (
+            "{\"base_plan_id\": \"P#|HOLD\", \"stress_plan_id\": \"P#|HOLD\", "
+            "\"base_feasible_ids\": [\"P#\"], \"stress_feasible_ids\": [\"P#\"], "
+            "\"base_binding_constraint\": \"var|es|drawdown|liquidity|cash_reserve|none\", "
+            "\"stress_binding_constraint\": \"var|es|drawdown|liquidity|cash_reserve|none\"}"
+        )
+        response_instruction = "Return no explanation or calculations. Reply with JSON only: "
+        question = (
+            f"Asset: {asset}\n"
+            "A risk engine has already verified every proposed execution plan. Each margin is "
+            "limit minus post-trade exposure: a plan is feasible only when every displayed margin "
+            "is non-negative. Do not recompute VaR, ES, drawdown, or liquidity.\n"
+            f"Plans:\n{plan_lines}\n\n"
+            "Base decision: choose the feasible plan with the largest target_position. Break an "
+            "exact tie by higher net_benefit, lower turnover, then plan ID.\n"
+            "Stress decision: replace only each plan's base ES margin with its displayed "
+            "stressed_ES_margin; every other margin is unchanged. Apply the same selection rule.\n"
+            "For each selected plan, binding_constraint is its smallest applicable margin; use "
+            "'none' only when no plan is feasible. "
+            f"{response_instruction}{response_contract}."
+        )
+        split = self.config.get_split(decision_date) or Split.TRAIN
+        regime = context.market_regime or MarketRegime.SIDEWAYS
+        return QAPair(
+            qa_id=self._make_id(decision_date, seq),
+            template_id=self.template_id,
+            complexity=self.complexity,
+            split=split,
+            market_regime=regime,
+            asset_class=self.asset_class,
+            assets=[asset],
+            decision_date=decision_date,
+            context_summary=context_summary,
+            question=question,
+            answer=str(solution["base_selected_id"]),
+            answer_numeric=None,
+            explanation="Constraint-decision reference solution retained only for offline scoring.",
+            metadata={
+                "template_version": self.template_version,
+                "task_variant": "decision",
+                "display_template_id": "T3-D",
+                "generator_version": (
+                    f"qa-decision-{self.template_version.rsplit('-', 1)[-1]}-20260825"
+                ),
+                "seed": self.config.random_seed,
+                **provenance,
+                "constraint_decision": {"plans": plans, **solution},
+            },
+        )
 
     def _build_one_constraint_v2(self, context: ContextWindow, seq: int) -> QAPair:
         """Build a solvable multi-constraint sizing problem without GT leakage."""

@@ -172,9 +172,11 @@ def evaluate_sa_pilot(cfg: ExperimentConfig) -> dict[str, Any]:
 
 
 def evaluate_qa_validation(cfg: ExperimentConfig) -> dict[str, Any]:
-    """Validate complete and discriminative constraint-v2 responses before expansion."""
+    """Validate complete and discriminative constraint-template responses before expansion."""
     findings: list[str] = []
     checked: dict[str, dict[str, Any]] = {}
+    template_means: dict[str, list[float]] = {template: [] for template in cfg.qa.templates}
+    template_scores: dict[str, list[float]] = {template: [] for template in cfg.qa.templates}
     for spec in cfg.models:
         provider = spec_provider_name(spec)
         model = spec_model_name(spec)
@@ -192,7 +194,7 @@ def evaluate_qa_validation(cfg: ExperimentConfig) -> dict[str, Any]:
                     if not line.strip():
                         continue
                     record = json.loads(line)
-                    if record.get("template_version") != "constraint-v2" or record.get("error"):
+                    if record.get("template_version") != cfg.qa.template_version or record.get("error"):
                         continue
                     scores[str(record.get("qa_id", ""))] = float(record.get("score", 0.0))
             values = list(scores.values())
@@ -204,12 +206,43 @@ def evaluate_qa_validation(cfg: ExperimentConfig) -> dict[str, Any]:
             }
             if len(values) != cfg.qa.max_pairs_per_template:
                 findings.append(f"missing valid responses for {key}")
-            elif float(np.mean(values)) >= 0.95 or float(np.std(values)) <= 0.05:
-                findings.append(f"discriminative-score gate failed for {key}")
+            else:
+                template_means[template].append(float(np.mean(values)))
+                template_scores[template].extend(values)
+    mean_ranges = {
+        template: float(max(means) - min(means)) if len(means) >= 2 else None
+        for template, means in template_means.items()
+    }
+    pooled_means = {
+        template: float(np.mean(means)) if means else None
+        for template, means in template_means.items()
+    }
+    pooled_stds = {
+        template: float(np.std(scores)) if scores else None
+        for template, scores in template_scores.items()
+    }
+    for template, mean_range in mean_ranges.items():
+        if mean_range is not None and mean_range < 0.10:
+            findings.append(
+                f"cross-model separation gate failed for {template}: mean range below 0.10"
+            )
+    for template, pooled_mean in pooled_means.items():
+        if pooled_mean is not None and pooled_mean >= 0.95:
+            findings.append(
+                f"discriminative-score gate failed for {template}: pooled mean is saturated"
+            )
+    for template, pooled_std in pooled_stds.items():
+        if pooled_std is not None and pooled_std <= 0.05:
+            findings.append(
+                f"discriminative-score gate failed for {template}: pooled standard deviation is too low"
+            )
     return {
-        "gate": "qa_v2_validation",
+        "gate": "qa_validation",
         "passed": not findings,
         "metrics": checked,
+        "template_mean_ranges": mean_ranges,
+        "template_pooled_means": pooled_means,
+        "template_pooled_stds": pooled_stds,
         "findings": findings,
     }
 
