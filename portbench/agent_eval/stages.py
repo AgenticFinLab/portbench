@@ -23,7 +23,6 @@ To use a real LLM:
 """
 
 import json
-import math
 import re
 from typing import Any, Optional
 import numpy as np
@@ -397,10 +396,8 @@ def _parse_stage_payload(
     if stage_name == "S1":
         views = payload.get("asset_views")
         confidence = payload.get("confidence")
-        if not isinstance(views, dict):
-            raise ValueError("S1 requires an asset_views object")
-        if not set(views).issubset(assets):
-            raise ValueError("S1 asset views may only reference visible assets")
+        if not isinstance(views, dict) or not assets.issubset(views):
+            raise ValueError("S1 requires views for every visible asset")
         if not isinstance(confidence, (int, float)) or not 0.0 <= float(confidence) <= 1.0:
             raise ValueError("S1 confidence must be in [0, 1]")
         for value in views.values():
@@ -411,31 +408,22 @@ def _parse_stage_payload(
         strengths = payload.get("strengths")
         if not isinstance(signals, dict) or not isinstance(strengths, dict):
             raise ValueError("S2 requires signals and strengths objects")
-        if not set(signals).issubset(assets) or not set(strengths).issubset(assets):
-            raise ValueError("S2 signals and strengths may only reference visible assets")
-        if set(signals) != set(strengths):
-            raise ValueError("S2 signals and strengths must select the same assets")
+        if not assets.issubset(signals) or not assets.issubset(strengths):
+            raise ValueError("S2 requires signals and strengths for every visible asset")
         if any(str(value) not in {"buy", "sell", "hold"} for value in signals.values()):
             raise ValueError("S2 signals must be buy, sell, or hold")
         for value in strengths.values():
             if not isinstance(value, (int, float)) or not 0.0 <= float(value) <= 1.0:
                 raise ValueError("S2 strengths must be in [0, 1]")
     elif stage_name == "S3":
-        scores = payload.get("allocation_scores")
-        if not isinstance(scores, dict) or not scores:
-            raise ValueError("S3 requires at least one positive visible-asset allocation score")
-        if not set(scores).issubset(assets):
-            raise ValueError("S3 allocation scores may only reference visible assets")
-        if len(scores) > 12:
-            raise ValueError("S3 may select at most 12 positive-score assets")
-        values = list(scores.values())
-        if any(
-            not isinstance(value, (int, float))
-            or not math.isfinite(float(value))
-            or float(value) <= 0.0
-            for value in values
-        ):
-            raise ValueError("S3 allocation scores must be finite positive numbers")
+        weights = payload.get("weights")
+        if not isinstance(weights, dict) or not assets.issubset(weights):
+            raise ValueError("S3 requires weights for every visible asset")
+        values = list(weights.values())
+        if any(not isinstance(value, (int, float)) or float(value) < 0.0 for value in values):
+            raise ValueError("S3 weights must be non-negative numbers")
+        if not 0.999 <= sum(float(value) for value in values) <= 1.001:
+            raise ValueError("S3 weights must sum to one")
     return payload
 
 
@@ -471,19 +459,11 @@ def _call_with_json_retry(
                 return _parse_stage_payload(raw, stage_name=stage_name, snapshot=snapshot)
             return _extract_json(raw)
 
-        response_schema = {"type": "object", "stage": stage_name}
-        parser_version = f"{stage_name}-json-v4"
-        if stage_name == "S1":
-            response_schema["asset_view_representation"] = "sparse-neutral-v1"
-            parser_version = "S1-sparse-json-v5"
-        if stage_name == "S3":
-            response_schema["allocation_representation"] = "positive-scores-v1"
-            parser_version = "S3-scores-json-v5"
         parsed, raw = adapter.complete_json(
             prompt,
             parse=parse,
-            parser_version=parser_version,
-            response_schema=response_schema,
+            parser_version=f"{stage_name}-json-v4",
+            response_schema={"type": "object", "stage": stage_name},
             use_tools=use_tools,
             snapshot=snapshot,
         )
@@ -1089,7 +1069,9 @@ class S3WeightOptimization(PipelineStage):
                 refused=True,
             )
         try:
-            raw_weights_src = parsed["allocation_scores"]
+            raw_weights_src = parsed.get("weights")
+            if not isinstance(raw_weights_src, dict):
+                raw_weights_src = parsed  # flat dict fallback: {"SPY": 0.5, ...}
             raw_weights = {}
             for a in assets:
                 try:
@@ -1103,7 +1085,7 @@ class S3WeightOptimization(PipelineStage):
                 n = len(assets)
                 weights = {a: round(1.0 / n, 4) for a in assets}
             else:
-                weights = {a: w / total for a, w in raw_weights.items()}
+                weights = {a: round(w / total, 4) for a, w in raw_weights.items()}
 
             def _safe_float_s3(v, default=0.0):
                 try:

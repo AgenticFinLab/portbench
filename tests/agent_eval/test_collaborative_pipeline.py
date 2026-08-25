@@ -101,15 +101,6 @@ class CollaborationAdapter(AgentAdapter):
                     "macro_summary": "stable",
                 }
             )
-        if '"allocation_scores"' in prompt:
-            return json.dumps(
-                {
-                    "allocation_scores": {"SPY": 0.6, "BIL": 0.4},
-                    "expected_return": 0.06,
-                    "expected_vol": 0.11,
-                    "sharpe_estimate": 0.55,
-                }
-            )
         if '"signals"' in prompt:
             return json.dumps(
                 {

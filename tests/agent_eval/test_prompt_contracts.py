@@ -32,7 +32,6 @@ def test_s1_json_only_without_tools():
     )
     assert "Reply with EXACTLY ONE JSON object and nothing else" in prompt
     assert "You MAY call the provided tools" not in prompt
-    assert 'omitted from\n"asset_views" is deterministically interpreted as neutral' in prompt
 
 
 def test_s1_tools_then_json():

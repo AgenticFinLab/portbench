@@ -141,9 +141,10 @@ def build_s1_prompt(
         if snapshot.news_text
         else ""
     )
+    asset_view_fields = ", ".join(f"{_quote(a)}: <float in [-1, 1]>" for a in assets)
     schema = _schema_block(
         [
-            '  "asset_views": { "ASSET": <float in [-1, 1]> },',
+            f'  "asset_views": {{ {asset_view_fields} }},',
             '  "detected_regime": "<bull|bear|sideways|high-volatility>",',
             '  "confidence": <float in [0, 1]>,',
             '  "macro_summary": "<one sentence>"',
@@ -162,12 +163,7 @@ Current market regime context: {_display_regime(snapshot.market_regime)}
 {news_block}
 TASK: Interpret the market data and provide structured asset views.
 
-Return a sparse set of material asset views. Any visible asset omitted from
-"asset_views" is deterministically interpreted as neutral (0.0). Only use
-visible asset identifiers and do not invent assets. You may include an
-explicit neutral 0.0 view, but do not need to list every neutral asset.
-
-For each reported asset, assign a sentiment score in [-1.0, +1.0]:
+For each asset, assign a sentiment score in [-1.0, +1.0]:
   +1.0 = strongly bullish (expect strong outperformance)
    0.0 = neutral
   -1.0 = strongly bearish (expect significant underperformance)
@@ -197,10 +193,12 @@ def build_s2_prompt(
         if snapshot.news_text
         else ""
     )
+    sig_fields = ", ".join(f'{_quote(a)}: "<buy|hold|sell>"' for a in assets)
+    str_fields = ", ".join(f"{_quote(a)}: <float in [0, 1]>" for a in assets)
     schema = _schema_block(
         [
-            '  "signals": {"SELECTED_ASSET": "<buy|sell>", ...},',
-            '  "strengths": {"SELECTED_ASSET": <float in [0, 1]>, ...},',
+            f'  "signals": {{ {sig_fields} }},',
+            f'  "strengths": {{ {str_fields} }},',
             '  "reasoning": "<one sentence>"',
         ]
     )
@@ -221,8 +219,6 @@ Rules:
 
 Use your judgement to refine signals based on regime and macro context.
 Signal strength should reflect conviction (0.0 = low, 1.0 = high).
-Return only non-hold signals. Omitted visible assets are interpreted as hold with strength 0.5.
-The signals and strengths objects must contain exactly the same selected assets.
 
 {schema}
 
@@ -241,20 +237,19 @@ def build_s3_prompt(
     corr_block: str,
     use_tools: bool = False,
 ) -> str:
-    """Prompt for Stage 3: sparse relative allocation scores."""
+    """Prompt for Stage 3: portfolio weight allocation summing to 1.0."""
     signals_str = "\n".join(
         f"  {a}: signal={s2.signals[a]}, strength={s2.strengths.get(a, 0.5):.2f}"
         for a in assets
     )
     current_w_str = ", ".join(
-        f"{asset}={weight:.4f}"
-        for asset, weight in snapshot.current_weights.items()
-        if abs(float(weight)) > 1e-8
-    ) or "none"
+        f"{a}={w:.3f}" for a, w in snapshot.current_weights.items()
+    )
     corr_section = f"\n{corr_block}\n" if corr_block else ""
+    weight_fields = ", ".join(f"{_quote(a)}: <float in [0, 1]>" for a in assets)
     schema = _schema_block(
         [
-            '  "allocation_scores": {"SELECTED_ASSET": <positive decimal>, ...},',
+            f'  "weights": {{ {weight_fields} }},',
             '  "expected_return": <annualized decimal, e.g. 0.08>,',
             '  "expected_vol": <annualized decimal, e.g. 0.12>,',
             '  "sharpe_estimate": <decimal>',
@@ -269,13 +264,11 @@ Current portfolio weights: {current_w_str}
 Portfolio NAV: ${snapshot.portfolio_value:,.0f}
 Market regime: {_display_regime(snapshot.market_regime)}
 {corr_section}
-TASK: Select a sparse portfolio allocation based on the signals above.
+TASK: Allocate portfolio weights based on the signals above.
 
 Constraints:
-  - allocation_scores must be finite, strictly positive decimal numbers
-  - Do not normalize allocation_scores; the deterministic environment normalizes their relative magnitudes into target weights
-  - Return only selected assets in allocation_scores; omitted visible assets receive a target weight of 0.0
-  - Select at most 12 assets
+  - All weights must be in [0.0, 1.0]
+  - Weights must sum to exactly 1.0
   - "sell" signals should receive reduced weight (ideally 0.0)
   - "buy" signals should receive increased weight
   - Minimize unnecessary turnover from current weights
