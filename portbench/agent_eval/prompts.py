@@ -193,12 +193,10 @@ def build_s2_prompt(
         if snapshot.news_text
         else ""
     )
-    sig_fields = ", ".join(f'{_quote(a)}: "<buy|hold|sell>"' for a in assets)
-    str_fields = ", ".join(f"{_quote(a)}: <float in [0, 1]>" for a in assets)
     schema = _schema_block(
         [
-            f'  "signals": {{ {sig_fields} }},',
-            f'  "strengths": {{ {str_fields} }},',
+            '  "signals": {"SELECTED_ASSET": "<buy|sell>", ...},',
+            '  "strengths": {"SELECTED_ASSET": <float in [0, 1]>, ...},',
             '  "reasoning": "<one sentence>"',
         ]
     )
@@ -219,6 +217,8 @@ Rules:
 
 Use your judgement to refine signals based on regime and macro context.
 Signal strength should reflect conviction (0.0 = low, 1.0 = high).
+Return only non-hold signals. Omitted visible assets are interpreted as hold with strength 0.5.
+The signals and strengths objects must contain exactly the same selected assets.
 
 {schema}
 
@@ -269,6 +269,7 @@ Constraints:
   - All weights must be in [0.0, 1.0]
   - Weights must sum to exactly 1.0
   - Return only assets with strictly positive weights; omitted visible assets receive 0.0
+  - Select at most 12 assets
   - "sell" signals should receive reduced weight (ideally 0.0)
   - "buy" signals should receive increased weight
   - Minimize unnecessary turnover from current weights

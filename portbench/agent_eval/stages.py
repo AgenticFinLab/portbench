@@ -408,8 +408,10 @@ def _parse_stage_payload(
         strengths = payload.get("strengths")
         if not isinstance(signals, dict) or not isinstance(strengths, dict):
             raise ValueError("S2 requires signals and strengths objects")
-        if not assets.issubset(signals) or not assets.issubset(strengths):
-            raise ValueError("S2 requires signals and strengths for every visible asset")
+        if not set(signals).issubset(assets) or not set(strengths).issubset(assets):
+            raise ValueError("S2 signals and strengths may only reference visible assets")
+        if set(signals) != set(strengths):
+            raise ValueError("S2 signals and strengths must select the same assets")
         if any(str(value) not in {"buy", "sell", "hold"} for value in signals.values()):
             raise ValueError("S2 signals must be buy, sell, or hold")
         for value in strengths.values():
@@ -421,6 +423,8 @@ def _parse_stage_payload(
             raise ValueError("S3 requires at least one positive visible-asset weight")
         if not set(weights).issubset(assets):
             raise ValueError("S3 weights may only reference visible assets")
+        if len(weights) > 12:
+            raise ValueError("S3 may select at most 12 positive-weight assets")
         values = list(weights.values())
         if any(not isinstance(value, (int, float)) or float(value) <= 0.0 for value in values):
             raise ValueError("S3 reported weights must be strictly positive numbers")
