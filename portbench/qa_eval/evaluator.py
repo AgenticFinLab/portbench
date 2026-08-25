@@ -363,7 +363,7 @@ class QAEvaluator:
             model_name = spec_model_name(spec)
             label = _spec_display_label(spec)
 
-            tqdm.write(f"\n[QA] ── Model {i+1}/{n_models}: {label} ──")
+            tqdm.write(f"\n[QA] Model {i+1}/{n_models}: {label}")
             tqdm.write(f"      templates: {', '.join(templates_order)}")
 
             try:
@@ -385,7 +385,7 @@ class QAEvaluator:
 
             mean_acc = model_summary.get("mean_accuracy", 0.0)
             n_done = model_summary.get("n_total", 0)
-            tqdm.write(f"[QA] ✓ {label}  mean_accuracy={mean_acc:.3f}  n={n_done}")
+            tqdm.write(f"[QA] completed {label}  mean_accuracy={mean_acc:.3f}  n={n_done}")
 
         pbar.close()
 
@@ -423,7 +423,7 @@ class QAEvaluator:
                 else cfg.qa.parallel_questions
             )
             pbar.set_description(f"{label.split('/')[-1]} {tid}")
-            tqdm.write(f"  → {tid}  ({len(pairs)} questions, parallel={model_parallel})")
+            tqdm.write(f"  -> {tid}  ({len(pairs)} questions, parallel={model_parallel})")
             t_summary = self._run_template(
                 adapter, provider, model_name, label, tid, pairs,
                 completed_keys, ckpt_lock, ckpt_path, pbar,
