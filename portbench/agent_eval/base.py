@@ -307,6 +307,7 @@ class S5Output:
     rebalance_needed: bool = False
     raw_llm_output: str = ""
     final_weights: dict[str, float] = field(default_factory=dict)
+    refused: bool = False
     schema_version: str = "pipeline-v1-deterministic"
     decision: dict[str, Any] = field(default_factory=dict)
     plan_scores: dict[str, float] = field(default_factory=dict)

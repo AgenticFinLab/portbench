@@ -24,10 +24,17 @@ from portbench.metrics.plan_outcome_scores import ceps_plan_score
 class AgenticS4PipelineStage(PipelineStage):
     """Expose agentic execution planning through the standard pipeline API."""
 
-    def __init__(self, adapter: Any, oracle_mode: str = "lookback", use_tools: bool = False) -> None:
+    def __init__(
+        self,
+        adapter: Any,
+        oracle_mode: str = "lookback",
+        use_tools: bool = False,
+        schema_version: str = S4S5_SCHEMA_AGENTIC,
+    ) -> None:
         self.adapter = adapter
         self.oracle_mode = oracle_mode
-        self._stage = AgenticS4Stage(adapter, use_tools=use_tools)
+        self.schema_version = schema_version
+        self._stage = AgenticS4Stage(adapter, use_tools=use_tools, schema_version=schema_version)
 
     @property
     def stage_id(self) -> StageID:
@@ -66,7 +73,7 @@ class AgenticS4PipelineStage(PipelineStage):
             turnover=float(bundle.result.turnover),
             raw_llm_output=bundle.raw_response,
             refused=bool((bundle.plan.metadata or {}).get("parse_error")),
-            schema_version=S4S5_SCHEMA_AGENTIC,
+            schema_version=self.schema_version,
             plan=asdict(bundle.plan),
             plan_scores=dict(bundle.plan_scores),
             outcome_scores=dict(bundle.outcome_scores),
@@ -79,9 +86,16 @@ class AgenticS4PipelineStage(PipelineStage):
 class AgenticS5PipelineStage(PipelineStage):
     """Expose agentic risk control through the standard pipeline API."""
 
-    def __init__(self, adapter: Any, profile: Any = None, use_tools: bool = False) -> None:
+    def __init__(
+        self,
+        adapter: Any,
+        profile: Any = None,
+        use_tools: bool = False,
+        schema_version: str = S4S5_SCHEMA_AGENTIC,
+    ) -> None:
         self.adapter = adapter
-        self._stage = AgenticS5Stage(adapter, use_tools=use_tools)
+        self.schema_version = schema_version
+        self._stage = AgenticS5Stage(adapter, use_tools=use_tools, schema_version=schema_version)
         self._var_limit = profile.var_limit if profile is not None else S5RiskMonitoring.VAR_LIMIT
         self._drawdown_limit = (
             -profile.max_drawdown_tolerance
@@ -127,7 +141,8 @@ class AgenticS5PipelineStage(PipelineStage):
             rebalance_needed=bundle.decision.action != "hold",
             raw_llm_output=bundle.raw_response,
             final_weights=dict(metrics.metadata.get("final_weights", {})),
-            schema_version=S4S5_SCHEMA_AGENTIC,
+            refused=bool((bundle.decision.metadata or {}).get("parse_error")),
+            schema_version=self.schema_version,
             decision=asdict(bundle.decision),
             plan_scores=dict(bundle.plan_scores),
             outcome_scores=dict(bundle.outcome_scores),

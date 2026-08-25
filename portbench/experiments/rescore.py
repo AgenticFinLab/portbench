@@ -67,17 +67,20 @@ def _s5_from_dict(d: dict):
 
 
 PIPELINE_V3 = "pipeline-v3-collab"
+PIPELINE_V4 = "pipeline-v4-sa-causal"
+_AGENTIC_PIPELINE_SCHEMAS = {PIPELINE_V3, PIPELINE_V4}
 
 
 def _episode_schema_version(episode: dict) -> str:
-    """Return pipeline-v3-collab when the log is agentic; never treat those as v1."""
-    if str(episode.get("schema_version") or "") == PIPELINE_V3:
-        return PIPELINE_V3
+    """Return the recorded agentic schema without treating it as pipeline-v1."""
+    episode_schema = str(episode.get("schema_version") or "")
+    if episode_schema in _AGENTIC_PIPELINE_SCHEMAS:
+        return episode_schema
     for record in episode.get("stages") or []:
         parsed = record.get("parsed_output") or {}
         version = str(parsed.get("schema_version") or "")
-        if version == PIPELINE_V3:
-            return PIPELINE_V3
+        if version in _AGENTIC_PIPELINE_SCHEMAS:
+            return version
         if record.get("stage_id") in {"S4", "S5"} and (
             parsed.get("plan") or parsed.get("decision") or parsed.get("plan_scores")
         ):
@@ -131,7 +134,7 @@ def _rescore_v3_s4_s5(
 ) -> tuple[float, float, dict, dict]:
     """Rescore agentic S4/S5 from logged plans; CEPS uses plan-quality only."""
     from ..agent_eval.s4_s5_bridge import run_s4_deterministic_from_weights
-    from ..agent_eval.s4_s5_stages import _reference_risk_decision
+    from ..agent_eval.s4_s5_stages import _reference_risk_decision, _snapshot_context
     from ..agent_eval.stages import S5RiskMonitoring
     from ..metrics.plan_outcome_scores import (
         ceps_outcome_score,
@@ -155,7 +158,11 @@ def _rescore_v3_s4_s5(
         target_weights, snapshot, current, nav
     )
     s4_plan = score_s4_plan_quality(
-        plan, ref_plan, target_weights=target_weights, current_weights=current
+        plan,
+        ref_plan,
+        target_weights=target_weights,
+        current_weights=current,
+        market_context=_snapshot_context(snapshot),
     )
     s4_out = score_s4_environment_outcome(fill, ref_fill)
     s4_score = ceps_plan_score(s4_plan, stage="S4")
@@ -274,7 +281,7 @@ def _rescore_episode(
     plan_outcome = {}
     outcome_scalars = {}
 
-    if schema == PIPELINE_V3:
+    if schema in _AGENTIC_PIPELINE_SCHEMAS:
         s4_parsed = (stages_by_id.get("S4") or {}).get("parsed_output") or {}
         s5_parsed = (stages_by_id.get("S5") or {}).get("parsed_output") or {}
         try:

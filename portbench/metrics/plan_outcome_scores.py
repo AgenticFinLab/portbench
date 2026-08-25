@@ -20,13 +20,13 @@ from portbench.agent_eval.contracts import (
 )
 
 S4_PLAN_QUALITY_KEYS: frozenset[str] = frozenset(
-    {"order_legality", "target_tracking", "plan_quality"}
+    {"order_legality", "target_tracking", "direction_consistency", "cost_awareness", "plan_quality"}
 )
 S4_ENV_OUTCOME_KEYS: frozenset[str] = frozenset(
     {"implementation_shortfall", "cost", "turnover", "filled_weight_error"}
 )
 S5_PLAN_QUALITY_KEYS: frozenset[str] = frozenset(
-    {"alert_identification", "action_choice", "corrective_compliance"}
+    {"alert_identification", "action_choice", "corrective_compliance", "adjustment_scale"}
 )
 S5_ENV_OUTCOME_KEYS: frozenset[str] = frozenset(
     {"cvar", "drawdown", "violation", "period_return"}
@@ -47,15 +47,21 @@ def ceps_plan_score(plan_scores: Optional[Mapping[str, float]], *, stage: str) -
     if stage == "S4":
         if "plan_quality" in scores:
             return _clip01(float(scores["plan_quality"]))
-        keys = [key for key in ("order_legality", "target_tracking") if key in scores]
-        return _clip01(_mean([float(scores[key]) for key in keys]))
+        weights = {
+            "order_legality": 0.20,
+            "target_tracking": 0.35,
+            "direction_consistency": 0.25,
+            "cost_awareness": 0.20,
+        }
+        return _clip01(sum(float(scores.get(key, 0.0)) * weight for key, weight in weights.items()))
     if stage == "S5":
-        keys = [
-            key
-            for key in ("alert_identification", "action_choice", "corrective_compliance")
-            if key in scores
-        ]
-        return _clip01(_mean([float(scores[key]) for key in keys]))
+        weights = {
+            "alert_identification": 0.30,
+            "action_choice": 0.30,
+            "corrective_compliance": 0.25,
+            "adjustment_scale": 0.15,
+        }
+        return _clip01(sum(float(scores.get(key, 0.0)) * weight for key, weight in weights.items()))
     return 0.0
 
 
@@ -103,12 +109,15 @@ def score_s4_plan_quality(
     target_weights: Optional[Mapping[str, float]] = None,
     *,
     current_weights: Optional[Mapping[str, float]] = None,
+    market_context: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, float]:
     """Subscores for the agent execution *plan* (not the fill)."""
     if (plan.metadata or {}).get("parse_error"):
         return {
             "order_legality": 0.0,
             "target_tracking": 0.0,
+            "direction_consistency": 0.0,
+            "cost_awareness": 0.0,
             "plan_quality": 0.0,
         }
     current = (
@@ -118,6 +127,7 @@ def score_s4_plan_quality(
     )
     orders = plan.normalized_orders()
     legal = 0.0
+    direction = 0.0
     if not orders and not (plan.metadata or {}).get("target_weights"):
         # Empty plan is legal only if reference is also empty / scale-only
         legal = 1.0 if reference_plan is None or not reference_plan.normalized_orders() else 0.5
@@ -152,13 +162,15 @@ def score_s4_plan_quality(
                 and weight_ok
                 and slip_ok
                 and order_type_ok
-                and consistent
             ):
                 ok += 1
+            if consistent:
+                direction += 1
         if n == 0 and (plan.metadata or {}).get("target_weights"):
             legal = 1.0
         else:
             legal = ok / n if n else 0.0
+        direction = direction / n if n else 0.0
 
     planned_for_validation = _weights_from_plan(plan)
     if planned_for_validation and abs(sum(planned_for_validation.values()) - 1.0) > 1e-3:
@@ -171,11 +183,32 @@ def score_s4_plan_quality(
     elif reference_plan is not None:
         ref_w = _weights_from_plan(reference_plan)
     tracking = _l1_tracking(planned, ref_w) if ref_w or planned else 1.0
+    volatility = dict((market_context or {}).get("volatility", {}) or {})
+    liquidity = dict((market_context or {}).get("liquidity", {}) or {})
+    policy_scores: list[float] = []
+    for order in orders:
+        asset_vol = float(volatility.get(order.asset, 0.0) or 0.0)
+        asset_liq = float(liquidity.get(order.asset, 1.0) or 0.0)
+        is_stressed = asset_vol >= 0.25 or asset_liq < 0.5
+        if not is_stressed:
+            policy_scores.append(1.0)
+            continue
+        limit_ok = order.order_type == "limit" and order.slip_limit is not None
+        urgency_ok = order.urgency != "high"
+        policy_scores.append(0.5 * float(limit_ok) + 0.5 * float(urgency_ok))
+    cost_awareness = _mean(policy_scores) if policy_scores else 1.0
 
-    plan_quality = _mean([legal, tracking])
+    plan_quality = (
+        0.20 * legal
+        + 0.35 * tracking
+        + 0.25 * direction
+        + 0.20 * cost_awareness
+    )
     return {
         "order_legality": round(legal, 6),
         "target_tracking": round(tracking, 6),
+        "direction_consistency": round(direction, 6),
+        "cost_awareness": round(cost_awareness, 6),
         "plan_quality": round(plan_quality, 6),
     }
 
@@ -246,10 +279,9 @@ def score_s5_plan_quality(
     ref = _alert_tokens(reference_decision)
     if not ref and not pred:
         alert_id = 1.0
-    elif not ref:
-        alert_id = 1.0 if not pred else 0.5
     else:
-        alert_id = len(pred & ref) / len(ref)
+        overlap = len(pred & ref)
+        alert_id = 2.0 * overlap / max(len(pred) + len(ref), 1)
 
     # Corrective compliance: if reference requires weights, measure L1 match.
     ref_cw = reference_decision.corrective_weights
@@ -270,10 +302,27 @@ def score_s5_plan_quality(
     else:
         corrective = 1.0 if act == "hold" else 0.8
 
+    if act != ref_act:
+        adjustment_scale = 0.0
+    elif act == "scale_down":
+        actual = decision.scale_factor
+        reference = reference_decision.scale_factor
+        if actual is None or reference is None:
+            adjustment_scale = 0.0
+        else:
+            adjustment_scale = _clip01(1.0 - abs(float(actual) - float(reference)))
+    elif act == "rebalance":
+        actual_weights = decision.corrective_weights or {}
+        reference_weights = reference_decision.corrective_weights or {}
+        adjustment_scale = _l1_tracking(actual_weights, reference_weights)
+    else:
+        adjustment_scale = 1.0
+
     return {
         "alert_identification": round(_clip01(alert_id), 6),
         "action_choice": round(action_choice, 6),
         "corrective_compliance": round(_clip01(corrective), 6),
+        "adjustment_scale": round(_clip01(adjustment_scale), 6),
     }
 
 

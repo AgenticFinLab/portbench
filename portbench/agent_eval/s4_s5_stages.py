@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, Mapping, Optional
@@ -143,7 +144,36 @@ def _snapshot_context(snapshot_like: Any) -> Dict[str, Any]:
     for asset, values in (price_data or {}).items():
         if hasattr(values, "empty") and not values.empty:
             prices[str(asset)] = float(values.iloc[-1])
-    return {"decision_date": str(getattr(snapshot_like, "decision_date", "")), "prices": prices}
+    return_data = getattr(snapshot_like, "return_data", None)
+    if return_data is None and isinstance(snapshot_like, Mapping):
+        return_data = snapshot_like.get("return_data", {})
+    macro_data = getattr(snapshot_like, "macro_data", None)
+    if macro_data is None and isinstance(snapshot_like, Mapping):
+        macro_data = snapshot_like.get("macro_data", {})
+    volatility: Dict[str, float] = {}
+    for asset, values in (return_data or {}).items():
+        sample = [float(value) for value in list(values)[-20:] if value is not None]
+        if len(sample) < 2:
+            volatility[str(asset)] = 0.0
+            continue
+        mean = sum(sample) / len(sample)
+        variance = sum((value - mean) ** 2 for value in sample) / (len(sample) - 1)
+        volatility[str(asset)] = round(math.sqrt(max(variance, 0.0)) * math.sqrt(252.0), 6)
+    inverse = {asset: 1.0 / max(value, 1e-6) for asset, value in volatility.items()}
+    total_inverse = sum(inverse.values())
+    liquidity = {
+        asset: round(value / total_inverse, 6) if total_inverse > 0.0 else 1.0
+        for asset, value in inverse.items()
+    }
+    for asset, value in dict(macro_data or {}).items():
+        if str(asset).startswith("liquidity_"):
+            liquidity[str(asset).removeprefix("liquidity_")] = float(value)
+    return {
+        "decision_date": str(getattr(snapshot_like, "decision_date", "")),
+        "prices": prices,
+        "volatility": volatility,
+        "liquidity": liquidity,
+    }
 
 
 def _reference_risk_decision(
@@ -184,6 +214,20 @@ def _complete_json(
     parse,
 ) -> tuple[Any, str, Optional[Exception]]:
     """Retry JSON parse like S1–S3. Return (parsed, raw, error); parsed is None on failure."""
+    if hasattr(adapter, "complete_json"):
+        def validate(raw: str):
+            return parse(_extract_json(str(raw)))
+
+        parsed, raw = adapter.complete_json(
+            prompt,
+            parse=validate,
+            parser_version="s4s5-json-v4",
+            response_schema={"type": "object", "stage": "S4S5"},
+            use_tools=use_tools,
+            snapshot=snapshot,
+        )
+        return parsed, raw, None
+
     last_err: Optional[Exception] = None
     last_raw = ""
     for attempt in range(_JSON_RETRY_LIMIT + 1):
@@ -200,27 +244,20 @@ def _complete_json(
     return None, last_raw, last_err
 
 
-S5_DECISION_POLICY = (
-    "alerts must be a list of these tokens only: var_breach, drawdown, weight_drift "
-    "(omit a token if that limit is not breached). "
-    "If VaR or drawdown breaches its limit: action=scale_down with scale_factor in [0,1] "
-    "and include the matching alert tokens. "
-    "If only weight_drift exceeds its limit: action=rebalance with non-negative "
-    "corrective_weights that sum to exactly 1.0 and alerts=[\"weight_drift\"]. "
-    "If no limit is breached: action=hold, alerts=[], corrective_weights=null. "
-    "corrective_weights are required only for rebalance and must be non-negative "
-    "and sum to 1.0; otherwise null."
-)
-
-
 class AgenticS4Stage:
     """Ask the model for an execution plan and simulate its fills."""
 
-    def __init__(self, adapter: Any, use_tools: bool = False):
+    def __init__(
+        self,
+        adapter: Any,
+        use_tools: bool = False,
+        schema_version: str = S4S5_SCHEMA_AGENTIC,
+    ):
         if adapter is None or not hasattr(adapter, "complete"):
             raise ValueError("AgenticS4Stage requires an adapter")
         self.adapter = adapter
         self.use_tools = bool(use_tools)
+        self.schema_version = schema_version
         self.last_prompt = ""
 
     def run(
@@ -235,26 +272,26 @@ class AgenticS4Stage:
         slippage_rate: float = 0.001,
         commission_rate: float = 0.0005,
     ) -> S4AgenticBundle:
-        expected_directions = {}
-        for asset, target_weight in target_weights.items():
-            delta = float(target_weight) - float(current_weights.get(asset, 0.0))
-            expected_directions[asset] = "hold" if abs(delta) < 1e-6 else "buy" if delta > 0 else "sell"
         context = {
             "market": _snapshot_context(snapshot_like),
             "current_weights": dict(current_weights),
             "target_weights": dict(target_weights),
-            "expected_directions": expected_directions,
             "nav": float(nav),
-            "slippage_rate": slippage_rate,
-            "commission_rate": commission_rate,
+            "transaction_cost_model": {
+                "slippage_rate": slippage_rate,
+                "commission_rate": commission_rate,
+            },
         }
         self.last_prompt = (
             "You are the execution-planning stage. Use only the supplied Point-in-Time context. "
-            "orders must contain every target asset with asset, direction, target_weight, order_type, urgency, slip_limit. "
-            "Copy each supplied target weight and expected direction exactly. "
+            "Determine trade direction and size from current and target books yourself. "
+            "Return a JSON object with orders and rationale. Each order must include asset, direction, "
+            "target_weight or delta_weight, order_type, urgency, and slip_limit. "
+            "Consider volatility, liquidity, and the supplied transaction-cost model when selecting order policy. "
             f"Context: {json.dumps(context, ensure_ascii=False, default=str)}\n"
             f"{format_contract(self.use_tools)}"
         )
+        call_error: Optional[Exception] = None
         try:
             plan, raw, parse_err = _complete_json(
                 self.adapter,
@@ -264,11 +301,16 @@ class AgenticS4Stage:
                 parse=_plan_from_payload,
             )
         except Exception as exc:
-            raise AgenticStageError(f"S4 model call failed: {exc}") from exc
+            plan, raw, parse_err = None, "", exc
+            call_error = exc
         if plan is None:
             plan = ExecutionPlan(
                 orders=[],
-                metadata={"parse_error": str(parse_err), "rationale": ""},
+                metadata={
+                    "parse_error": str(parse_err),
+                    "model_call_error": str(call_error) if call_error else "",
+                    "rationale": "",
+                },
             )
         try:
             result = simulate_execution(
@@ -285,8 +327,8 @@ class AgenticS4Stage:
                 filled_weights=held,
                 metadata={"execution_error": str(exc), "held_current": True},
             )
-        result.metadata["schema_version"] = S4S5_SCHEMA_AGENTIC
-        plan.metadata["schema_version"] = S4S5_SCHEMA_AGENTIC
+        result.metadata["schema_version"] = self.schema_version
+        plan.metadata["schema_version"] = self.schema_version
         ref_plan = reference_plan
         if ref_plan is None:
             ref_plan, automatic_result = run_s4_deterministic_from_weights(
@@ -301,28 +343,39 @@ class AgenticS4Stage:
                 reference_result = automatic_result
         if reference_result is None:
             raise ValueError("reference_result is required when reference_plan is supplied")
+        plan_scores = score_s4_plan_quality(
+            plan,
+            ref_plan,
+            target_weights=target_weights,
+            current_weights=current_weights,
+            market_context=context["market"],
+        )
+        if parse_err is not None:
+            plan_scores = {key: 0.0 for key in plan_scores}
         return S4AgenticBundle(
             plan=plan,
             result=result,
             raw_response=str(raw),
-            plan_scores=score_s4_plan_quality(
-                plan,
-                ref_plan,
-                target_weights=target_weights,
-                current_weights=current_weights,
-            ),
+            plan_scores=plan_scores,
             outcome_scores=score_s4_environment_outcome(result, reference_result),
+            schema_version=self.schema_version,
         )
 
 
 class AgenticS5Stage:
     """Ask the model for a risk action and evaluate its post-action outcome."""
 
-    def __init__(self, adapter: Any, use_tools: bool = False):
+    def __init__(
+        self,
+        adapter: Any,
+        use_tools: bool = False,
+        schema_version: str = S4S5_SCHEMA_AGENTIC,
+    ):
         if adapter is None or not hasattr(adapter, "complete"):
             raise ValueError("AgenticS5Stage requires an adapter")
         self.adapter = adapter
         self.use_tools = bool(use_tools)
+        self.schema_version = schema_version
         self.last_prompt = ""
 
     def run(
@@ -356,7 +409,9 @@ class AgenticS5Stage:
             "You are the portfolio risk-control stage. Use only the supplied Point-in-Time risk summary. "
             "Return a JSON object with action, alerts, corrective_weights, scale_factor, rationale. "
             "action must be hold, scale_down, or rebalance. "
-            f"{S5_DECISION_POLICY} "
+            "alerts must use only var_breach, drawdown, and weight_drift. "
+            "For a rebalance, corrective_weights must be non-negative and sum to one. "
+            "For scale_down, provide a scale_factor in [0,1]. Explain the risk evidence and proposed action briefly. "
             f"Context: {json.dumps(context, ensure_ascii=False, default=str)}\n"
             f"{format_contract(self.use_tools)}"
         )
@@ -373,6 +428,7 @@ class AgenticS5Stage:
                     "portfolio_value": 0.0,
                 },
             )()
+        call_error: Optional[Exception] = None
         try:
             decision, raw, parse_err = _complete_json(
                 self.adapter,
@@ -382,13 +438,18 @@ class AgenticS5Stage:
                 parse=_decision_from_payload,
             )
         except Exception as exc:
-            raise AgenticStageError(f"S5 model call failed: {exc}") from exc
+            decision, raw, parse_err = None, "", exc
+            call_error = exc
         if decision is None:
             decision = RiskControlDecision(
                 action="hold",
-                metadata={"parse_error": str(parse_err), "rationale": ""},
+                metadata={
+                    "parse_error": str(parse_err),
+                    "model_call_error": str(call_error) if call_error else "",
+                    "rationale": "",
+                },
             )
-        decision.metadata.setdefault("schema_version", S4S5_SCHEMA_AGENTIC)
+        decision.metadata.setdefault("schema_version", self.schema_version)
         try:
             eval_result = evaluate_risk(
                 decision,
@@ -408,7 +469,7 @@ class AgenticS5Stage:
                 drift_limit=drift_limit,
             )
             eval_result.metadata["execution_error"] = str(exc)
-        eval_result.metadata["schema_version"] = S4S5_SCHEMA_AGENTIC
+        eval_result.metadata["schema_version"] = self.schema_version
         ref_decision = reference_decision or _reference_risk_decision(
             weights, pre_risk, var_limit, drawdown_limit, drift_limit
         )
@@ -420,12 +481,16 @@ class AgenticS5Stage:
             drawdown_limit=drawdown_limit,
             drift_limit=drift_limit,
         )
+        plan_scores = score_s5_plan_quality(decision, ref_decision)
+        if parse_err is not None:
+            plan_scores = {key: 0.0 for key in plan_scores}
         return S5AgenticBundle(
             decision=decision,
             eval_result=eval_result,
             raw_response=str(raw),
-            plan_scores=score_s5_plan_quality(decision, ref_decision),
+            plan_scores=plan_scores,
             outcome_scores=score_s5_environment_outcome(eval_result, ref_result),
+            schema_version=self.schema_version,
         )
 
 

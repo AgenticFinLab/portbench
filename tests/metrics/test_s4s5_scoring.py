@@ -125,7 +125,8 @@ def test_s4_direction_mismatch_fails_legality():
         target_weights={"SPY": 0.4, "BIL": 0.6},
         current_weights=current,
     )
-    assert pq_bad["order_legality"] == 0.0
+    assert pq_bad["order_legality"] == 1.0
+    assert pq_bad["direction_consistency"] == 0.0
 
     good = ExecutionPlan(
         orders=[
@@ -139,6 +140,7 @@ def test_s4_direction_mismatch_fails_legality():
         current_weights=current,
     )
     assert pq_good["order_legality"] == 1.0
+    assert pq_good["direction_consistency"] == 1.0
 
     mixed = ExecutionPlan(
         orders=[
@@ -151,10 +153,12 @@ def test_s4_direction_mismatch_fails_legality():
         target_weights={"SPY": 0.7, "BIL": 0.3},
         current_weights=current,
     )
-    assert pq_mixed["order_legality"] == 0.5
+    assert pq_mixed["order_legality"] == 1.0
+    assert pq_mixed["direction_consistency"] == 0.5
 
     # Without current_weights the mismatch is not scored.
     pq_unchecked = score_s4_plan_quality(
         mixed, target_weights={"SPY": 0.7, "BIL": 0.3}
     )
     assert pq_unchecked["order_legality"] == 1.0
+    assert pq_unchecked["direction_consistency"] == 1.0

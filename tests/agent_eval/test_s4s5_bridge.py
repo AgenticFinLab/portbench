@@ -103,7 +103,7 @@ def test_agentic_s5_accepts_off_simplex_corrective():
     assert bundle.plan_scores["corrective_compliance"] == 0.0
 
 
-def test_agentic_s5_prompt_uses_canonical_alert_policy():
+def test_agentic_s5_prompt_lists_contract_without_answer_policy():
     import json
 
     from portbench.agent_eval.s4_s5_stages import AgenticS5Stage
@@ -131,7 +131,8 @@ def test_agentic_s5_prompt_uses_canonical_alert_policy():
     assert "weight_drift" in prompt
     assert "var_breach" in prompt
     assert "drawdown" in prompt
-    assert "only weight_drift exceeds its limit: action=rebalance" in prompt
+    assert "only weight_drift exceeds its limit: action=rebalance" not in prompt
+    assert "Explain the risk evidence" in prompt
 
 
 def test_agentic_s4_retries_then_marks_parse_error_and_zeros_plan():
