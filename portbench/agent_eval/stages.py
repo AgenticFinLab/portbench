@@ -417,11 +417,13 @@ def _parse_stage_payload(
                 raise ValueError("S2 strengths must be in [0, 1]")
     elif stage_name == "S3":
         weights = payload.get("weights")
-        if not isinstance(weights, dict) or not assets.issubset(weights):
-            raise ValueError("S3 requires weights for every visible asset")
+        if not isinstance(weights, dict) or not weights:
+            raise ValueError("S3 requires at least one positive visible-asset weight")
+        if not set(weights).issubset(assets):
+            raise ValueError("S3 weights may only reference visible assets")
         values = list(weights.values())
-        if any(not isinstance(value, (int, float)) or float(value) < 0.0 for value in values):
-            raise ValueError("S3 weights must be non-negative numbers")
+        if any(not isinstance(value, (int, float)) or float(value) <= 0.0 for value in values):
+            raise ValueError("S3 reported weights must be strictly positive numbers")
         if not 0.999 <= sum(float(value) for value in values) <= 1.001:
             raise ValueError("S3 weights must sum to one")
     return payload

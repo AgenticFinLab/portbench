@@ -246,10 +246,9 @@ def build_s3_prompt(
         f"{a}={w:.3f}" for a, w in snapshot.current_weights.items()
     )
     corr_section = f"\n{corr_block}\n" if corr_block else ""
-    weight_fields = ", ".join(f"{_quote(a)}: <float in [0, 1]>" for a in assets)
     schema = _schema_block(
         [
-            f'  "weights": {{ {weight_fields} }},',
+            '  "weights": {"SELECTED_ASSET": <float in [0, 1]>, ...},',
             '  "expected_return": <annualized decimal, e.g. 0.08>,',
             '  "expected_vol": <annualized decimal, e.g. 0.12>,',
             '  "sharpe_estimate": <decimal>',
@@ -269,6 +268,7 @@ TASK: Allocate portfolio weights based on the signals above.
 Constraints:
   - All weights must be in [0.0, 1.0]
   - Weights must sum to exactly 1.0
+  - Return only assets with strictly positive weights; omitted visible assets receive 0.0
   - "sell" signals should receive reduced weight (ideally 0.0)
   - "buy" signals should receive increased weight
   - Minimize unnecessary turnover from current weights

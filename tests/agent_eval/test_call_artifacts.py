@@ -50,6 +50,11 @@ def test_valid_call_reuses_raw_parse_and_score_without_provider(tmp_path):
     assert parsed == {"answer": 0.5}
     assert not hit
     assert artifact.raw_response == '{"answer": 0.5}'
+    records = store.attempts(request)
+    assert records[0]["event"] == "request_recorded"
+    assert records[0]["request_hash"] == request.call_key
+    assert records[0]["request"]["system_prompt"] == request.system_prompt
+    assert records[0]["request"]["user_prompt"] == request.user_prompt
 
     parsed_again, _, hit_again = store.complete_or_call(
         request,

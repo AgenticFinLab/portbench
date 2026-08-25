@@ -308,9 +308,22 @@ class CallArtifactStore:
                     self._record_parse(request, parser_version, existing.raw_response, parsed_output)
                     return parsed_output, existing, True
 
+            ledger = self.attempts(request)
+            if not any(item.get("event") == "request_recorded" for item in ledger):
+                self._append_attempt(
+                    request.namespace,
+                    request.call_key,
+                    {
+                        "timestamp": _now(),
+                        "event": "request_recorded",
+                        "request_hash": request.call_key,
+                        "request": request.key_payload(),
+                        "provenance": dict(provenance or {}),
+                    },
+                )
             provider_attempts = [
                 item
-                for item in self.attempts(request)
+                for item in ledger
                 if item.get("event") in {"received", "provider_error"}
             ]
             if len(provider_attempts) >= max_attempts and not retry_failed:
