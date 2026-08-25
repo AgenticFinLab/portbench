@@ -6,15 +6,18 @@ import json
 import os
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
 
 from portbench.agent_eval.base import AgentAdapter
+from portbench.agent_eval.call_artifacts import CallArtifactStore, CallRequest
 from portbench.agent_eval.canonical import build_stage_cache_key, canonical_json, sha256_hex
 from portbench.agent_eval.contracts import (
     ARCHITECTURE_IDS,
     PIPELINE_V3_COLLAB,
+    PIPELINE_V4_SA_CAUSAL,
     ArchitectureId,
     ProvenanceSource,
     ResultProvenance,
@@ -562,6 +565,95 @@ class ArchitectureStageAdapter(AgentAdapter):
             self._memory().append(self.call_id, self.runtime.decision_date, str(response))
         return str(response)
 
+    def _call_provider(self, prompt: str, tools: Optional[list] = None) -> str:
+        """Call the provider once and record the exact resource delta."""
+        before = _usage_snapshot(self.runtime.base_adapter)
+        started = time.perf_counter()
+        if tools is None:
+            response = self.runtime.base_adapter.complete(prompt)
+        else:
+            response = self.runtime.base_adapter.complete_with_tools(prompt, tools)
+        provenance = self._record_new_call(before, prompt, str(response))
+        self.runtime.record_agent_usage(
+            self.agent_id,
+            token_exact=int(provenance.token_exact or 0),
+            token_est=int(provenance.token_est or 0),
+            request_count=int(provenance.request_count),
+            tool_call_count=int(provenance.tool_call_count),
+            latency_ms=(time.perf_counter() - started) * 1000.0,
+        )
+        return str(response)
+
+    def complete_json(
+        self,
+        prompt: str,
+        *,
+        parse,
+        parser_version: str,
+        response_schema: Optional[Mapping[str, Any]] = None,
+        use_tools: bool = False,
+        snapshot: Any = None,
+    ) -> tuple[Any, str]:
+        """Return a parser-validated SA response with durable call reuse."""
+        if self.runtime.spec.architecture_id != ArchitectureId.SA.value:
+            raw = self.complete_with_tools(prompt, []) if use_tools else self.complete(prompt)
+            return parse(raw), raw
+        if use_tools:
+            raise RuntimeError("SA-only v4 calls do not permit tools")
+        if self.runtime.call_artifacts is None:
+            raw = self.complete(prompt)
+            return parse(raw), raw
+
+        self.runtime.record_logical_call(self.call_id, self.agent_id)
+        augmented = self._augment(prompt)
+        base = self.runtime.base_adapter
+        request = CallRequest(
+            provider=self.runtime.provider,
+            model=self.model_name,
+            model_revision=str(getattr(base, "_model_revision", "")),
+            stage_id=self.stage_id,
+            system_prompt=str(getattr(base, "_system_prompt", "")),
+            user_prompt=augmented,
+            response_schema=dict(response_schema or {"type": "object"}),
+            generation_config={
+                "temperature": getattr(base, "_temperature", None),
+                "max_tokens": getattr(base, "_max_tokens", None),
+                "timeout": getattr(base, "_timeout", None),
+            },
+            visible_input={"prompt_hash": sha256_hex(augmented)},
+            namespace=self.runtime.cache_namespace,
+            data_version=self.runtime.data_version,
+            profile=self.runtime.profile,
+            decision_date=self.runtime.decision_date,
+        )
+        parsed, artifact, cache_hit = self.runtime.call_artifacts.complete_or_call(
+            request,
+            parser_version=parser_version,
+            parse=parse,
+            call_fn=lambda: self._call_provider(augmented),
+            provenance={
+                "schema_version": PIPELINE_V4_SA_CAUSAL,
+                "code_commit": self.runtime.code_commit,
+                "architecture_id": ArchitectureId.SA.value,
+                "memory_mode": "none",
+                "tool_mode": "none",
+            },
+            max_attempts=self.runtime.call_max_attempts,
+            retry_failed=self.runtime.retry_failed_calls,
+        )
+        if cache_hit:
+            self.runtime.ledger.record(cache_hit_count=1)
+            self.runtime.record_agent_usage(self.agent_id, cache_hit_count=1)
+        self.runtime.provenance[self.call_id] = {
+            **dict(artifact.provenance),
+            "source": "current_call_artifact" if cache_hit else "new_api_call",
+            "call_key": request.call_key,
+            "stage_id": self.stage_id,
+            "agent_id": self.agent_id,
+            "round_id": self.round_id,
+        }
+        return parsed, artifact.raw_response
+
     def complete(self, prompt: str) -> str:
         """Complete a stage call without tools."""
         return self._complete(prompt)
@@ -591,6 +683,10 @@ class ArchitectureRuntime:
         cache_namespace: str = FACTUAL_NAMESPACE,
         intervention_id: str = "",
         memory_store: Optional[MemoryStore] = None,
+        call_max_attempts: int = 3,
+        retry_failed_calls: bool = False,
+        schema_version: str = PIPELINE_V3_COLLAB,
+        call_artifact_dir: str | Path | None = None,
     ) -> None:
         self.base_adapter = base_adapter
         self.spec = get_architecture(architecture_id)
@@ -599,13 +695,25 @@ class ArchitectureRuntime:
         self.cache = ReplayAdapter(cache_dir)
         self.memory = memory_store or MemoryStore(memory_path)
         self.message_bus = MessageBus()
-        self.schema_version = PIPELINE_V3_COLLAB
+        self.schema_version = str(schema_version)
         self.provider = provider
         self.profile = profile
         self.data_version = data_version
         self.code_commit = code_commit
         self.cache_namespace = cache_namespace
         self.intervention_id = intervention_id
+        self.call_max_attempts = int(call_max_attempts)
+        self.retry_failed_calls = bool(retry_failed_calls)
+        self.call_artifacts = (
+            CallArtifactStore(
+                Path(call_artifact_dir)
+                if call_artifact_dir is not None
+                else Path(cache_dir) / "call_artifacts"
+            )
+            if self.schema_version == PIPELINE_V4_SA_CAUSAL
+            and (cache_dir is not None or call_artifact_dir is not None)
+            else None
+        )
         self.episode_id = ""
         self.decision_date = ""
         self.snapshot_hash = ""
@@ -756,6 +864,23 @@ class ArchitectureRuntime:
             return
         for role in MA_ROLE_NAMES:
             self.agent_nodes[role].memory = other.agent_nodes[role].memory.clone()
+
+    @contextmanager
+    def intervention_branch(self, branch_id: str):
+        """Route one online intervention suffix into its isolated namespace."""
+        if self.schema_version != PIPELINE_V4_SA_CAUSAL:
+            yield
+            return
+        namespace = f"intervention__{branch_id}"
+        previous_namespace = self.cache_namespace
+        previous_id = self.intervention_id
+        self.cache_namespace = namespace
+        self.intervention_id = branch_id
+        try:
+            yield
+        finally:
+            self.cache_namespace = previous_namespace
+            self.intervention_id = previous_id
 
     def collaboration_trace(self) -> List[Dict[str, Any]]:
         """Return the episode's ordered message trace."""

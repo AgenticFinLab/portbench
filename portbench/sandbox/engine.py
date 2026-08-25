@@ -98,6 +98,10 @@ class BacktestEngine:
         code_commit: str = "",
         resource_budget=None,
         intervention_spec: Optional[dict] = None,
+        call_max_attempts: int = 3,
+        retry_failed_calls: bool = False,
+        schema_version: str = "pipeline-v3-collab",
+        call_artifact_dir: Optional[str] = None,
     ):
         self.strategy = strategy
         self._snapshot_dump_dir: Optional[str] = snapshot_dump_dir
@@ -116,6 +120,7 @@ class BacktestEngine:
         self._progress = progress
         self._profile = profile
         self._architecture_id = architecture_id
+        self._schema_version = str(schema_version)
         self._data_version = data_version
         self._code_commit = code_commit
         self._intervention_spec: dict = dict(intervention_spec or {})
@@ -156,6 +161,10 @@ class BacktestEngine:
                 profile_name=profile.name if profile is not None else "",
                 data_version=data_version,
                 code_commit=code_commit,
+                call_max_attempts=call_max_attempts,
+                retry_failed_calls=retry_failed_calls,
+                schema_version=schema_version,
+                call_artifact_dir=call_artifact_dir,
             )
             spec = dict(self._intervention_spec)
             spec.setdefault("propagation_weight", self._propagation_weight)
@@ -334,7 +343,7 @@ class BacktestEngine:
             architecture_id=self._architecture_id or "legacy",
             result_protocol="closed-loop",
             schema_version=(
-                "pipeline-v3-collab" if self._architecture_id is not None else "pipeline-v1"
+                self._schema_version if self._architecture_id is not None else "pipeline-v1"
             ),
             data_version=self._data_version,
             code_commit=self._code_commit,
@@ -348,7 +357,11 @@ class BacktestEngine:
             date_key = str(snapshot.decision_date)
 
             # ── Step cache hit: skip LLM call, restore cached metrics ──────
-            if self._architecture_id is None and date_key in self._step_cache:
+            cacheable_architecture = self._architecture_id is None or (
+                self._architecture_id == "SA"
+                and self._schema_version == "pipeline-v4-sa-causal"
+            )
+            if cacheable_architecture and date_key in self._step_cache:
                 cached = self._step_cache[date_key]
                 if cached.get("step_ceps") is not None:
                     self._per_step_ceps.append(float(cached["step_ceps"]))
@@ -407,8 +420,15 @@ class BacktestEngine:
                 weights = s3_output.weights
 
             if weights is not None:
-                if self._architecture_id is None:
-                    self._write_step_cache(date_key, weights, step_ceps, step_alignment)
+                if cacheable_architecture:
+                    self._write_step_cache(
+                        date_key,
+                        weights,
+                        step_ceps,
+                        step_alignment,
+                        snapshot=snapshot,
+                        result=result,
+                    )
                 return weights
 
         if isinstance(self.strategy, BaselineStrategy):
@@ -451,25 +471,60 @@ class BacktestEngine:
         weights: dict,
         step_ceps: Optional[float],
         step_alignment: Optional[float],
+        *,
+        snapshot=None,
+        result=None,
     ) -> None:
-        """Persist one rebalance step to step_cache.json (non-fatal on failure)."""
+        """Atomically persist one completed rebalance step for recovery."""
         if self._step_cache_dir is None:
             return
         self._step_cache[date_key] = {
             "weights": weights,
             "step_ceps": step_ceps,
             "step_alignment": step_alignment,
+            "episode": self._episode_checkpoint(snapshot, result),
         }
         self._step_cache_dir.mkdir(parents=True, exist_ok=True)
         cache_file = self._step_cache_dir / "step_cache.json"
         try:
             import json as _json
-            cache_file.write_text(
+            temporary = cache_file.with_suffix(".tmp")
+            temporary.write_text(
                 _json.dumps(self._step_cache, indent=2, default=str),
                 encoding="utf-8",
             )
+            temporary.replace(cache_file)
         except Exception:
             pass  # non-fatal: step is lost from cache but run continues
+
+    @staticmethod
+    def _episode_checkpoint(snapshot, result) -> dict:
+        """Capture state and stage outputs needed to audit a completed episode."""
+        if snapshot is None or result is None:
+            return {}
+        stage_outputs = {}
+        for stage_id, output in result.stage_outputs.items():
+            try:
+                stage_outputs[stage_id.value] = dataclasses.asdict(output)
+            except TypeError:
+                stage_outputs[stage_id.value] = str(output)
+        call_keys = {
+            call_id: str(record.get("call_key", ""))
+            for call_id, record in dict(result.provenance or {}).items()
+            if record.get("call_key")
+        }
+        return {
+            "decision_date": str(snapshot.decision_date),
+            "nav_before": float(snapshot.portfolio_value),
+            "weights_before": dict(snapshot.current_weights),
+            "stage_outputs": stage_outputs,
+            "stage_scores": {
+                stage_id.value: float(score)
+                for stage_id, score in result.stage_scores.items()
+            },
+            "call_keys": call_keys,
+            "ceps_score": float(result.ceps_score),
+        }
 
     def _dump_snapshot(self, snapshot) -> None:
         """Persist MarketSnapshot for the current rebalance date if dumping is enabled."""

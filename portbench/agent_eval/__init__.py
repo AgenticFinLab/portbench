@@ -51,6 +51,10 @@ def build_default_pipeline(
     profile_name: str = "",
     data_version: str = "",
     code_commit: str = "",
+    call_max_attempts: int = 3,
+    retry_failed_calls: bool = False,
+    schema_version: str = "pipeline-v3-collab",
+    call_artifact_dir: str | None = None,
 ) -> EvalPipeline:
     """
     Construct a default five-stage EvalPipeline with the given adapter.
@@ -101,6 +105,10 @@ def build_default_pipeline(
         profile=profile_name,
         data_version=data_version,
         code_commit=code_commit,
+        call_max_attempts=call_max_attempts,
+        retry_failed_calls=retry_failed_calls,
+        schema_version=schema_version,
+        call_artifact_dir=call_artifact_dir,
     )
     tools_enabled = runtime.spec.tools_enabled
     if runtime.spec.shared_agent:
@@ -118,10 +126,16 @@ def build_default_pipeline(
         S2SignalGeneration(runtime.stage_adapter("S2"), use_tools=tools_enabled),
         s3_stage,
         AgenticS4PipelineStage(
-            runtime.stage_adapter("S4"), oracle_mode=oracle_mode, use_tools=tools_enabled
+            runtime.stage_adapter("S4"),
+            oracle_mode=oracle_mode,
+            use_tools=tools_enabled,
+            schema_version=runtime.schema_version,
         ),
         AgenticS5PipelineStage(
-            runtime.stage_adapter("S5"), profile=profile, use_tools=tools_enabled
+            runtime.stage_adapter("S5"),
+            profile=profile,
+            use_tools=tools_enabled,
+            schema_version=runtime.schema_version,
         ),
     ]
     return EvalPipeline(stages, runtime=runtime)

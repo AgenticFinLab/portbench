@@ -791,12 +791,23 @@ def intervene_from_factual(
         for upstream in STAGE_ORDER[:stage_index]
         if upstream in factual.stage_outputs
     }
-    intervened = pipeline.run_episode(
-        snapshot,
-        stage_overrides={stage: replacement},
-        reuse_outputs=reused,
-        run_interventions=False,
-    )
+    runtime = getattr(pipeline, "runtime", None)
+    branch_id = f"{stage.value.lower()}_{snapshot.decision_date}_{operator}"
+    if runtime is None:
+        intervened = pipeline.run_episode(
+            snapshot,
+            stage_overrides={stage: replacement},
+            reuse_outputs=reused,
+            run_interventions=False,
+        )
+    else:
+        with runtime.intervention_branch(branch_id):
+            intervened = pipeline.run_episode(
+                snapshot,
+                stage_overrides={stage: replacement},
+                reuse_outputs=reused,
+                run_interventions=False,
+            )
     deltas = {
         downstream.value: float(intervened.stage_scores.get(downstream, 0.0))
         - float(factual.stage_scores.get(downstream, 0.0))

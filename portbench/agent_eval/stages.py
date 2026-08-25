@@ -384,6 +384,49 @@ def _is_refusal(raw: str) -> bool:
     return False
 
 
+def _parse_stage_payload(
+    raw: str,
+    *,
+    stage_name: str,
+    snapshot: Optional[MarketSnapshot],
+) -> dict:
+    """Validate the minimal JSON and numeric contract before caching an LLM call."""
+    payload = _extract_json(raw)
+    assets = set(snapshot.return_data) if snapshot is not None else set()
+    if stage_name == "S1":
+        views = payload.get("asset_views")
+        confidence = payload.get("confidence")
+        if not isinstance(views, dict) or not assets.issubset(views):
+            raise ValueError("S1 requires views for every visible asset")
+        if not isinstance(confidence, (int, float)) or not 0.0 <= float(confidence) <= 1.0:
+            raise ValueError("S1 confidence must be in [0, 1]")
+        for value in views.values():
+            if not isinstance(value, (int, float)) or not -1.0 <= float(value) <= 1.0:
+                raise ValueError("S1 asset views must be in [-1, 1]")
+    elif stage_name == "S2":
+        signals = payload.get("signals")
+        strengths = payload.get("strengths")
+        if not isinstance(signals, dict) or not isinstance(strengths, dict):
+            raise ValueError("S2 requires signals and strengths objects")
+        if not assets.issubset(signals) or not assets.issubset(strengths):
+            raise ValueError("S2 requires signals and strengths for every visible asset")
+        if any(str(value) not in {"buy", "sell", "hold"} for value in signals.values()):
+            raise ValueError("S2 signals must be buy, sell, or hold")
+        for value in strengths.values():
+            if not isinstance(value, (int, float)) or not 0.0 <= float(value) <= 1.0:
+                raise ValueError("S2 strengths must be in [0, 1]")
+    elif stage_name == "S3":
+        weights = payload.get("weights")
+        if not isinstance(weights, dict) or not assets.issubset(weights):
+            raise ValueError("S3 requires weights for every visible asset")
+        values = list(weights.values())
+        if any(not isinstance(value, (int, float)) or float(value) < 0.0 for value in values):
+            raise ValueError("S3 weights must be non-negative numbers")
+        if not 0.999 <= sum(float(value) for value in values) <= 1.001:
+            raise ValueError("S3 weights must sum to one")
+    return payload
+
+
 def _call_with_json_retry(
     adapter,
     prompt: str,
@@ -401,6 +444,31 @@ def _call_with_json_retry(
     — callers should catch this separately from generic RuntimeError to apply
     fallback logic.
     """
+    runtime = getattr(adapter, "runtime", None)
+    strict_artifact_validation = (
+        getattr(runtime, "schema_version", "") == "pipeline-v4-sa-causal"
+        and getattr(getattr(runtime, "spec", None), "architecture_id", "") == "SA"
+    )
+    if hasattr(adapter, "complete_json"):
+        def parse(raw: str):
+            if _is_refusal(raw):
+                raise StageRefusalError(
+                    f"{stage_name} model refused to respond. Last raw output: {raw!r}"
+                )
+            if strict_artifact_validation:
+                return _parse_stage_payload(raw, stage_name=stage_name, snapshot=snapshot)
+            return _extract_json(raw)
+
+        parsed, raw = adapter.complete_json(
+            prompt,
+            parse=parse,
+            parser_version=f"{stage_name}-json-v4",
+            response_schema={"type": "object", "stage": stage_name},
+            use_tools=use_tools,
+            snapshot=snapshot,
+        )
+        return parsed, raw
+
     last_err: Optional[Exception] = None
     last_raw: str = ""
     for attempt in range(_JSON_RETRY_LIMIT + 1):
@@ -425,6 +493,8 @@ def _call_with_json_retry(
                 f"{stage_name} model refused to respond. " f"Last raw output: {raw!r}"
             )
         try:
+            if strict_artifact_validation:
+                return _parse_stage_payload(raw, stage_name=stage_name, snapshot=snapshot), raw
             return _extract_json(raw), raw
         except (json.JSONDecodeError, ValueError) as exc:
             last_err = exc

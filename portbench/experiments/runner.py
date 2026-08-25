@@ -42,6 +42,7 @@ from ..qa_builder.processed_data import ProcessedDataProvider
 from ..sandbox import BacktestEngine
 from . import paths
 from .config import ExperimentConfig, ModelSpec
+from .freeze import build_freeze_manifest, manifest_matches, write_manifest
 from .figures import (
     render_dataset_correlation_figures,
     render_experiment_figures,
@@ -104,6 +105,17 @@ def _persist_closed_loop(engine, out_dir: Path) -> None:
         json.dumps(branches, indent=2, default=str),
         encoding="utf-8",
     )
+
+
+def _write_checkpoint(path: Path, completed: list[str]) -> None:
+    """Atomically persist the completed-profile checkpoint for interruption recovery."""
+    payload = {
+        "completed": completed,
+        "updated_at": datetime.now().isoformat(),
+    }
+    temporary = path.with_suffix(f".tmp.{threading.get_ident()}")
+    temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    temporary.replace(path)
 
 
 # ---------------------------------------------------------------------------
@@ -209,7 +221,7 @@ def _make_logger(name: str, log_path: Path) -> logging.Logger:
 def _cache_contract_matches(data: dict, cfg: "ExperimentConfig", spec: ModelSpec) -> bool:
     """Return whether a closed-loop artifact belongs to the current experiment contract."""
     expected_architecture = spec.architecture_id or "legacy"
-    expected_schema = "pipeline-v3-collab" if spec.architecture_id else "pipeline-v1"
+    expected_schema = cfg.pipeline_schema_version if spec.architecture_id else "pipeline-v1"
     # Reuse requires an exact match across protocol, data, and executable source.
     return all(
         (
@@ -328,6 +340,10 @@ def _run_one_scenario(
         code_commit=_current_code_commit(),
         resource_budget=_resource_budget(cfg) if spec.architecture_id else None,
         intervention_spec=_intervention_spec(cfg),
+        call_max_attempts=cfg.call_max_attempts,
+        retry_failed_calls=cfg.retry_failed_calls,
+        schema_version=cfg.pipeline_schema_version,
+        call_artifact_dir=cfg.call_artifact_root or None,
     )
     if pipeline_log_dir is not None:
         engine.enable_pipeline_logging(
@@ -414,6 +430,10 @@ def _run_normal(
         code_commit=_current_code_commit(),
         resource_budget=_resource_budget(cfg) if spec.architecture_id else None,
         intervention_spec=_intervention_spec(cfg),
+        call_max_attempts=cfg.call_max_attempts,
+        retry_failed_calls=cfg.retry_failed_calls,
+        schema_version=cfg.pipeline_schema_version,
+        call_artifact_dir=cfg.call_artifact_root or None,
     )
     if pipeline_log_dir is not None:
         engine.enable_pipeline_logging(
@@ -589,6 +609,12 @@ def _run_one_model(
         cfg.output_root, cfg.rebalance, prov_name, model_name, timestamp
     )
     r_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = r_dir / "freeze_manifest.json"
+    manifest = build_freeze_manifest(cfg, spec)
+    if manifest_path.exists() and not manifest_matches(manifest_path, manifest):
+        raise RuntimeError("freeze manifest mismatch; refusing to resume this run")
+    if not manifest_path.exists():
+        write_manifest(manifest_path, manifest)
 
     logger = _make_logger(
         f"{prov_name}/{model_name}",
@@ -673,13 +699,7 @@ def _run_one_model(
             completed.append(profile_name)
 
             # Update checkpoint after each completed profile
-            (r_dir / "checkpoint.json").write_text(
-                json.dumps(
-                    {"completed": completed, "updated_at": datetime.now().isoformat()},
-                    indent=2,
-                ),
-                encoding="utf-8",
-            )
+            _write_checkpoint(r_dir / "checkpoint.json", completed)
         except Exception as exc:
             tb = traceback.format_exc()
             p_logger.error("Profile failed: %s", exc)
@@ -744,6 +764,8 @@ class BatchRunner:
     def dry_run(self) -> list[dict]:
         """Return the (provider, model, profile, scenario) matrix without running."""
         out = []
+        if not self.cfg.run_sandbox:
+            return out
         scenarios = self.cfg.resolved_stress_scenarios()
         for spec in self.cfg.models:
             prov = spec_provider_name(spec)
@@ -773,6 +795,16 @@ class BatchRunner:
 
     def run(self) -> dict:
         cfg = self.cfg
+        if cfg.required_gate:
+            gate_path = Path(cfg.required_gate)
+            try:
+                gate = json.loads(gate_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise RuntimeError(
+                    f"required release gate is unavailable: {gate_path}"
+                ) from exc
+            if gate.get("passed") is not True:
+                raise RuntimeError(f"required release gate did not pass: {gate_path}")
         rebal_dir = paths.rebalance_dir(cfg.output_root, cfg.rebalance)
         rebal_dir.mkdir(parents=True, exist_ok=True)
 
@@ -795,10 +827,11 @@ class BatchRunner:
         model_specs: list[tuple[ModelSpec, str, str]] = (
             []
         )  # (spec, prov_name, model_name)
-        for spec in cfg.models:
-            prov_name = spec_provider_name(spec)
-            model_name = _resolve_model_name(spec)
-            model_specs.append((spec, prov_name, model_name))
+        if cfg.run_sandbox:
+            for spec in cfg.models:
+                prov_name = spec_provider_name(spec)
+                model_name = _resolve_model_name(spec)
+                model_specs.append((spec, prov_name, model_name))
 
         # Decide which models to run vs. resume vs. fully reuse
         # Each entry: (spec, prov, model, timestamp, already_done_profiles)
@@ -815,6 +848,19 @@ class BatchRunner:
                     r_dir = paths.run_dir(
                         cfg.output_root, cfg.rebalance, prov_name, model_name, ts
                     )
+                    if cfg.sa_only and not manifest_matches(
+                        r_dir / "freeze_manifest.json",
+                        build_freeze_manifest(cfg, spec),
+                    ):
+                        print(
+                            f"[freeze] {prov_name}/{model_name}: "
+                            "latest run has a different behavior contract; starting fresh"
+                        )
+                        ts = None
+                    if ts is None:
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        to_run.append((spec, prov_name, model_name, timestamp, []))
+                        continue
                     done = paths.get_completed_profiles(r_dir, cfg.profiles)
                     # Verify scenario data exists; demote incomplete profiles
                     truly_done = [
