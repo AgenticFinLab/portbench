@@ -237,7 +237,7 @@ def build_s3_prompt(
     corr_block: str,
     use_tools: bool = False,
 ) -> str:
-    """Prompt for Stage 3: portfolio weight allocation summing to 1.0."""
+    """Prompt for Stage 3: sparse relative allocation scores."""
     signals_str = "\n".join(
         f"  {a}: signal={s2.signals[a]}, strength={s2.strengths.get(a, 0.5):.2f}"
         for a in assets
@@ -250,7 +250,7 @@ def build_s3_prompt(
     corr_section = f"\n{corr_block}\n" if corr_block else ""
     schema = _schema_block(
         [
-            '  "weights": {"SELECTED_ASSET": <float in [0, 1]>, ...},',
+            '  "allocation_scores": {"SELECTED_ASSET": <positive decimal>, ...},',
             '  "expected_return": <annualized decimal, e.g. 0.08>,',
             '  "expected_vol": <annualized decimal, e.g. 0.12>,',
             '  "sharpe_estimate": <decimal>',
@@ -265,14 +265,12 @@ Current portfolio weights: {current_w_str}
 Portfolio NAV: ${snapshot.portfolio_value:,.0f}
 Market regime: {_display_regime(snapshot.market_regime)}
 {corr_section}
-TASK: Allocate portfolio weights based on the signals above.
+TASK: Select a sparse portfolio allocation based on the signals above.
 
 Constraints:
-  - All weights must be in [0.0, 1.0]
-  - Weights must sum to exactly 1.0
-  - Use at least four decimal places for every selected weight
-  - Recalculate the sum of the numeric literals before replying; set the final selected weight to the residual needed for exactly 1.0
-  - Return only assets with strictly positive weights; omitted visible assets receive 0.0
+  - allocation_scores must be finite, strictly positive decimal numbers
+  - Do not normalize allocation_scores; the deterministic environment normalizes their relative magnitudes into target weights
+  - Return only selected assets in allocation_scores; omitted visible assets receive a target weight of 0.0
   - Select at most 12 assets
   - "sell" signals should receive reduced weight (ideally 0.0)
   - "buy" signals should receive increased weight

@@ -8,41 +8,35 @@ import pytest
 
 from portbench.agent_eval.base import MarketSnapshot, S2Output
 from portbench.agent_eval.prompts import build_s3_prompt
-from portbench.agent_eval.stages import _parse_stage_payload
+from portbench.agent_eval.stages import S3WeightOptimization, _parse_stage_payload
 
 
-def test_s3_accepts_sparse_weights_that_sum_to_one():
+def test_s3_accepts_sparse_positive_allocation_scores():
     """Allow omitted visible assets to represent zero-weight holdings."""
     snapshot = SimpleNamespace(return_data={"SPY": object(), "BIL": object()})
 
     parsed = _parse_stage_payload(
-        '{"weights": {"SPY": 0.7, "BIL": 0.3}}',
+        '{"allocation_scores": {"SPY": 0.7, "BIL": 0.3}}',
         stage_name="S3",
         snapshot=snapshot,
     )
 
-    assert parsed["weights"] == {"SPY": 0.7, "BIL": 0.3}
+    assert parsed["allocation_scores"] == {"SPY": 0.7, "BIL": 0.3}
 
 
-def test_s3_rejects_unknown_or_off_simplex_sparse_weights():
-    """Keep the visible-asset and simplex numeric constraints strict."""
+def test_s3_rejects_unknown_or_non_positive_allocation_scores():
+    """Keep the visible-asset and numeric constraints strict."""
     snapshot = SimpleNamespace(return_data={"SPY": object(), "BIL": object()})
 
     with pytest.raises(ValueError, match="visible assets"):
         _parse_stage_payload(
-            '{"weights": {"UNKNOWN": 1.0}}',
+            '{"allocation_scores": {"UNKNOWN": 1.0}}',
             stage_name="S3",
             snapshot=snapshot,
         )
-    with pytest.raises(ValueError, match="sum to one"):
+    with pytest.raises(ValueError, match="finite positive"):
         _parse_stage_payload(
-            '{"weights": {"SPY": 0.7}}',
-            stage_name="S3",
-            snapshot=snapshot,
-        )
-    with pytest.raises(ValueError, match="strictly positive"):
-        _parse_stage_payload(
-            '{"weights": {"SPY": 1.0, "BIL": 0.0}}',
+            '{"allocation_scores": {"SPY": 1.0, "BIL": 0.0}}',
             stage_name="S3",
             snapshot=snapshot,
         )
@@ -52,7 +46,7 @@ def test_s3_rejects_more_than_twelve_positive_assets():
     """Keep the S3 sparse allocation representation bounded."""
     assets = [f"A{index}" for index in range(13)]
     snapshot = SimpleNamespace(return_data={asset: object() for asset in assets})
-    raw = json.dumps({"weights": {asset: 1.0 / 13.0 for asset in assets}})
+    raw = json.dumps({"allocation_scores": {asset: 1.0 for asset in assets}})
 
     with pytest.raises(ValueError, match="at most 12"):
         _parse_stage_payload(raw, stage_name="S3", snapshot=snapshot)
@@ -72,7 +66,7 @@ def test_s2_accepts_sparse_signal_strength_pairs():
     assert parsed["strengths"] == {"SPY": 0.8}
 
 
-def test_s3_prompt_requires_exact_numeric_simplex_without_zero_weight_noise():
+def test_s3_prompt_uses_relative_scores_without_zero_weight_noise():
     snapshot = MarketSnapshot(
         decision_date=date(2024, 1, 2),
         price_data={},
@@ -92,7 +86,36 @@ def test_s3_prompt_requires_exact_numeric_simplex_without_zero_weight_noise():
         corr_block="",
     )
 
-    assert "at least four decimal places" in prompt
-    assert "residual needed for exactly 1.0" in prompt
+    assert "Do not normalize allocation_scores" in prompt
+    assert '"allocation_scores"' in prompt
     assert "SPY=0.6000, BIL=0.4000" in prompt
     assert "TLT=0.0000" not in prompt
+
+
+def test_s3_normalizes_model_relative_scores_once_for_execution():
+    class Adapter:
+        def complete(self, prompt: str) -> str:
+            return json.dumps(
+                {
+                    "allocation_scores": {"SPY": 2.0, "BIL": 1.0},
+                    "expected_return": 0.05,
+                    "expected_vol": 0.10,
+                    "sharpe_estimate": 0.5,
+                }
+            )
+
+    snapshot = MarketSnapshot(
+        decision_date=date(2024, 1, 2),
+        price_data={},
+        return_data={"SPY": object(), "BIL": object()},
+        current_weights={"SPY": 0.5, "BIL": 0.5},
+        portfolio_value=1_000_000.0,
+    )
+    s2 = S2Output(
+        signals={"SPY": "buy", "BIL": "hold"},
+        strengths={"SPY": 0.8, "BIL": 0.5},
+    )
+
+    output = S3WeightOptimization(Adapter()).run(snapshot, s2)
+
+    assert output.weights == {"SPY": 2.0 / 3.0, "BIL": 1.0 / 3.0}
