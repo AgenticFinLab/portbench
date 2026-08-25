@@ -17,6 +17,7 @@ Layout (independent of rebalance frequency and run timestamp):
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -52,7 +53,8 @@ def load_checkpoint(path: Path) -> set[str]:
 
 def write_checkpoint(path: Path, completed_keys: set[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+    temporary = path.with_suffix(f".tmp.{os.getpid()}")
+    temporary.write_text(
         json.dumps(
             {
                 "completed": sorted(completed_keys),
@@ -62,9 +64,12 @@ def write_checkpoint(path: Path, completed_keys: set[str]) -> None:
         ),
         encoding="utf-8",
     )
+    os.replace(temporary, path)
 
 
 def append_result(out_dir: Path, record: dict) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     with open(out_dir / "results.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps(record, default=str) + "\n")
+        f.flush()
+        os.fsync(f.fileno())

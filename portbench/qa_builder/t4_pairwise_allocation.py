@@ -21,14 +21,27 @@ from .base import (
     QAPair,
     Split,
 )
+from .constraint_v2 import (
+    TEMPLATE_VERSION,
+    source_snapshot_provenance,
+    t4_metrics,
+    t4_solution,
+)
 
 
 class T4PairwiseAllocation(QABuilder):
     """Template T4: Pairwise Constrained Allocation."""
 
-    def __init__(self, provider, config, redesign: bool = False):
+    def __init__(
+        self,
+        provider,
+        config,
+        redesign: bool = False,
+        template_version: str = "legacy",
+    ):
         super().__init__(provider, config)
         self.redesign = redesign
+        self.template_version = template_version
 
     @property
     def template_id(self) -> str:
@@ -45,7 +58,7 @@ class T4PairwiseAllocation(QABuilder):
     def _select_assets(self, decision_date: date) -> list[str]:
         text_classes = ["equities", "cryptocurrency"]
         other_classes = ["bonds", "commodities", "real_estate", "cash"]
-        rng = random.Random(hash(decision_date) + 3)
+        rng = random.Random(int(decision_date.strftime("%Y%m%d")) + 3)
         cls1 = rng.choice(text_classes)
         if rng.random() < 0.5:
             cls2 = rng.choice([c for c in text_classes if c != cls1] + other_classes)
@@ -56,9 +69,143 @@ class T4PairwiseAllocation(QABuilder):
         return [rng.choice(c1), rng.choice(c2)]
 
     def build_one(self, context: ContextWindow, seq: int) -> QAPair:
+        if self.template_version == TEMPLATE_VERSION:
+            return self._build_one_constraint_v2(context, seq)
         if self.redesign:
             return self._build_one_redesign(context, seq)
         return self._build_one_legacy(context, seq)
+
+    def _build_one_constraint_v2(self, context: ContextWindow, seq: int) -> QAPair:
+        """Build a candidate-allocation decision with all required data visible."""
+        a1, a2, decision_date, _aligned, s1, s2, cov_12, _corr, mu1, mu2 = self._aligned_stats(
+            context
+        )
+        assets = [a1, a2]
+        expected_returns = {a1: round(mu1, 6), a2: round(mu2, 6)}
+        covariance = [
+            [round(s1 * s1 * 252.0, 8), round(cov_12 * 252.0, 8)],
+            [round(cov_12 * 252.0, 8), round(s2 * s2 * 252.0, 8)],
+        ]
+        current_weights = ({a1: 0.7, a2: 0.3} if seq % 2 == 0 else {a1: 0.3, a2: 0.7})
+        candidates = []
+        for index, weight_1 in enumerate((0.1, 0.3, 0.5, 0.7, 0.9), start=1):
+            weights = {a1: weight_1, a2: round(1.0 - weight_1, 4)}
+            candidates.append(
+                {
+                    "candidate_id": f"C{index}",
+                    "weights": weights,
+                    "metrics": t4_metrics(
+                        weights,
+                        assets,
+                        expected_returns,
+                        covariance,
+                        current_weights,
+                    ),
+                }
+            )
+
+        return_values = sorted({float(item["metrics"]["expected_return"]) for item in candidates})
+        turnover_values = sorted({float(item["metrics"]["turnover"]) for item in candidates})
+        selected_problem = None
+        for return_floor in return_values:
+            for turnover_cap in turnover_values:
+                try:
+                    solution = t4_solution(
+                        candidates,
+                        return_floor=return_floor,
+                        turnover_cap=turnover_cap,
+                    )
+                except ValueError:
+                    continue
+                feasibility = []
+                for candidate in candidates:
+                    metrics = candidate["metrics"]
+                    feasibility.append(
+                        float(metrics["expected_return"]) >= return_floor - 1e-8
+                        and float(metrics["turnover"]) <= turnover_cap + 1e-8
+                    )
+                has_return_decoy = any(
+                    float(item["metrics"]["expected_return"]) < return_floor - 1e-8
+                    for item in candidates
+                )
+                has_turnover_decoy = any(
+                    float(item["metrics"]["turnover"]) > turnover_cap + 1e-8
+                    for item in candidates
+                )
+                if sum(feasibility) >= 2 and has_return_decoy and has_turnover_decoy:
+                    selected_problem = (return_floor, turnover_cap, solution)
+                    break
+            if selected_problem is not None:
+                break
+        if selected_problem is None:
+            raise ValueError("Could not construct a discriminative T4 constraint-v2 item")
+        return_floor, turnover_cap, _solution = selected_problem
+        return_floor = round(return_floor, 6)
+        turnover_cap = round(turnover_cap, 6)
+        solution = t4_solution(
+            candidates,
+            return_floor=return_floor,
+            turnover_cap=turnover_cap,
+        )
+        candidate_lines = "\n".join(
+            f"{item['candidate_id']}: {a1}={item['weights'][a1]:.4f}, {a2}={item['weights'][a2]:.4f}"
+            for item in candidates
+        )
+        context_summary = (
+            f"Pairwise allocation decision for {a1} and {a2}. "
+            "All candidate weights and constraints are in the question."
+        )
+        question = (
+            f"Assets: {a1}, {a2}\n"
+            f"Annualized expected returns: {a1}={expected_returns[a1]:.6f}, {a2}={expected_returns[a2]:.6f}\n"
+            f"Annualized covariance matrix in [{a1}, {a2}] order: {covariance}\n"
+            f"Current weights: {a1}={current_weights[a1]:.4f}, {a2}={current_weights[a2]:.4f}\n"
+            f"Return floor: {return_floor:.6f}\n"
+            f"Turnover cap: {turnover_cap:.6f}\n"
+            f"Candidates:\n{candidate_lines}\n\n"
+            "For each candidate, compute expected return w^T mu, variance w^T Sigma w, "
+            "and turnover 0.5 * sum(abs(w-current)). Keep only long-only candidates whose weights sum to 1, "
+            "meet the return floor, and do not exceed the turnover cap. Select the feasible candidate with "
+            "minimum variance. Break ties by higher return, lower turnover, then candidate ID. "
+            "Reply with JSON only: {\"candidate_id\": \"C#\", \"weights\": {\"ASSET\": <decimal>}, "
+            "\"calculated_metrics\": {\"expected_return\": <decimal>, \"variance\": <decimal>, "
+            "\"turnover\": <decimal>}, \"binding_constraints\": [\"return_floor|turnover_cap\"], "
+            "\"rationale\": \"...\"}."
+        )
+        split = self.config.get_split(decision_date) or Split.TRAIN
+        regime = context.market_regime or MarketRegime.SIDEWAYS
+        provenance = source_snapshot_provenance(context)
+        return QAPair(
+            qa_id=self._make_id(decision_date, seq),
+            template_id=self.template_id,
+            complexity=self.complexity,
+            split=split,
+            market_regime=regime,
+            asset_class=self.asset_class,
+            assets=assets,
+            decision_date=decision_date,
+            context_summary=context_summary,
+            question=question,
+            answer=str(solution["candidate_id"]),
+            answer_numeric=None,
+            explanation="Constraint-v2 reference solution retained only for offline scoring.",
+            metadata={
+                "template_version": TEMPLATE_VERSION,
+                "generator_version": "qa-v2-constraint-20260825",
+                "seed": self.config.random_seed,
+                **provenance,
+                "constraint_v2": {
+                    "assets": assets,
+                    "expected_returns": expected_returns,
+                    "covariance": covariance,
+                    "current_weights": current_weights,
+                    "return_floor": round(return_floor, 6),
+                    "turnover_cap": round(turnover_cap, 6),
+                    "candidates": candidates,
+                    **solution,
+                },
+            },
+        )
 
     def _aligned_stats(self, context: ContextWindow):
         a1, a2 = context.assets[0], context.assets[1]
@@ -157,7 +304,7 @@ class T4PairwiseAllocation(QABuilder):
             w2_mv = 1.0 - w1_mv
         mv_return = w1_mv * mu1 + w2_mv * mu2
 
-        rng = np.random.default_rng(abs(hash(d)) + seq)
+        rng = np.random.default_rng(int(d.strftime("%Y%m%d")) + seq)
         mu_max = max(mu1, mu2)
         mu_min = min(mu1, mu2)
         binding = (seq % 2 == 0) and (mu_max > mv_return)

@@ -25,6 +25,7 @@ def get_all_builders(
     provider: DataProvider,
     config: QAConfig,
     t3t4_redesign: bool = False,
+    template_version: str = "legacy",
 ) -> list[QABuilder]:
     """
     Instantiate all seven template builders with the given provider and config.
@@ -35,8 +36,18 @@ def get_all_builders(
     return [
         T1ReturnPrediction(provider, config),
         T2RiskAssessment(provider, config),
-        T3PositionSizing(provider, config, redesign=t3t4_redesign),
-        T4PairwiseAllocation(provider, config, redesign=t3t4_redesign),
+        T3PositionSizing(
+            provider,
+            config,
+            redesign=t3t4_redesign,
+            template_version=template_version,
+        ),
+        T4PairwiseAllocation(
+            provider,
+            config,
+            redesign=t3t4_redesign,
+            template_version=template_version,
+        ),
         T5MultiAssetOptimization(provider, config),
         T6RebalancingDecision(provider, config),
         T7RegimeDetection(provider, config),

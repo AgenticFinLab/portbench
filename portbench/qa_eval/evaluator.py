@@ -19,6 +19,8 @@ from typing import Optional
 import numpy as np
 from tqdm.auto import tqdm
 
+from ..agent_eval.call_artifacts import CallArtifactStore, CallRequest
+from ..agent_eval.canonical import canonical_json, sha256_hex
 from ..experiments.config import ExperimentConfig, ModelSpec
 from ..experiments.providers import build_adapter, spec_provider_name, spec_model_name
 from . import paths as qpaths
@@ -118,6 +120,32 @@ def _load_qa_pairs(dataset_path: str, split: str) -> list[dict]:
     return pairs
 
 
+def _apply_freeze_manifest(pairs: list[dict], manifest_path: str) -> list[dict]:
+    """Select and verify the locked constraint-v2 test items before any call."""
+    if not manifest_path:
+        return pairs
+    manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    if manifest.get("template_version") != "constraint-v2":
+        raise ValueError("QA freeze manifest must declare template_version=constraint-v2")
+    indexed = {
+        str(pair.get("qa_id", pair.get("id", ""))): pair
+        for pair in pairs
+    }
+    selected: list[dict] = []
+    for template in ("T3", "T4"):
+        for entry in dict(manifest.get("selected") or {}).get(template, []):
+            qa_id = str(entry.get("qa_id", ""))
+            pair = indexed.get(qa_id)
+            if pair is None:
+                raise ValueError(f"frozen QA item is missing from the loaded split: {qa_id}")
+            if sha256_hex(canonical_json(pair)) != entry.get("pair_hash"):
+                raise ValueError(f"frozen QA item changed after manifest creation: {qa_id}")
+            selected.append(pair)
+    if not selected:
+        raise ValueError("QA freeze manifest selects no items")
+    return selected
+
+
 def _strip_covariance_from_pair(pair: dict, base_tid: str) -> dict:
     """Return a shallow-copy of pair with covariance/correlation info removed from question.
 
@@ -143,17 +171,30 @@ def _strip_covariance_from_pair(pair: dict, base_tid: str) -> dict:
     return {**pair, "question": question}
 
 
-def _build_eval_prompt(pair: dict, t3t4_redesign: bool = False) -> str:
+def _build_eval_prompt(
+    pair: dict,
+    t3t4_redesign: bool = False,
+    template_version: str = "legacy",
+) -> str:
     context = pair.get("context_summary", "")
     question = pair.get("question", "")
     tid = pair.get("template_id", pair.get("template", ""))
     meta = pair.get("metadata") or {}
+    use_constraint_v2 = template_version == "constraint-v2" and tid in ("T3", "T4")
     use_json = bool(t3t4_redesign or meta.get("t3t4_redesign")) and tid in (
         "T3",
         "T4",
         "T4_restricted",
     )
-    if use_json:
+    if use_constraint_v2:
+        instructions = (
+            "Instructions:\n"
+            "- Reply with a single JSON object only.\n"
+            "- Use exactly the fields and numeric conventions required in the question.\n"
+            "- Do not include markdown fences or any text outside the JSON object.\n\n"
+            "Answer:"
+        )
+    elif use_json:
         instructions = (
             "Instructions:\n"
             "- Reply with a single JSON object only\n"
@@ -180,12 +221,80 @@ def _build_eval_prompt(pair: dict, t3t4_redesign: bool = False) -> str:
     )
 
 
+def _parse_qa_response(raw: str, template_version: str, template_id: str) -> dict:
+    """Validate one QA response before it is eligible for durable reuse."""
+    response = str(raw or "").strip()
+    if not response:
+        raise ValueError("empty QA response")
+    if template_version != "constraint-v2":
+        return {"raw_response": response}
+    payload = json.loads(response)
+    if not isinstance(payload, dict):
+        raise ValueError("constraint-v2 response must be a JSON object")
+    base_tid = template_id.replace("_restricted", "")
+    if base_tid == "T3":
+        required = {"position_size", "binding_constraint", "constraint_margins"}
+    elif base_tid == "T4":
+        required = {"candidate_id", "weights", "calculated_metrics", "binding_constraints"}
+    else:
+        required = set()
+    missing = required - set(payload)
+    if missing:
+        raise ValueError(f"constraint-v2 response missing keys: {sorted(missing)}")
+    if base_tid == "T3":
+        position_size = payload["position_size"]
+        if not isinstance(position_size, (int, float)) or not 0.0 <= float(position_size) <= 1.0:
+            raise ValueError("T3 position_size must be a number in [0, 1]")
+        if payload["binding_constraint"] not in {
+            "var",
+            "es",
+            "drawdown",
+            "liquidity",
+            "full_allocation",
+        }:
+            raise ValueError("T3 binding_constraint is invalid")
+        margins = payload["constraint_margins"]
+        if not isinstance(margins, dict) or set(margins) != {
+            "var",
+            "es",
+            "drawdown",
+            "liquidity",
+            "full_allocation",
+        }:
+            raise ValueError("T3 constraint_margins must contain every named constraint")
+        if any(not isinstance(value, (int, float)) for value in margins.values()):
+            raise ValueError("T3 constraint_margins values must be numeric")
+    if base_tid == "T4":
+        weights = payload["weights"]
+        metrics = payload["calculated_metrics"]
+        if not isinstance(payload["candidate_id"], str) or not payload["candidate_id"]:
+            raise ValueError("T4 candidate_id must be non-empty")
+        if not isinstance(weights, dict) or not weights:
+            raise ValueError("T4 weights must be a non-empty object")
+        if any(not isinstance(value, (int, float)) or float(value) < 0.0 for value in weights.values()):
+            raise ValueError("T4 weights must be non-negative numbers")
+        if abs(sum(float(value) for value in weights.values()) - 1.0) > 1e-4:
+            raise ValueError("T4 weights must sum to one")
+        if not isinstance(metrics, dict) or set(metrics) != {
+            "expected_return",
+            "variance",
+            "turnover",
+        }:
+            raise ValueError("T4 calculated_metrics must contain all required metrics")
+        if any(not isinstance(value, (int, float)) for value in metrics.values()):
+            raise ValueError("T4 calculated_metrics values must be numeric")
+        if not isinstance(payload["binding_constraints"], list):
+            raise ValueError("T4 binding_constraints must be a list")
+    return payload
+
+
 class QAEvaluator:
     def __init__(self, cfg: ExperimentConfig, raw_yaml: Optional[str] = None):
         self.cfg = cfg
         self._raw_yaml = raw_yaml
 
         all_pairs = _load_qa_pairs(cfg.qa.dataset_path, cfg.qa.split)
+        all_pairs = _apply_freeze_manifest(all_pairs, cfg.qa.freeze_manifest)
 
         # Filter by templates (support both "template_id" and "template" field names)
         templates = set(cfg.qa.templates)
@@ -386,6 +495,12 @@ class QAEvaluator:
             cfg.output_root, provider, model_name, template_id
         )
         t_dir.mkdir(parents=True, exist_ok=True)
+        artifact_root = (
+            Path(cfg.call_artifact_root) / "qa" / provider / model_name / template_id
+            if cfg.call_artifact_root
+            else t_dir / "call_artifacts"
+        )
+        artifact_store = CallArtifactStore(artifact_root)
 
         is_restricted = template_id.endswith("_restricted")
         base_tid = template_id.replace("_restricted", "") if is_restricted else template_id
@@ -393,7 +508,8 @@ class QAEvaluator:
         # Fast path: all pairs already evaluated → rebuild summary from results.jsonl
         # (avoids stale zero-value summaries written by earlier broken resume runs).
         if pairs and all(
-            f"{template_id}:{p.get('qa_id', p.get('id', ''))}" in completed_keys
+            f"{cfg.qa.template_version}:{template_id}:{p.get('qa_id', p.get('id', ''))}"
+            in completed_keys
             for p in pairs
         ):
             summary = _rebuild_summary_from_results(t_dir, template_id)
@@ -412,7 +528,7 @@ class QAEvaluator:
 
         def _eval_one(pair: dict) -> None:
             qa_id = pair.get("qa_id", pair.get("id", ""))
-            ck = f"{template_id}:{qa_id}"
+            ck = f"{cfg.qa.template_version}:{template_id}:{qa_id}"
 
             if ck in completed_keys:
                 pbar.update(1)
@@ -424,35 +540,88 @@ class QAEvaluator:
                     _strip_covariance_from_pair(pair, base_tid) if is_restricted else pair
                 )
                 prompt = _build_eval_prompt(
-                    eval_pair, t3t4_redesign=cfg.qa.t3t4_redesign
+                    eval_pair,
+                    t3t4_redesign=cfg.qa.t3t4_redesign,
+                    template_version=cfg.qa.template_version,
                 )
-                response = adapter.complete(prompt)
+                request = CallRequest(
+                    provider=provider,
+                    model=model_name,
+                    model_revision=str(getattr(adapter, "_model_revision", "")),
+                    stage_id=f"QA:{template_id}",
+                    system_prompt=str(getattr(adapter, "_system_prompt", "")),
+                    user_prompt=prompt,
+                    response_schema={"template_version": cfg.qa.template_version},
+                    generation_config={
+                        "temperature": getattr(adapter, "_temperature", None),
+                        "max_tokens": getattr(adapter, "_max_tokens", None),
+                        "timeout": getattr(adapter, "_timeout", None),
+                    },
+                    visible_input={
+                        "qa_id": qa_id,
+                        "template_id": template_id,
+                        "context_summary": eval_pair.get("context_summary", ""),
+                        "question": eval_pair.get("question", ""),
+                    },
+                    data_version=str((pair.get("metadata") or {}).get("generator_version", "")),
+                )
+                _, call_artifact, _ = artifact_store.complete_or_call(
+                    request,
+                    parser_version=f"qa-{cfg.qa.template_version}-parser-v1",
+                    parse=lambda raw: _parse_qa_response(
+                        raw,
+                        cfg.qa.template_version,
+                        template_id,
+                    ),
+                    call_fn=lambda: adapter.complete(prompt),
+                    provenance={"qa_id": qa_id, "template_id": template_id},
+                    max_attempts=cfg.qa.call_max_attempts,
+                    retry_failed=cfg.qa.retry_failed_calls,
+                )
+                response = call_artifact.raw_response
                 latency = time.time() - t0
 
                 meta = pair.get("metadata") or {}
-                sc = score_response(
-                    template_id=base_tid,
-                    gt_answer=pair.get("answer", ""),
-                    llm_response=response or "",
-                    answer_numeric=pair.get("answer_numeric"),
-                    assets=pair.get("assets"),
-                    redesign=bool(
-                        cfg.qa.t3t4_redesign or meta.get("t3t4_redesign")
+                score_artifact = artifact_store.score(
+                    request,
+                    f"qa-{cfg.qa.template_version}-parser-v1",
+                    cfg.qa.scorer_version,
+                    {
+                        "answer": pair.get("answer", ""),
+                        "answer_numeric": pair.get("answer_numeric"),
+                        "assets": pair.get("assets"),
+                        "metadata": meta,
+                    },
+                    lambda _: score_response(
+                        template_id=base_tid,
+                        gt_answer=pair.get("answer", ""),
+                        llm_response=response,
+                        answer_numeric=pair.get("answer_numeric"),
+                        assets=pair.get("assets"),
+                        redesign=bool(
+                            cfg.qa.t3t4_redesign or meta.get("t3t4_redesign")
+                        ),
+                        explanation_keypoints=meta.get("explanation_keypoints"),
+                        numeric_weight=cfg.qa.t3t4_numeric_weight,
+                        explanation_weight=cfg.qa.t3t4_explanation_weight,
+                        template_version=cfg.qa.template_version,
+                        metadata=meta,
                     ),
-                    explanation_keypoints=meta.get("explanation_keypoints"),
-                    numeric_weight=cfg.qa.t3t4_numeric_weight,
-                    explanation_weight=cfg.qa.t3t4_explanation_weight,
                 )
+                sc = float(score_artifact.score_payload)
 
                 record = {
                     "qa_id": qa_id,
                     "template_id": template_id,
                     "score": round(sc, 4),
-                    "response": (response or "")[:500] if cfg.qa.save_responses else "",
+                    "response": response if cfg.qa.save_responses else "",
+                    "call_key": request.call_key,
                     "latency": round(latency, 2),
                     "regime": pair.get("market_regime", ""),
                     "complexity": pair.get("complexity", ""),
                     "split": pair.get("split", ""),
+                    "template_version": cfg.qa.template_version,
+                    "scorer_version": cfg.qa.scorer_version,
                 }
             except Exception as exc:
                 latency = time.time() - t0

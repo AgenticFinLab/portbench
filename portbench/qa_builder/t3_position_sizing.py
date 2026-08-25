@@ -21,6 +21,7 @@ from .base import (
 )
 from ..metrics.risk_metrics import var
 from ..metrics.base import MetricsConfig
+from .constraint_v2 import TEMPLATE_VERSION, source_snapshot_provenance, t3_solution
 
 _REDESIGN_THRESHOLDS = (0.05, 0.08, 0.10, 0.15)
 
@@ -40,10 +41,12 @@ class T3PositionSizing(QABuilder):
         config: QAConfig,
         max_drawdown_threshold: float = 0.10,
         redesign: bool = False,
+        template_version: str = "legacy",
     ):
         super().__init__(provider, config)
         self.max_drawdown_threshold = max_drawdown_threshold
         self.redesign = redesign
+        self.template_version = template_version
 
     @property
     def template_id(self) -> str:
@@ -62,7 +65,7 @@ class T3PositionSizing(QABuilder):
 
         text_classes = ["equities", "cryptocurrency"]
         other_classes = ["bonds", "commodities", "real_estate", "cash"]
-        rng = random.Random(hash(decision_date) + 2)
+        rng = random.Random(int(decision_date.strftime("%Y%m%d")) + 2)
         cls = (
             rng.choice(text_classes)
             if rng.random() < 0.8
@@ -74,9 +77,96 @@ class T3PositionSizing(QABuilder):
         return [rng.choice(candidates)]
 
     def build_one(self, context: ContextWindow, seq: int) -> QAPair:
+        if self.template_version == TEMPLATE_VERSION:
+            return self._build_one_constraint_v2(context, seq)
         if self.redesign:
             return self._build_one_redesign(context, seq)
         return self._build_one_legacy(context, seq)
+
+    def _build_one_constraint_v2(self, context: ContextWindow, seq: int) -> QAPair:
+        """Build a solvable multi-constraint sizing problem without GT leakage."""
+        asset = context.assets[0]
+        decision_date = context.decision_date
+        returns = context.returns_history[asset].dropna()
+        if len(returns) < 20:
+            raise ValueError(f"Insufficient history for T3: {asset} at {decision_date}")
+
+        losses = sorted([-float(value) for value in returns])
+        tail_size = max(1, int(len(losses) * 0.05))
+        unit_var = max(1e-6, losses[int(len(losses) * 0.95)])
+        unit_es = max(unit_var, sum(losses[-tail_size:]) / tail_size)
+        cumulative = (1.0 + returns).cumprod()
+        unit_drawdown = max(1e-6, float((1.0 - cumulative / cumulative.cummax()).max()))
+        constraint_patterns = (
+            {"var": 0.35, "es": 0.70, "drawdown": 0.80, "liquidity": 0.90},
+            {"var": 0.80, "es": 0.40, "drawdown": 0.70, "liquidity": 0.90},
+            {"var": 0.80, "es": 0.90, "drawdown": 0.50, "liquidity": 0.90},
+            {"var": 0.80, "es": 0.90, "drawdown": 0.90, "liquidity": 0.60},
+            {"var": 1.20, "es": 1.10, "drawdown": 1.30, "liquidity": 1.20},
+        )
+        limits = constraint_patterns[seq % len(constraint_patterns)]
+        target_limits = {name: limits[name] for name in ("var", "es", "drawdown")}
+        liquidity_cap = limits["liquidity"]
+        unit_risk = {
+            "var": round(unit_var, 6),
+            "es": round(unit_es, 6),
+            "drawdown": round(unit_drawdown, 6),
+        }
+        budgets = {
+            name: round(unit_risk[name] * limit, 6)
+            for name, limit in target_limits.items()
+        }
+        solution = t3_solution(unit_risk, budgets, liquidity_cap)
+        context_summary = (
+            f"{asset}: {len(returns)} Point-in-Time daily observations. "
+            "Use the visible per-unit risk estimates and limits below."
+        )
+        question = (
+            f"Asset: {asset}\n"
+            f"Per-unit VaR(95%): {unit_var:.6f}\n"
+            f"Per-unit ES(95%): {unit_es:.6f}\n"
+            f"Per-unit drawdown proxy: {unit_drawdown:.6f}\n"
+            f"VaR budget: {budgets['var']:.6f}\n"
+            f"ES budget: {budgets['es']:.6f}\n"
+            f"Drawdown budget: {budgets['drawdown']:.6f}\n"
+            f"Liquidity cap: {liquidity_cap:.4f}\n\n"
+            "Choose the largest position_size in [0,1] that satisfies every constraint. "
+            "Use budget / per-unit-risk for VaR, ES, and drawdown. "
+            "Reply with JSON only: {\"position_size\": <decimal>, \"binding_constraint\": "
+            "\"var|es|drawdown|liquidity|full_allocation\", \"constraint_margins\": "
+            "{\"var\": <decimal>, \"es\": <decimal>, \"drawdown\": <decimal>, "
+            "\"liquidity\": <decimal>, \"full_allocation\": <decimal>}, \"rationale\": \"...\"}."
+        )
+        split = self.config.get_split(decision_date) or Split.TRAIN
+        regime = context.market_regime or MarketRegime.SIDEWAYS
+        provenance = source_snapshot_provenance(context)
+        return QAPair(
+            qa_id=self._make_id(decision_date, seq),
+            template_id=self.template_id,
+            complexity=self.complexity,
+            split=split,
+            market_regime=regime,
+            asset_class=self.asset_class,
+            assets=[asset],
+            decision_date=decision_date,
+            context_summary=context_summary,
+            question=question,
+            answer=str(solution["position_size"]),
+            answer_numeric=float(solution["position_size"]),
+            explanation="Constraint-v2 reference solution retained only for offline scoring.",
+            metadata={
+                "template_version": TEMPLATE_VERSION,
+                "generator_version": "qa-v2-constraint-20260825",
+                "seed": self.config.random_seed,
+                **provenance,
+                "constraint_v2": {
+                    "unit_risk": unit_risk,
+                    "budgets": budgets,
+                    "liquidity_cap": liquidity_cap,
+                    **solution,
+                },
+            },
+        )
 
     def _compute_position(
         self, returns, threshold: float

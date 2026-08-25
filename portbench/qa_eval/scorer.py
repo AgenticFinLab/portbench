@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +329,112 @@ def _score_t4(gt_answer: str, response: str, assets: list[str] = None, **kw) -> 
     return _cosine_similarity(gt_vec, pred_vec)
 
 
+def _json_object(response: str) -> Optional[dict[str, Any]]:
+    """Parse one strict JSON object from a constraint-v2 response."""
+    import json
+
+    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", str(response or "").strip())
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _numeric_similarity(actual: Any, expected: Any, scale: float = 0.1) -> float:
+    """Map one bounded numeric error to a deterministic score in [0, 1]."""
+    try:
+        error = abs(float(actual) - float(expected))
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, 1.0 - error / max(scale, abs(float(expected)), 1e-6))
+
+
+def _score_t3_constraint_v2(response: str, metadata: Mapping[str, Any]) -> float:
+    """Score T3 position, binding constraint, and visible constraint margins."""
+    payload = _json_object(response)
+    gt = dict(metadata.get("constraint_v2") or {})
+    if payload is None or not gt:
+        return 0.0
+    position = _numeric_similarity(payload.get("position_size"), gt.get("position_size"))
+    binding = float(payload.get("binding_constraint") == gt.get("binding_constraint"))
+    margins = payload.get("constraint_margins")
+    expected_margins = dict(gt.get("constraint_margins") or {})
+    limits = dict(gt.get("constraint_limits") or {})
+    try:
+        predicted_size = float(payload.get("position_size"))
+    except (TypeError, ValueError):
+        predicted_size = float("inf")
+    feasible = float(
+        0.0 <= predicted_size <= 1.0
+        and all(predicted_size <= float(limit) + 1e-4 for limit in limits.values())
+    )
+    margin_scores = []
+    if isinstance(margins, Mapping):
+        for name, expected in expected_margins.items():
+            margin_scores.append(_numeric_similarity(margins.get(name), expected, scale=0.1))
+    margin_score = sum(margin_scores) / len(margin_scores) if margin_scores else 0.0
+    feasibility = 0.5 * feasible + 0.5 * margin_score
+    return max(0.0, min(1.0, 0.50 * position + 0.30 * binding + 0.20 * feasibility))
+
+
+def _score_t4_constraint_v2(response: str, metadata: Mapping[str, Any]) -> float:
+    """Score T4 candidate selection, weights, metrics, and binding constraints."""
+    payload = _json_object(response)
+    gt = dict(metadata.get("constraint_v2") or {})
+    if payload is None or not gt:
+        return 0.0
+    candidate_id = str(payload.get("candidate_id", ""))
+    candidate_score = float(candidate_id == str(gt.get("candidate_id", "")))
+    expected_weights = dict(gt.get("weights") or {})
+    predicted_weights = payload.get("weights")
+    if isinstance(predicted_weights, Mapping):
+        l1 = sum(
+            abs(float(predicted_weights.get(asset, 0.0)) - float(weight))
+            for asset, weight in expected_weights.items()
+        )
+        weight_score = max(0.0, 1.0 - l1 / 2.0)
+    else:
+        weight_score = 0.0
+    candidates = {str(item["candidate_id"]): item for item in gt.get("candidates", [])}
+    selected = candidates.get(candidate_id)
+    valid_selected = False
+    expected_metrics: Mapping[str, Any] = {}
+    if selected is not None:
+        expected_metrics = dict(selected.get("metrics") or {})
+        valid_selected = (
+            float(expected_metrics.get("expected_return", -float("inf")))
+            >= float(gt.get("return_floor", float("inf"))) - 1e-8
+            and float(expected_metrics.get("turnover", float("inf")))
+            <= float(gt.get("turnover_cap", -float("inf"))) + 1e-8
+        )
+    provided_metrics = payload.get("calculated_metrics")
+    metric_scores = []
+    if isinstance(provided_metrics, Mapping):
+        for name in ("expected_return", "variance", "turnover"):
+            scale = 0.1 if name != "variance" else 0.01
+            metric_scores.append(_numeric_similarity(provided_metrics.get(name), expected_metrics.get(name), scale))
+    metric_score = sum(metric_scores) / len(metric_scores) if metric_scores else 0.0
+    feasibility_metrics = 0.5 * float(valid_selected) + 0.5 * metric_score
+    expected_binding = set(gt.get("binding_constraints") or [])
+    predicted_binding = set(payload.get("binding_constraints") or [])
+    if not expected_binding and not predicted_binding:
+        binding_score = 1.0
+    else:
+        union = expected_binding | predicted_binding
+        binding_score = len(expected_binding & predicted_binding) / len(union) if union else 1.0
+    return max(
+        0.0,
+        min(
+            1.0,
+            0.50 * candidate_score
+            + 0.20 * weight_score
+            + 0.20 * feasibility_metrics
+            + 0.10 * binding_score,
+        ),
+    )
+
+
 def _score_t5(gt_answer: str, response: str, assets: list[str] = None, **kw) -> float:
     return _score_t4(gt_answer, response, assets=assets)
 
@@ -417,6 +523,8 @@ def score_response(
     explanation_keypoints: Optional[list] = None,
     numeric_weight: float = 0.7,
     explanation_weight: float = 0.3,
+    template_version: str = "legacy",
+    metadata: Optional[Mapping[str, Any]] = None,
 ) -> float:
     """
     Score an LLM response against a ground-truth answer.
@@ -425,6 +533,11 @@ def score_response(
     0.7 * numeric + 0.3 * explanation (weights configurable).
     """
     base_tid = template_id.replace("_restricted", "")
+    if template_version == "constraint-v2":
+        if base_tid == "T3":
+            return _score_t3_constraint_v2(llm_response, metadata or {})
+        if base_tid == "T4":
+            return _score_t4_constraint_v2(llm_response, metadata or {})
     scorer = _SCORERS.get(base_tid)
     if scorer is None:
         return 0.0

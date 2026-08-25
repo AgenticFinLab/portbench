@@ -53,6 +53,12 @@ _parser.add_argument(
     "Default keeps legacy T3/T4 for current paper numbers.",
 )
 _parser.add_argument(
+    "--template-version",
+    choices=["legacy", "constraint-v2"],
+    default="legacy",
+    help="Use constraint-v2 for the redesigned T3/T4 while keeping other templates unchanged.",
+)
+_parser.add_argument(
     "--output-dir",
     type=str,
     default="datasets/qa_dataset",
@@ -60,10 +66,13 @@ _parser.add_argument(
 )
 _args = _parser.parse_args()
 T3T4_REDESIGN = bool(_args.t3t4_redesign)
+TEMPLATE_VERSION = str(_args.template_version)
 
 OUTPUT_DIR = Path(_args.output_dir)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-print(f"t3t4_redesign={T3T4_REDESIGN}; output={OUTPUT_DIR}")
+print(
+    f"t3t4_redesign={T3T4_REDESIGN}; template_version={TEMPLATE_VERSION}; output={OUTPUT_DIR}"
+)
 
 import pandas as pd
 import warnings
@@ -143,8 +152,18 @@ print(f"Candidate decision dates: {len(SAMPLE_DATES)} "
 BUILDERS = [
     T1ReturnPrediction(provider, config),
     T2RiskAssessment(provider, config),
-    T3PositionSizing(provider, config, redesign=T3T4_REDESIGN),
-    T4PairwiseAllocation(provider, config, redesign=T3T4_REDESIGN),
+    T3PositionSizing(
+        provider,
+        config,
+        redesign=T3T4_REDESIGN,
+        template_version=TEMPLATE_VERSION,
+    ),
+    T4PairwiseAllocation(
+        provider,
+        config,
+        redesign=T3T4_REDESIGN,
+        template_version=TEMPLATE_VERSION,
+    ),
     T5MultiAssetOptimization(provider, config),
     T6RebalancingDecision(provider, config),
     T7RegimeDetection(provider, config),
