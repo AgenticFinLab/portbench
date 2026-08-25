@@ -254,7 +254,7 @@ def build_s3_prompt(
     corr_section = f"\n{corr_block}\n" if corr_block else ""
     schema = _schema_block(
         [
-            '  "allocation_scores": {"SELECTED_ASSET": <positive decimal>, ...},',
+            '  "allocation_scores": {"SELECTED_ASSET": <non-negative decimal>, ...},',
             '  "expected_return": <annualized decimal, e.g. 0.08>,',
             '  "expected_vol": <annualized decimal, e.g. 0.12>,',
             '  "sharpe_estimate": <decimal>',
@@ -272,9 +272,9 @@ Market regime: {_display_regime(snapshot.market_regime)}
 TASK: Select a sparse portfolio allocation based on the signals above.
 
 Constraints:
-  - allocation_scores must be finite, strictly positive decimal numbers
+  - allocation_scores must be finite, non-negative decimal numbers, with at least one strictly positive score
   - Do not normalize allocation_scores; the deterministic environment normalizes their relative magnitudes into target weights
-  - Return only selected assets in allocation_scores; omitted visible assets receive a target weight of 0.0
+  - Omitted visible assets receive a target weight of 0.0; a listed 0.0 explicitly excludes that asset
   - Select at most 12 assets
   - "sell" signals should receive reduced weight (ideally 0.0)
   - "buy" signals should receive increased weight

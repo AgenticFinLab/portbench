@@ -423,19 +423,21 @@ def _parse_stage_payload(
     elif stage_name == "S3":
         scores = payload.get("allocation_scores")
         if not isinstance(scores, dict) or not scores:
-            raise ValueError("S3 requires at least one positive visible-asset allocation score")
+            raise ValueError("S3 requires a non-empty visible-asset allocation score object")
         if not set(scores).issubset(assets):
             raise ValueError("S3 allocation scores may only reference visible assets")
         if len(scores) > 12:
-            raise ValueError("S3 may select at most 12 positive-score assets")
+            raise ValueError("S3 may list at most 12 allocation-score assets")
         values = list(scores.values())
         if any(
             not isinstance(value, (int, float))
             or not math.isfinite(float(value))
-            or float(value) <= 0.0
+            or float(value) < 0.0
             for value in values
         ):
-            raise ValueError("S3 allocation scores must be finite positive numbers")
+            raise ValueError("S3 allocation scores must be finite non-negative numbers")
+        if not any(float(value) > 0.0 for value in values):
+            raise ValueError("S3 requires at least one strictly positive allocation score")
     return payload
 
 
@@ -477,8 +479,8 @@ def _call_with_json_retry(
             response_schema["asset_view_representation"] = "sparse-neutral-v1"
             parser_version = "S1-sparse-json-v5"
         if stage_name == "S3":
-            response_schema["allocation_representation"] = "positive-scores-v1"
-            parser_version = "S3-scores-json-v5"
+            response_schema["allocation_representation"] = "nonnegative-scores-v2"
+            parser_version = "S3-scores-json-v6"
         parsed, raw = adapter.complete_json(
             prompt,
             parse=parse,

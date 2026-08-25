@@ -11,20 +11,20 @@ from portbench.agent_eval.prompts import build_s3_prompt
 from portbench.agent_eval.stages import S3WeightOptimization, _parse_stage_payload
 
 
-def test_s3_accepts_sparse_positive_allocation_scores():
-    """Allow omitted visible assets to represent zero-weight holdings."""
+def test_s3_accepts_sparse_non_negative_allocation_scores():
+    """Allow zero scores to explicitly exclude a visible asset."""
     snapshot = SimpleNamespace(return_data={"SPY": object(), "BIL": object()})
 
     parsed = _parse_stage_payload(
-        '{"allocation_scores": {"SPY": 0.7, "BIL": 0.3}}',
+        '{"allocation_scores": {"SPY": 0.7, "BIL": 0.0}}',
         stage_name="S3",
         snapshot=snapshot,
     )
 
-    assert parsed["allocation_scores"] == {"SPY": 0.7, "BIL": 0.3}
+    assert parsed["allocation_scores"] == {"SPY": 0.7, "BIL": 0.0}
 
 
-def test_s3_rejects_unknown_or_non_positive_allocation_scores():
+def test_s3_rejects_unknown_negative_or_all_zero_allocation_scores():
     """Keep the visible-asset and numeric constraints strict."""
     snapshot = SimpleNamespace(return_data={"SPY": object(), "BIL": object()})
 
@@ -34,9 +34,15 @@ def test_s3_rejects_unknown_or_non_positive_allocation_scores():
             stage_name="S3",
             snapshot=snapshot,
         )
-    with pytest.raises(ValueError, match="finite positive"):
+    with pytest.raises(ValueError, match="finite non-negative"):
         _parse_stage_payload(
-            '{"allocation_scores": {"SPY": 1.0, "BIL": 0.0}}',
+            '{"allocation_scores": {"SPY": 1.0, "BIL": -0.1}}',
+            stage_name="S3",
+            snapshot=snapshot,
+        )
+    with pytest.raises(ValueError, match="strictly positive"):
+        _parse_stage_payload(
+            '{"allocation_scores": {"SPY": 0.0, "BIL": 0.0}}',
             stage_name="S3",
             snapshot=snapshot,
         )
