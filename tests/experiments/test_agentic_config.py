@@ -191,10 +191,11 @@ def test_sa_upgrade_configs_pin_single_agent_without_tools_or_memory():
         "constraint_decision_v2_test_manifest.json"
     )
     assert len(configs["full_c_stress"].models) == 10
-    assert configs["full_c_stress"].rebalance == "weekly"
+    assert configs["full_c_stress"].rebalance == "monthly"
     assert not configs["full_c_stress"].run_normal
     assert configs["full_c_stress"].legacy_stage_reuse_root == ""
     assert configs["full_c_normal"].rebalance == "monthly"
     assert configs["full_c_normal"].stress_scenarios == []
     assert configs["causal_c_stress"].profiles == ["balanced"]
+    assert configs["causal_c_stress"].rebalance == "monthly"
     assert configs["causal_c_normal"].interventions.mode == "online"

@@ -11,7 +11,7 @@ sa_only: true
 call_artifact_root: EXPERIMENTS_SA_UPGRADE/shared_call_artifacts
 required_gate: EXPERIMENTS_SA_UPGRADE/gates/sa_upgrade_pilot.json
 workers_per_experiment: 1
-parallel_experiments: 1
+parallel_experiments: 3
 seed: 42
 use_tools: false
 call_max_attempts: 3
@@ -25,8 +25,8 @@ resource_budget:
   config_version: iso-token-v3
 models:
   - {provider: tencent, model: hy3-preview, architecture_id: SA}
-  - {provider: deepseek, model: deepseek-v4-pro, architecture_id: SA}
-  - {provider: deepseek, model: deepseek-v4-flash, architecture_id: SA}
+  - {provider: tencent, model: deepseek-v4-pro, architecture_id: SA}
+  - {provider: tencent, model: deepseek-v4-flash, architecture_id: SA}
   - {provider: ark, model: doubao-seed-2-0-pro-260215, architecture_id: SA}
   - {provider: ark, model: doubao-seed-2-0-lite-260215, architecture_id: SA}
   - {provider: dashscope, model: qwen3.7-max, architecture_id: SA}
@@ -41,7 +41,7 @@ normal_periods:
   - {start: 2024-01-01, end: 2024-12-31, label: balanced_bull_2024}
 max_rebalances_per_window: 0
 oracle_mode: lookback
-experiment_tag: sa_upgrade_full_c_normal_v1
+experiment_tag: sa_upgrade_full_c_normal_v3
 logging: {save_pipeline_logs: true, save_snapshots: true, save_figures: true}
 on_error: isolate
 output_root: EXPERIMENTS
