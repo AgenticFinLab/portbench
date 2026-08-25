@@ -39,7 +39,7 @@ stress_scenarios: [2015_china_shock, 2020_covid_flash_crash, 2022_crypto_collaps
 run_normal: false
 max_rebalances_per_window: 0
 oracle_mode: lookback
-experiment_tag: sa_upgrade_causal_c_stress_v5
+experiment_tag: sa_upgrade_causal_c_stress_v6
 logging: {save_pipeline_logs: true, save_snapshots: true, save_figures: true}
 on_error: isolate
 output_root: EXPERIMENTS

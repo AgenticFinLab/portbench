@@ -23,16 +23,23 @@ def test_s1_accepts_sparse_visible_asset_views():
     assert parsed["asset_views"] == {"SPY": 0.4}
 
 
-def test_s1_rejects_unknown_or_non_finite_asset_views():
-    """Sparse S1 views must remain bounded to the visible asset universe."""
+def test_s1_ignores_unknown_news_asset_views():
+    """Ignore asset symbols copied from news that are not investable inputs."""
+    snapshot = SimpleNamespace(return_data={"SPY": object(), "BIL": object()})
+
+    parsed = _parse_stage_payload(
+        ('{"asset_views": {"SPY": 0.4, "NEWS_TICKER": 0.7}, ' '"confidence": 0.7}'),
+        stage_name="S1",
+        snapshot=snapshot,
+    )
+
+    assert parsed["asset_views"] == {"SPY": 0.4}
+
+
+def test_s1_rejects_non_finite_visible_asset_views():
+    """Visible-asset views must remain bounded numeric values."""
     snapshot = SimpleNamespace(return_data={"SPY": object()})
 
-    with pytest.raises(ValueError, match="visible assets"):
-        _parse_stage_payload(
-            ('{"asset_views": {"UNKNOWN": 0.4}, ' '"confidence": 0.7}'),
-            stage_name="S1",
-            snapshot=snapshot,
-        )
     with pytest.raises(ValueError, match="asset views"):
         _parse_stage_payload(
             ('{"asset_views": {"SPY": "not-a-number"}, ' '"confidence": 0.7}'),

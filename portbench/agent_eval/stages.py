@@ -400,7 +400,11 @@ def _parse_stage_payload(
         if not isinstance(views, dict):
             raise ValueError("S1 requires an asset_views object")
         if not set(views).issubset(assets):
-            raise ValueError("S1 asset views may only reference visible assets")
+            payload = dict(payload)
+            payload["asset_views"] = {
+                asset: value for asset, value in views.items() if asset in assets
+            }
+            views = payload["asset_views"]
         if not isinstance(confidence, (int, float)) or not 0.0 <= float(confidence) <= 1.0:
             raise ValueError("S1 confidence must be in [0, 1]")
         for value in views.values():
@@ -475,7 +479,7 @@ def _call_with_json_retry(
         parser_version = f"{stage_name}-json-v4"
         if stage_name == "S1":
             response_schema["asset_view_representation"] = "sparse-neutral-v1"
-            parser_version = "S1-sparse-json-v5"
+            parser_version = "S1-sparse-json-v6"
         if stage_name == "S3":
             response_schema["allocation_representation"] = "nonnegative-scores-v3"
             parser_version = "S3-scores-json-v7"
