@@ -321,6 +321,41 @@ class CallArtifactStore:
                         "provenance": dict(provenance or {}),
                     },
                 )
+            for item in reversed(ledger):
+                if item.get("event") != "received":
+                    continue
+                raw_response = item.get("raw_response")
+                if not isinstance(raw_response, str):
+                    continue
+                try:
+                    parsed_output = parse(raw_response)
+                except Exception:
+                    continue
+                artifact_provenance = dict(provenance or {})
+                artifact_provenance["reparsed_from_attempt"] = item.get("attempt")
+                artifact = CallArtifact(
+                    call_key=request.call_key,
+                    request=request.key_payload(),
+                    raw_response=raw_response,
+                    response_hash=sha256_hex(raw_response),
+                    completed_at=_now(),
+                    provenance=artifact_provenance,
+                )
+                self._atomic_write(
+                    self._path("calls", request.namespace, request.call_key), asdict(artifact)
+                )
+                self._record_parse(request, parser_version, raw_response, parsed_output)
+                self._append_attempt(
+                    request.namespace,
+                    request.call_key,
+                    {
+                        "timestamp": _now(),
+                        "event": "reparsed_validated",
+                        "attempt": item.get("attempt"),
+                        "parser_version": parser_version,
+                    },
+                )
+                return parsed_output, artifact, True
             provider_attempts = [
                 item
                 for item in ledger

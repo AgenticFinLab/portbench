@@ -112,6 +112,39 @@ def test_parser_upgrade_reuses_validated_raw_response(tmp_path):
     assert calls["count"] == 1
 
 
+def test_parser_upgrade_promotes_a_previously_invalid_raw_response(tmp_path):
+    store = CallArtifactStore(tmp_path)
+    request = _request()
+    responses = iter(['{"answer": "0.5"}'] * 3)
+
+    def rejected_parse(raw):
+        raise ValueError("old parser")
+
+    with pytest.raises(TerminalCallFailure):
+        store.complete_or_call(
+            request,
+            parser_version="schema-v1",
+            parse=rejected_parse,
+            call_fn=lambda: next(responses),
+            backoff_seconds=(0.0, 0.0),
+        )
+
+    def unexpected_provider_call():
+        raise AssertionError("provider call not expected")
+
+    parsed, artifact, hit = store.complete_or_call(
+        request,
+        parser_version="schema-v2",
+        parse=lambda raw: {"answer": float(json.loads(raw)["answer"])},
+        call_fn=unexpected_provider_call,
+    )
+
+    assert hit
+    assert parsed == {"answer": 0.5}
+    assert artifact.provenance["reparsed_from_attempt"] == 3
+    assert any(item["event"] == "reparsed_validated" for item in store.attempts(request))
+
+
 def test_invalid_attempts_stay_in_ledger_and_require_explicit_retry(tmp_path):
     store = CallArtifactStore(tmp_path)
     request = _request()

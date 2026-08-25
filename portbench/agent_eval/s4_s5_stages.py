@@ -91,11 +91,15 @@ def _plan_from_payload(payload: Mapping[str, Any]) -> ExecutionPlan:
         try:
             order = OrderIntent(
                 asset=str(item.get("asset", "")),
-                direction=str(item.get("direction", "hold")),
+                direction=str(item.get("direction", "hold")).strip().lower(),
                 target_weight=item.get("target_weight"),
                 delta_weight=item.get("delta_weight"),
-                order_type=str(item.get("order_type", payload.get("order_type", "market"))),
-                urgency=str(item.get("urgency", payload.get("urgency", "normal"))),
+                order_type=str(
+                    item.get("order_type", payload.get("order_type", "market"))
+                ).strip().lower(),
+                urgency=str(
+                    item.get("urgency", payload.get("urgency", "normal"))
+                ).strip().lower(),
                 slip_limit=item.get("slip_limit", payload.get("slip_limit")),
             )
         except (TypeError, ValueError) as exc:
@@ -221,7 +225,7 @@ def _complete_json(
         parsed, raw = adapter.complete_json(
             prompt,
             parse=validate,
-            parser_version="s4s5-json-v4",
+            parser_version="s4s5-json-v5",
             response_schema={"type": "object", "stage": "S4S5"},
             use_tools=use_tools,
             snapshot=snapshot,

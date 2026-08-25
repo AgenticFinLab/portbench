@@ -187,6 +187,30 @@ def test_agentic_s4_retries_then_marks_parse_error_and_zeros_plan():
     assert output.refused is True
 
 
+def test_agentic_s4_normalizes_order_enum_casing():
+    from portbench.agent_eval.s4_s5_stages import _plan_from_payload
+
+    plan = _plan_from_payload(
+        {
+            "orders": [
+                {
+                    "asset": "SPY",
+                    "direction": "SELL",
+                    "delta_weight": -0.1,
+                    "order_type": "MARKET",
+                    "urgency": "HIGH",
+                    "slip_limit": 0.001,
+                }
+            ]
+        }
+    )
+
+    order = plan.normalized_orders()[0]
+    assert order.direction == "sell"
+    assert order.order_type == "market"
+    assert order.urgency == "high"
+
+
 def test_agentic_s5_rejects_overweight_incoming_book():
     import json
 
