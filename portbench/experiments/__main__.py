@@ -71,6 +71,56 @@ def main(argv=None) -> int:
         ),
     )
     p.add_argument(
+        "--analyze-causal",
+        action="store_true",
+        help="Aggregate completed SA v4 online repair logs without making LLM calls.",
+    )
+    p.add_argument(
+        "--causal-input",
+        default=None,
+        help="Rebalance directory containing causal pipeline logs.",
+    )
+    p.add_argument(
+        "--causal-output",
+        default=None,
+        help="Directory for causal attribution JSON and heatmap artifacts.",
+    )
+    p.add_argument(
+        "--causal-bootstrap",
+        type=int,
+        default=10_000,
+        help="Moving-block bootstrap draws for --analyze-causal.",
+    )
+    p.add_argument(
+        "--analyze-qa-v2",
+        action="store_true",
+        help="Aggregate locked constraint-v2 QA results with item-bootstrap intervals.",
+    )
+    p.add_argument(
+        "--qa-v2-input",
+        default=None,
+        help="Experiment output root containing qa_eval results for --analyze-qa-v2.",
+    )
+    p.add_argument(
+        "--qa-v2-output",
+        default=None,
+        help="Directory for constraint-v2 QA statistics and figures.",
+    )
+    p.add_argument(
+        "--qa-v2-bootstrap",
+        type=int,
+        default=10_000,
+        help="Item-bootstrap draws for --analyze-qa-v2.",
+    )
+    p.add_argument(
+        "--export-paper-artifacts",
+        action="store_true",
+        help="Export LaTeX rows and a numeric manifest from frozen causal and QA summaries.",
+    )
+    p.add_argument("--paper-causal-summary", default=None)
+    p.add_argument("--paper-qa-summary", default=None)
+    p.add_argument("--paper-output", default=None)
+    p.add_argument(
         "--rebalance",
         default="monthly",
         help="Rebalance frequency directory (default: monthly)",
@@ -132,6 +182,77 @@ def main(argv=None) -> int:
             config_path=args.config,
         )
         print(f"λ sweep complete: {result}")
+        return 0
+
+    if getattr(args, "analyze_causal", False):
+        from .causal_analysis import (
+            load_online_repair_records,
+            summarize_causal_attribution,
+            write_causal_artifacts,
+        )
+
+        if args.causal_input:
+            input_root = Path(args.causal_input)
+        elif args.config:
+            config = ExperimentConfig.from_yaml(args.config)
+            input_root = Path(config.output_root) / config.rebalance
+        else:
+            p.error("--analyze-causal requires --causal-input or --config")
+        output_root = (
+            Path(args.causal_output)
+            if args.causal_output
+            else input_root / "causal_attribution"
+        )
+        records = load_online_repair_records(input_root)
+        summary = summarize_causal_attribution(
+            records,
+            n_bootstrap=args.causal_bootstrap,
+            seed=42,
+            block_size=3,
+        )
+        result = write_causal_artifacts(summary, output_root)
+        print(f"Causal attribution complete: {result}")
+        return 0
+
+    if getattr(args, "analyze_qa_v2", False):
+        from ..qa_eval.constraint_analysis import (
+            load_constraint_v2_records,
+            summarize_constraint_v2,
+            write_constraint_v2_artifacts,
+        )
+
+        if args.qa_v2_input:
+            input_root = Path(args.qa_v2_input)
+        elif args.config:
+            input_root = Path(ExperimentConfig.from_yaml(args.config).output_root)
+        else:
+            p.error("--analyze-qa-v2 requires --qa-v2-input or --config")
+        output_root = Path(args.qa_v2_output) if args.qa_v2_output else input_root / "qa_eval" / "constraint_v2_analysis"
+        result = write_constraint_v2_artifacts(
+            summarize_constraint_v2(
+                load_constraint_v2_records(input_root),
+                n_bootstrap=args.qa_v2_bootstrap,
+                seed=42,
+            ),
+            output_root,
+        )
+        print(f"Constraint-v2 QA analysis complete: {result}")
+        return 0
+
+    if getattr(args, "export_paper_artifacts", False):
+        from .paper_export import export_paper_artifacts
+
+        if not (args.paper_causal_summary and args.paper_qa_summary and args.paper_output):
+            p.error(
+                "--export-paper-artifacts requires --paper-causal-summary, "
+                "--paper-qa-summary, and --paper-output"
+            )
+        result = export_paper_artifacts(
+            causal_summary_path=args.paper_causal_summary,
+            qa_summary_path=args.paper_qa_summary,
+            output_dir=args.paper_output,
+        )
+        print(f"Paper artifacts exported: {result}")
         return 0
 
     if not args.config:
