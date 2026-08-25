@@ -47,6 +47,6 @@ on_error: isolate
 output_root: EXPERIMENTS
 timeout: 600
 propagation_weight: 0.1
-reuse_latest: false
+reuse_latest: true
 interventions: {enabled: false, stages: [S1, S2, S3, S4, S5], operator: repair, mode: online, closed_loop: false}
 run_qa: false
