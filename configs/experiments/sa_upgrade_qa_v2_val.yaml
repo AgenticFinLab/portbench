@@ -1,0 +1,60 @@
+# Development-only validation gate for constraint-v2; do not use test results to edit items.
+batch_id: "sa_upgrade_qa_v2_val_{date}"
+data_provider: processed
+data_version: processed-v1
+data_dir: datasets/processed
+sec_dir: datasets/sec
+rebalance: monthly
+initial_nav: 1000000
+pipeline_schema_version: pipeline-v4-sa-causal
+sa_only: true
+call_artifact_root: EXPERIMENTS_SA_UPGRADE/shared_call_artifacts
+workers_per_experiment: 1
+parallel_experiments: 1
+seed: 42
+use_tools: false
+call_max_attempts: 3
+retry_failed_calls: false
+generation:
+  temperature: 0.0
+  max_tokens: 8192
+resource_budget:
+  max_tokens_per_episode: 0
+  max_requests_per_episode: 0
+  config_version: iso-token-v3
+models:
+  - {provider: tencent, model: hy3-preview, architecture_id: SA}
+  - {provider: dashscope, model: qwen3.7-max, architecture_id: SA}
+profiles: [balanced]
+stress_scenarios: [2022_crypto_collapse]
+run_normal: false
+oracle_mode: lookback
+experiment_tag: sa_upgrade_qa_v2_val_v1
+logging:
+  save_pipeline_logs: true
+  save_snapshots: true
+  save_figures: false
+on_error: isolate
+output_root: EXPERIMENTS
+timeout: 600
+propagation_weight: 0.1
+reuse_latest: true
+run_sandbox: false
+interventions:
+  enabled: false
+  stages: [S1, S2, S3, S4, S5]
+  operator: repair
+  mode: online
+  closed_loop: false
+run_qa: true
+qa:
+  dataset_path: datasets/qa-v2-constraint
+  split: val
+  templates: [T3, T4]
+  max_pairs_per_template: 20
+  parallel_questions: 1
+  save_responses: true
+  template_version: constraint-v2
+  scorer_version: qa-v2-constraint-v1
+  call_max_attempts: 3
+  retry_failed_calls: false

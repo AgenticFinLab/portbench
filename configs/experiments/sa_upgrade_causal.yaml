@@ -1,0 +1,60 @@
+# Online paired simulator repair branches for the balanced SA-only v4 analysis.
+batch_id: "sa_upgrade_causal_{date}"
+data_provider: processed
+data_version: processed-v1
+data_dir: datasets/processed
+sec_dir: datasets/sec
+rebalance: monthly
+initial_nav: 1000000
+pipeline_schema_version: pipeline-v4-sa-causal
+sa_only: true
+call_artifact_root: EXPERIMENTS_SA_UPGRADE/shared_call_artifacts
+required_gate: EXPERIMENTS_SA_UPGRADE/gates/sa_upgrade_pilot.json
+workers_per_experiment: 1
+parallel_experiments: 1
+seed: 42
+use_tools: false
+call_max_attempts: 3
+retry_failed_calls: false
+generation:
+  temperature: 0.0
+  max_tokens: 8192
+resource_budget:
+  max_tokens_per_episode: 0
+  max_requests_per_episode: 0
+  config_version: iso-token-v3
+models:
+  - {provider: tencent, model: hy3-preview, architecture_id: SA}
+  - {provider: deepseek, model: deepseek-v4-pro, architecture_id: SA}
+  - {provider: deepseek, model: deepseek-v4-flash, architecture_id: SA}
+  - {provider: ark, model: doubao-seed-2-0-pro-260215, architecture_id: SA}
+  - {provider: ark, model: doubao-seed-2-0-lite-260215, architecture_id: SA}
+  - {provider: dashscope, model: qwen3.7-max, architecture_id: SA}
+  - {provider: dashscope, model: qwen3.6-plus, architecture_id: SA}
+  - {provider: dashscope, model: kimi-k2.6, architecture_id: SA}
+  - {provider: dashscope, model: glm-5.1, architecture_id: SA}
+  - {provider: dashscope, model: qwen3.6-35b-a3b, architecture_id: SA}
+profiles: [balanced]
+stress_scenarios: [2015_china_shock, 2020_covid_flash_crash, 2022_crypto_collapse]
+run_normal: true
+normal_periods:
+  - {start: 2024-01-01, end: 2024-12-31, label: balanced_bull_2024}
+  - {start: 2022-07-01, end: 2022-12-31, label: conservative_pressure_2022h2}
+oracle_mode: lookback
+experiment_tag: sa_upgrade_causal_v1
+logging:
+  save_pipeline_logs: true
+  save_snapshots: true
+  save_figures: true
+on_error: isolate
+output_root: EXPERIMENTS
+timeout: 600
+propagation_weight: 0.1
+reuse_latest: false
+interventions:
+  enabled: true
+  stages: [S1, S2, S3, S4, S5]
+  operator: repair
+  mode: online
+  closed_loop: false
+run_qa: false

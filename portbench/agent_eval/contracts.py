@@ -19,6 +19,7 @@ class SchemaVersion(str, Enum):
     PIPELINE_V1_DETERMINISTIC = "pipeline-v1-deterministic"
     PIPELINE_V2_AGENTIC = "pipeline-v2-agentic"
     PIPELINE_V3_COLLAB = "pipeline-v3-collab"
+    PIPELINE_V4_SA_CAUSAL = "pipeline-v4-sa-causal"
 
 
 # Module-level aliases matching plan string literals.
@@ -26,11 +27,13 @@ PIPELINE_V1 = SchemaVersion.PIPELINE_V1.value
 PIPELINE_V1_DETERMINISTIC = SchemaVersion.PIPELINE_V1_DETERMINISTIC.value
 PIPELINE_V2_AGENTIC = SchemaVersion.PIPELINE_V2_AGENTIC.value
 PIPELINE_V3_COLLAB = SchemaVersion.PIPELINE_V3_COLLAB.value
+PIPELINE_V4_SA_CAUSAL = SchemaVersion.PIPELINE_V4_SA_CAUSAL.value
 
 # S4/S5 dual-layer schema tags (plan vs deterministic environment).
 # Legacy stages map to DETERMINISTIC; agentic upgrade path uses AGENTIC.
 S4S5_SCHEMA_DETERMINISTIC = PIPELINE_V1_DETERMINISTIC
 S4S5_SCHEMA_AGENTIC = PIPELINE_V3_COLLAB
+S4S5_SCHEMA_SA_CAUSAL = PIPELINE_V4_SA_CAUSAL
 
 
 class ResultProtocol(str, Enum):
@@ -325,8 +328,10 @@ __all__ = [
     "PIPELINE_V1_DETERMINISTIC",
     "PIPELINE_V2_AGENTIC",
     "PIPELINE_V3_COLLAB",
+    "PIPELINE_V4_SA_CAUSAL",
     "S4S5_SCHEMA_DETERMINISTIC",
     "S4S5_SCHEMA_AGENTIC",
+    "S4S5_SCHEMA_SA_CAUSAL",
     "ResultProtocol",
     "STEP_REPLAY",
     "CLOSED_LOOP",

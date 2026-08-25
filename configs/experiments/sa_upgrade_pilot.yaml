@@ -1,0 +1,49 @@
+# SA-only pilot for the v4 causal pipeline. Run this gate before any full matrix.
+batch_id: "sa_upgrade_pilot_{date}"
+data_provider: processed
+data_version: processed-v1
+data_dir: datasets/processed
+sec_dir: datasets/sec
+rebalance: monthly
+initial_nav: 1000000
+pipeline_schema_version: pipeline-v4-sa-causal
+sa_only: true
+call_artifact_root: EXPERIMENTS_SA_UPGRADE/shared_call_artifacts
+workers_per_experiment: 1
+parallel_experiments: 1
+seed: 42
+use_tools: false
+call_max_attempts: 3
+retry_failed_calls: false
+generation:
+  temperature: 0.0
+  max_tokens: 8192
+resource_budget:
+  max_tokens_per_episode: 0
+  max_requests_per_episode: 0
+  config_version: iso-token-v3
+models:
+  - {provider: tencent, model: hy3-preview, architecture_id: SA}
+profiles: [balanced]
+stress_scenarios: [2022_crypto_collapse]
+run_normal: true
+normal_periods:
+  - {start: 2024-01-01, end: 2024-12-31, label: balanced_bull_2024}
+oracle_mode: lookback
+experiment_tag: sa_upgrade_pilot_v1
+logging:
+  save_pipeline_logs: true
+  save_snapshots: true
+  save_figures: true
+on_error: isolate
+output_root: EXPERIMENTS
+timeout: 600
+propagation_weight: 0.1
+reuse_latest: true
+interventions:
+  enabled: true
+  stages: [S1, S2, S3, S4, S5]
+  operator: repair
+  mode: online
+  closed_loop: false
+run_qa: false

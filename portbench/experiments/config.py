@@ -188,6 +188,11 @@ class QAConfig:
     t3t4_redesign: bool = False
     t3t4_numeric_weight: float = 0.7
     t3t4_explanation_weight: float = 0.3
+    template_version: str = "legacy"
+    scorer_version: str = "legacy-v1"
+    call_max_attempts: int = 3
+    retry_failed_calls: bool = False
+    freeze_manifest: str = ""
 
 
 @dataclass
@@ -209,6 +214,10 @@ class ExperimentConfig:
 
     data_provider: str = "processed"
     data_version: str = "processed-v1"
+    pipeline_schema_version: str = "pipeline-v3-collab"
+    sa_only: bool = False
+    call_artifact_root: str = ""
+    required_gate: str = ""
     data_dir: str = "datasets/processed"
     sec_dir: str = "datasets/sec"
     rebalance: str = "monthly"
@@ -219,11 +228,14 @@ class ExperimentConfig:
     noise: float = 0.2
     use_tools: bool = False
     timeout: float = 120.0  # per-request timeout in seconds for LLM calls
+    call_max_attempts: int = 3
+    retry_failed_calls: bool = False
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     on_error: str = "isolate"
     output_root: str = "EXPERIMENTS"
     propagation_weight: float = 0.1  # CEPS cascade penalty weight
     reuse_latest: bool = False  # reuse the most complete existing run per model
+    run_sandbox: bool = True  # run the S1-S5 backtest matrix
     run_qa: bool = False  # run QA dataset evaluation alongside sandbox
     qa: QAConfig = field(default_factory=QAConfig)
     generation: GenerationConfig = field(default_factory=GenerationConfig)
@@ -241,6 +253,18 @@ class ExperimentConfig:
             )
         if self.experiment_tag:
             self.output_root = f"{self.output_root}_{self.experiment_tag}"
+        if self.sa_only:
+            from ..agent_eval.contracts import PIPELINE_V4_SA_CAUSAL
+
+            if self.pipeline_schema_version != PIPELINE_V4_SA_CAUSAL:
+                raise ValueError("sa_only experiments require pipeline-v4-sa-causal")
+            if self.use_tools:
+                raise ValueError("sa_only experiments require use_tools=false")
+            if self.workers_per_experiment != 1:
+                raise ValueError("sa_only experiments require workers_per_experiment=1")
+            non_sa = [model for model in self.models if model.architecture_id != "SA"]
+            if non_sa:
+                raise ValueError("sa_only experiments require every model architecture_id=SA")
 
     @staticmethod
     def from_yaml(path: str | Path) -> "ExperimentConfig":
@@ -314,6 +338,10 @@ class ExperimentConfig:
             experiment_tag=str(raw.get("experiment_tag", "")),
             data_provider=raw.get("data_provider", "processed"),
             data_version=str(raw.get("data_version", "processed-v1")),
+            pipeline_schema_version=str(raw.get("pipeline_schema_version", "pipeline-v3-collab")),
+            sa_only=bool(raw.get("sa_only", False)),
+            call_artifact_root=str(raw.get("call_artifact_root", "")),
+            required_gate=str(raw.get("required_gate", "")),
             data_dir=raw.get("data_dir", "datasets/processed"),
             sec_dir=raw.get("sec_dir", "datasets/sec"),
             rebalance=raw.get("rebalance", "monthly"),
@@ -327,8 +355,11 @@ class ExperimentConfig:
             output_root=raw.get("output_root", "EXPERIMENTS"),
             use_tools=bool(raw.get("use_tools", False)),
             timeout=float(raw.get("timeout", 120.0)),
+            call_max_attempts=int(raw.get("call_max_attempts", 3)),
+            retry_failed_calls=bool(raw.get("retry_failed_calls", False)),
             propagation_weight=float(raw.get("propagation_weight", 0.1)),
             reuse_latest=bool(raw.get("reuse_latest", False)),
+            run_sandbox=bool(raw.get("run_sandbox", True)),
             run_qa=bool(raw.get("run_qa", False)),
             qa=_parse_qa_config(raw.get("qa") or {}),
             generation=gen_obj,
@@ -426,4 +457,9 @@ def _parse_qa_config(raw: dict) -> QAConfig:
         t3t4_redesign=bool(raw.get("t3t4_redesign", False)),
         t3t4_numeric_weight=float(raw.get("t3t4_numeric_weight", 0.7)),
         t3t4_explanation_weight=float(raw.get("t3t4_explanation_weight", 0.3)),
+        template_version=str(raw.get("template_version", "legacy")),
+        scorer_version=str(raw.get("scorer_version", "legacy-v1")),
+        call_max_attempts=int(raw.get("call_max_attempts", 3)),
+        retry_failed_calls=bool(raw.get("retry_failed_calls", False)),
+        freeze_manifest=str(raw.get("freeze_manifest", "")),
     )
