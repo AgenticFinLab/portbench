@@ -24,7 +24,8 @@ from typing import Callable, Optional
 import pandas as pd
 from tqdm.auto import tqdm
 
-from ..agent_eval.base import AgentAdapter, EvalPipeline, StageID
+from ..agent_eval import pit_repair
+from ..agent_eval.base import AgentAdapter, EvalPipeline, S1Output, S2Output, S3Output, StageID
 from ..agent_eval import build_default_pipeline
 from ..agent_eval.investor_profiles import InvestorProfile, ProfileAlignmentScorer
 from ..baselines.base import BaselineStrategy
@@ -58,6 +59,11 @@ class BacktestEngine:
         start_date:      Backtest start date.
         end_date:        Backtest end date.
         rebalance_freq:  One of "weekly", "monthly", "quarterly".
+        max_rebalances:  Optional positive cap used by a reliability pilot.
+        factual_pit_prefix_stages:
+                         Optional S1-S3 prefix built only from trailing returns.
+                         This is reserved for reliability pilots and is recorded
+                         in episode provenance; it is not a model-performance mode.
         initial_nav:     Starting portfolio NAV in dollars.
         initial_weights: Optional initial portfolio weights. If None, uses
                          equal-weight across all assets.
@@ -80,6 +86,7 @@ class BacktestEngine:
         end_date: date = date(2024, 12, 31),
         rebalance_freq: str = "monthly",
         max_rebalances: int = 0,
+        factual_pit_prefix_stages: Optional[list[str]] = None,
         initial_nav: float = 1_000_000.0,
         initial_weights: Optional[dict[str, float]] = None,
         lookback_days: int = 60,
@@ -112,6 +119,12 @@ class BacktestEngine:
         self.end_date = end_date
         self.rebalance_freq = rebalance_freq
         self.max_rebalances = max_rebalances
+        self._factual_pit_prefix_stages = tuple(factual_pit_prefix_stages or [])
+        allowed_prefix = ("S1", "S2", "S3")
+        if self._factual_pit_prefix_stages != allowed_prefix[
+            : len(self._factual_pit_prefix_stages)
+        ]:
+            raise ValueError("factual_pit_prefix_stages must be an S1-S3 prefix")
         self._forward_days = _REBALANCE_FORWARD_DAYS.get(rebalance_freq, 21)
         self.initial_nav = initial_nav
         self.initial_weights = initial_weights
@@ -384,6 +397,44 @@ class BacktestEngine:
             resource_audit=list(self._resource_audit),
         )
 
+    def _build_pit_prefix(self, snapshot) -> dict[StageID, object]:
+        """Build the configured reliability-pilot prefix from trailing returns only."""
+        if not self._factual_pit_prefix_stages:
+            return {}
+        lookback_returns = snapshot.return_data
+        outputs: dict[StageID, object] = {}
+        s1_payload: Optional[dict] = None
+        for stage_name in self._factual_pit_prefix_stages:
+            if stage_name == "S1":
+                s1_payload = pit_repair.repair_s1(lookback_returns=lookback_returns)
+                outputs[StageID.S1_MARKET_INTERPRETATION] = S1Output(
+                    asset_views=dict(s1_payload["asset_views"]),
+                    macro_summary=str(s1_payload["macro_summary"]),
+                    detected_regime=str(s1_payload["detected_regime"]),
+                    confidence=float(s1_payload["confidence"]),
+                )
+            elif stage_name == "S2":
+                if s1_payload is None:
+                    raise RuntimeError("S2 Point-in-Time prefix requires S1 output")
+                s2_payload = pit_repair.repair_s2(
+                    lookback_returns=lookback_returns,
+                    s1_output=s1_payload,
+                )
+                outputs[StageID.S2_SIGNAL_GENERATION] = S2Output(
+                    signals=dict(s2_payload["signals"]),
+                    strengths=dict(s2_payload["strengths"]),
+                    reasoning=str(s2_payload["reasoning"]),
+                )
+            elif stage_name == "S3":
+                s3_payload = pit_repair.repair_s3(lookback_returns=lookback_returns)
+                outputs[StageID.S3_WEIGHT_OPTIMIZATION] = S3Output(
+                    weights=dict(s3_payload["weights"]),
+                    expected_return=float(s3_payload["expected_return"]),
+                    expected_vol=float(s3_payload["expected_vol"]),
+                    sharpe_estimate=float(s3_payload["sharpe_estimate"]),
+                )
+        return outputs
+
     def _get_target_weights(self, snapshot) -> dict[str, float]:
         """Get target weights; inject profile, collect CEPS + alignment when configured."""
         self._dump_snapshot(snapshot)
@@ -410,7 +461,16 @@ class BacktestEngine:
                     snapshot, news_text=prefix + snapshot.news_text
                 )
 
-            result = self._pipeline.run_episode(snapshot)
+            prefix_outputs = self._build_pit_prefix(snapshot)
+            prefix_sources = {
+                stage: pit_repair.VERSION.replace("_", "-")
+                for stage in prefix_outputs
+            }
+            result = self._pipeline.run_episode(
+                snapshot,
+                reuse_outputs=prefix_outputs,
+                reused_stage_sources=prefix_sources,
+            )
             self._episode_results.append(result)
             self._rebalance_records.append((snapshot, result))
             self._resource_audit.append(

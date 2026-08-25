@@ -13,7 +13,11 @@ from portbench.experiments.freeze import (
 
 
 def _config(
-    data_dir: str, *, temperature: float = 0.0, max_rebalances_per_window: int = 0
+    data_dir: str,
+    *,
+    temperature: float = 0.0,
+    max_rebalances_per_window: int = 0,
+    factual_pit_prefix_stages: list[str] | None = None,
 ) -> ExperimentConfig:
     return ExperimentConfig.from_dict(
         {
@@ -32,6 +36,7 @@ def _config(
             "workers_per_experiment": 1,
             "use_tools": False,
             "max_rebalances_per_window": max_rebalances_per_window,
+            "factual_pit_prefix_stages": factual_pit_prefix_stages or [],
             "generation": {"temperature": temperature, "max_tokens": 8192},
         }
     )
@@ -56,6 +61,11 @@ def test_freeze_manifest_rejects_behavior_changes_without_code_commit(tmp_path):
     assert not manifest_matches(
         manifest_path,
         build_freeze_manifest(changed_limit, changed_limit.models[0]),
+    )
+    changed_prefix = _config(str(data_dir), factual_pit_prefix_stages=["S1", "S2", "S3"])
+    assert not manifest_matches(
+        manifest_path,
+        build_freeze_manifest(changed_prefix, changed_prefix.models[0]),
     )
 
 

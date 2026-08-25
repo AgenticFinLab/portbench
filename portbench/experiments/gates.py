@@ -45,7 +45,12 @@ def _artifact_failures(root: Path) -> list[str]:
     return failures
 
 
-def _check_episode_logs(scenario_dir: Path, expected_stages: set[str], label: str) -> list[str]:
+def _check_episode_logs(
+    scenario_dir: Path,
+    expected_stages: set[str],
+    expected_prefix_stages: set[str],
+    label: str,
+) -> list[str]:
     """Check one scenario has valid v4 factual and online repair episode logs."""
     findings: list[str] = []
     episode_paths = sorted(scenario_dir.glob("pipeline_logs/*/episodes/*.json"))
@@ -73,8 +78,16 @@ def _check_episode_logs(scenario_dir: Path, expected_stages: set[str], label: st
         except (OSError, json.JSONDecodeError):
             findings.append(f"unreadable episode: {episode_path}")
             continue
-        if episode.get("architecture_id") != "SA" or episode.get("schema_version") != "pipeline-v4-sa-causal":
+        if (
+            episode.get("architecture_id") != "SA"
+            or episode.get("schema_version") != "pipeline-v4-sa-causal"
+        ):
             findings.append(f"non-SA-v4 episode: {episode_path}")
+        reused_sources = (episode.get("provenance") or {}).get("reused_stage_sources") or {}
+        if set(reused_sources) != expected_prefix_stages:
+            findings.append(f"unexpected reused-stage provenance: {episode_path}")
+        elif any(str(source) != "pit-repair-v2" for source in reused_sources.values()):
+            findings.append(f"invalid reused-stage provenance: {episode_path}")
         if any(str(stage.get("error", "")).strip() for stage in episode.get("stages") or []):
             findings.append(f"stage error: {episode_path}")
         branches = episode.get("interventions") or []
@@ -107,7 +120,8 @@ def evaluate_sa_pilot(cfg: ExperimentConfig) -> dict[str, Any]:
     """Validate the online factual/repair pilot before the full SA matrix."""
     findings: list[str] = []
     episode_count = 0
-    expected_stages = {"S1", "S2", "S3", "S4", "S5"}
+    expected_stages = set(cfg.interventions.stages)
+    expected_prefix_stages = set(cfg.factual_pit_prefix_stages)
     for spec in cfg.models:
         provider = spec_provider_name(spec)
         model = spec_model_name(spec).replace("/", "_").replace(":", "_") + "__SA"
@@ -125,13 +139,27 @@ def evaluate_sa_pilot(cfg: ExperimentConfig) -> dict[str, Any]:
         for profile in cfg.profiles:
             for scenario in cfg.resolved_stress_scenarios():
                 scenario_dir = run_dir / profile / f"stress_{scenario}"
-                findings.extend(_check_episode_logs(scenario_dir, expected_stages, scenario))
+                findings.extend(
+                    _check_episode_logs(
+                        scenario_dir,
+                        expected_stages,
+                        expected_prefix_stages,
+                        scenario,
+                    )
+                )
                 episode_count += len(list(scenario_dir.glob("pipeline_logs/*/episodes/*.json")))
             if cfg.run_normal:
                 for normal in cfg.normal_periods:
                     label = f"normal_{normal.label}" if normal.label else "normal"
                     scenario_dir = run_dir / profile / label
-                    findings.extend(_check_episode_logs(scenario_dir, expected_stages, label))
+                    findings.extend(
+                        _check_episode_logs(
+                            scenario_dir,
+                            expected_stages,
+                            expected_prefix_stages,
+                            label,
+                        )
+                    )
                     episode_count += len(list(scenario_dir.glob("pipeline_logs/*/episodes/*.json")))
     if cfg.call_artifact_root:
         findings.extend(_artifact_failures(Path(cfg.call_artifact_root)))

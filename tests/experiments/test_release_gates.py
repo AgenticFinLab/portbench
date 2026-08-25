@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from portbench.experiments.config import ExperimentConfig
-from portbench.experiments.gates import evaluate_qa_validation
+from portbench.experiments.gates import _check_episode_logs, evaluate_qa_validation
 from portbench.qa_eval.paths import qa_template_dir
 
 
@@ -87,3 +87,51 @@ def test_qa_validation_gate_rejects_near_perfect_scores(tmp_path):
     verdict = evaluate_qa_validation(config)
     assert verdict["passed"] is False
     assert "discriminative-score gate failed" in verdict["findings"][0]
+
+
+def test_pilot_gate_requires_the_declared_pit_prefix_provenance(tmp_path):
+    scenario_dir = tmp_path / "stress_2022_crypto_collapse"
+    episode_dir = scenario_dir / "pipeline_logs" / "run" / "episodes"
+    episode_dir.mkdir(parents=True)
+    (scenario_dir / "backtest_result.json").write_text(
+        json.dumps({"n_rebalances": 1}),
+        encoding="utf-8",
+    )
+    episode = {
+        "architecture_id": "SA",
+        "schema_version": "pipeline-v4-sa-causal",
+        "provenance": {
+            "reused_stage_sources": {
+                "S1": "pit-repair-v2",
+                "S2": "pit-repair-v2",
+                "S3": "pit-repair-v2",
+            }
+        },
+        "interventions": [
+            {"stage_id": "S4", "operator": "repair", "mode": "online"},
+            {"stage_id": "S5", "operator": "repair", "mode": "online"},
+        ],
+        "stages": [
+            {"stage_id": "S4", "prompt": "", "parsed_output": {}, "error": ""},
+            {"stage_id": "S5", "prompt": "", "parsed_output": {}, "error": ""},
+        ],
+    }
+    episode_path = episode_dir / "2022-05-02_0001.json"
+    episode_path.write_text(json.dumps(episode), encoding="utf-8")
+
+    assert _check_episode_logs(
+        scenario_dir,
+        {"S4", "S5"},
+        {"S1", "S2", "S3"},
+        "2022_crypto_collapse",
+    ) == []
+
+    episode["provenance"]["reused_stage_sources"]["S1"] = "ground-truth"
+    episode_path.write_text(json.dumps(episode), encoding="utf-8")
+    findings = _check_episode_logs(
+        scenario_dir,
+        {"S4", "S5"},
+        {"S1", "S2", "S3"},
+        "2022_crypto_collapse",
+    )
+    assert any("invalid reused-stage provenance" in finding for finding in findings)

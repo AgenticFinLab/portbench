@@ -107,6 +107,18 @@ def test_parallel_scenarios_rejected_for_architecture_usage_accounting():
         )
 
 
+def test_pit_prefix_requires_an_s1_s3_prefix():
+    with pytest.raises(ValueError, match="factual_pit_prefix_stages"):
+        ExperimentConfig.from_dict(
+            {
+                "models": [
+                    {"provider": "tencent", "model": "hy3-preview", "architecture_id": "SA"}
+                ],
+                "factual_pit_prefix_stages": ["S2"],
+            }
+        )
+
+
 def test_closed_loop_cache_requires_current_contract():
     config = ExperimentConfig.from_yaml("configs/experiments/full_hy3.yaml")
     spec = config.models[0]
@@ -164,14 +176,18 @@ def test_sa_upgrade_configs_pin_single_agent_without_tools_or_memory():
         "balanced_bull_2024"
     ]
     assert configs["full"].max_rebalances_per_window == 0
+    assert configs["full"].factual_pit_prefix_stages == []
     assert configs["causal"].profiles == ["balanced"]
     assert [period.label for period in configs["causal"].normal_periods] == [
         "balanced_bull_2024"
     ]
     assert configs["causal"].max_rebalances_per_window == 0
+    assert configs["causal"].factual_pit_prefix_stages == []
     assert configs["causal"].interventions.mode == "online"
     assert configs["causal"].interventions.closed_loop is False
     assert configs["pilot"].max_rebalances_per_window == 1
+    assert configs["pilot"].factual_pit_prefix_stages == ["S1", "S2", "S3"]
+    assert configs["pilot"].interventions.stages == ["S4", "S5"]
     assert configs["qa"].run_sandbox is False
     assert configs["qa"].qa.template_version == "constraint-v2"
     assert configs["qa"].qa.templates == ["T3", "T4"]

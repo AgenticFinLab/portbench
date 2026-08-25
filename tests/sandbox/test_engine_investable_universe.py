@@ -4,7 +4,7 @@ from datetime import date
 
 import pandas as pd
 
-from portbench.agent_eval.base import MarketSnapshot
+from portbench.agent_eval.base import MarketSnapshot, StageID
 from portbench.baselines.base import BaselineStrategy
 from portbench.qa_builder.base import DataProvider, MarketRegime
 from portbench.sandbox.engine import BacktestEngine
@@ -86,3 +86,37 @@ def test_engine_limits_rebalances_for_a_protocol_pilot():
     engine.run()
 
     assert len(strategy.seen_current_weights) == 2
+
+
+def test_engine_pit_prefix_uses_only_trailing_returns():
+    """The pilot prefix must ignore the snapshot's forward-return ground truth."""
+    engine = BacktestEngine(
+        strategy=_RecordingBaseline(),
+        provider=_UniverseProvider(),
+        factual_pit_prefix_stages=["S1", "S2", "S3"],
+        use_pipeline=False,
+        progress=False,
+    )
+    snapshot = MarketSnapshot(
+        decision_date=date(2020, 1, 2),
+        price_data={"ACTIVE": pd.Series([100.0]), "INACTIVE": pd.Series([100.0])},
+        return_data={
+            "ACTIVE": pd.Series([0.0, 0.0, 0.0]),
+            "INACTIVE": pd.Series([0.0, 0.0, 0.0]),
+        },
+        macro_data={},
+        future_return_data={
+            "ACTIVE": pd.Series([10.0]),
+            "INACTIVE": pd.Series([-10.0]),
+        },
+    )
+
+    outputs = engine._build_pit_prefix(snapshot)
+
+    assert set(outputs) == {
+        StageID.S1_MARKET_INTERPRETATION,
+        StageID.S2_SIGNAL_GENERATION,
+        StageID.S3_WEIGHT_OPTIMIZATION,
+    }
+    weights = outputs[StageID.S3_WEIGHT_OPTIMIZATION].weights
+    assert weights == {"ACTIVE": 0.5, "INACTIVE": 0.5}

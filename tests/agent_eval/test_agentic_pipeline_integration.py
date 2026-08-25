@@ -121,13 +121,22 @@ def test_reuse_s1_s3_runs_only_agentic_s4_s5(tmp_path):
             sharpe_estimate=0.0,
         ),
     }
-    result = pipeline.run_episode(snapshot, reuse_outputs=reused)
+    result = pipeline.run_episode(
+        snapshot,
+        reuse_outputs=reused,
+        reused_stage_sources={stage: "pit-repair-v2" for stage in reused},
+    )
     assert adapter.calls == 2
     s4 = result.stage_outputs[StageID.S4_EXECUTION_SIMULATION]
     assert abs(s4.executed_weights.get("CSHI", 0.0)) < 1e-6
     assert abs(s4.executed_weights["SPY"] - 0.6) < 1e-3
     assert result.architecture_id == "SA"
     assert result.resource_usage["request_count"] == 2
+    assert result.provenance["reused_stage_sources"] == {
+        "S1": "pit-repair-v2",
+        "S2": "pit-repair-v2",
+        "S3": "pit-repair-v2",
+    }
     assert s4.schema_version == "pipeline-v3-collab"
     assert result.stage_outputs[StageID.S5_RISK_MONITORING].final_weights
     s5 = result.stage_outputs[StageID.S5_RISK_MONITORING]

@@ -583,6 +583,7 @@ class EvalPipeline:
         inject_gt_at: Optional[StageID] = None,
         stage_overrides: Optional[dict[StageID, Any]] = None,
         reuse_outputs: Optional[dict[StageID, Any]] = None,
+        reused_stage_sources: Optional[dict[StageID, str]] = None,
         run_interventions: bool = True,
     ) -> EpisodeResult:
         """
@@ -600,6 +601,7 @@ class EvalPipeline:
         result = EpisodeResult(decision_date=snapshot.decision_date)
         overrides = stage_overrides or {}
         reused = reuse_outputs or {}
+        reuse_sources = reused_stage_sources or {}
         if self.runtime is not None:
             from .canonical import canonical_json, sha256_hex
 
@@ -723,6 +725,10 @@ class EvalPipeline:
             result.resource_usage["by_agent"] = dict(audit.get("agent_usage", {}))
             result.provenance = dict(audit["provenance"])
             result.collaboration_trace = list(audit.get("collaboration_trace", []))
+        if reuse_sources:
+            result.provenance["reused_stage_sources"] = {
+                stage.value: str(source) for stage, source in reuse_sources.items()
+            }
 
         from ..metrics.ceps import CEPS
 
