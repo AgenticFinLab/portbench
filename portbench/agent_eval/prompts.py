@@ -141,10 +141,9 @@ def build_s1_prompt(
         if snapshot.news_text
         else ""
     )
-    asset_view_fields = ", ".join(f"{_quote(a)}: <float in [-1, 1]>" for a in assets)
     schema = _schema_block(
         [
-            f'  "asset_views": {{ {asset_view_fields} }},',
+            '  "asset_views": { "ASSET": <float in [-1, 1]> },',
             '  "detected_regime": "<bull|bear|sideways|high-volatility>",',
             '  "confidence": <float in [0, 1]>,',
             '  "macro_summary": "<one sentence>"',
@@ -163,7 +162,12 @@ Current market regime context: {_display_regime(snapshot.market_regime)}
 {news_block}
 TASK: Interpret the market data and provide structured asset views.
 
-For each asset, assign a sentiment score in [-1.0, +1.0]:
+Return a sparse set of material asset views. Any visible asset omitted from
+"asset_views" is deterministically interpreted as neutral (0.0). Only use
+visible asset identifiers and do not invent assets. You may include an
+explicit neutral 0.0 view, but do not need to list every neutral asset.
+
+For each reported asset, assign a sentiment score in [-1.0, +1.0]:
   +1.0 = strongly bullish (expect strong outperformance)
    0.0 = neutral
   -1.0 = strongly bearish (expect significant underperformance)
