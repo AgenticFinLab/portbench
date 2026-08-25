@@ -40,19 +40,12 @@ def test_full_hy3_config_covers_eight_cells_and_baselines():
     ]
     assert config.workers_per_experiment == 1
     assert config.oracle_mode == "lookback"
-    assert config.profiles == ["conservative", "balanced", "aggressive"]
-    assert config.resolved_stress_scenarios() == [
-        "2015_china_shock",
-        "2020_covid_flash_crash",
-        "2022_crypto_collapse",
-    ]
-    assert [p.label for p in config.normal_periods] == [
-        "balanced_bull_2024",
-        "conservative_pressure_2022h2",
-    ]
-    assert config.experiment_tag == "agentic_full_hy3_v1"
+    assert config.profiles == ["balanced"]
+    assert config.resolved_stress_scenarios() == ["2022_crypto_collapse"]
+    assert [p.label for p in config.normal_periods] == ["balanced_bull_2024"]
+    assert config.experiment_tag == "agentic_full_hy3_v3"
     assert config.interventions.operator == "repair"
-    assert config.interventions.mode == "offline"
+    assert config.interventions.mode == "online"
     assert config.interventions.closed_loop is True
     assert config.interventions.enabled is True
 
