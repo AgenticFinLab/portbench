@@ -41,7 +41,7 @@ normal_periods:
   - {start: 2024-01-01, end: 2024-12-31, label: balanced_bull_2024}
 max_rebalances_per_window: 0
 oracle_mode: lookback
-experiment_tag: sa_upgrade_full_c_normal_v4
+experiment_tag: sa_upgrade_full_c_normal_v5
 logging: {save_pipeline_logs: true, save_snapshots: true, save_figures: true}
 on_error: isolate
 output_root: EXPERIMENTS

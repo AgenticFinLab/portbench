@@ -48,14 +48,15 @@ def test_s3_rejects_unknown_negative_or_all_zero_allocation_scores():
         )
 
 
-def test_s3_rejects_more_than_twelve_positive_assets():
-    """Keep the S3 sparse allocation representation bounded."""
+def test_s3_accepts_material_existing_holdings_beyond_twelve_assets():
+    """Allow the model to retain a broad visible-asset allocation."""
     assets = [f"A{index}" for index in range(13)]
     snapshot = SimpleNamespace(return_data={asset: object() for asset in assets})
     raw = json.dumps({"allocation_scores": {asset: 1.0 for asset in assets}})
 
-    with pytest.raises(ValueError, match="at most 12"):
-        _parse_stage_payload(raw, stage_name="S3", snapshot=snapshot)
+    parsed = _parse_stage_payload(raw, stage_name="S3", snapshot=snapshot)
+
+    assert parsed["allocation_scores"] == {asset: 1.0 for asset in assets}
 
 
 def test_s2_accepts_sparse_signal_strength_pairs():

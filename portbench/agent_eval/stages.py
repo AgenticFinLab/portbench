@@ -426,8 +426,6 @@ def _parse_stage_payload(
             raise ValueError("S3 requires a non-empty visible-asset allocation score object")
         if not set(scores).issubset(assets):
             raise ValueError("S3 allocation scores may only reference visible assets")
-        if len(scores) > 12:
-            raise ValueError("S3 may list at most 12 allocation-score assets")
         values = list(scores.values())
         if any(
             not isinstance(value, (int, float))
@@ -479,8 +477,8 @@ def _call_with_json_retry(
             response_schema["asset_view_representation"] = "sparse-neutral-v1"
             parser_version = "S1-sparse-json-v5"
         if stage_name == "S3":
-            response_schema["allocation_representation"] = "nonnegative-scores-v2"
-            parser_version = "S3-scores-json-v6"
+            response_schema["allocation_representation"] = "nonnegative-scores-v3"
+            parser_version = "S3-scores-json-v7"
         parsed, raw = adapter.complete_json(
             prompt,
             parse=parse,

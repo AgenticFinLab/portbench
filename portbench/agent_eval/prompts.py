@@ -275,7 +275,7 @@ Constraints:
   - allocation_scores must be finite, non-negative decimal numbers, with at least one strictly positive score
   - Do not normalize allocation_scores; the deterministic environment normalizes their relative magnitudes into target weights
   - Omitted visible assets receive a target weight of 0.0; a listed 0.0 explicitly excludes that asset
-  - Select at most 12 assets
+  - Prefer a concise allocation, while retaining any material existing holdings
   - "sell" signals should receive reduced weight (ideally 0.0)
   - "buy" signals should receive increased weight
   - Minimize unnecessary turnover from current weights
