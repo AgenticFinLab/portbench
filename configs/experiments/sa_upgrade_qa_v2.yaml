@@ -9,7 +9,7 @@ initial_nav: 1000000
 pipeline_schema_version: pipeline-v4-sa-causal
 sa_only: true
 call_artifact_root: EXPERIMENTS_SA_UPGRADE/shared_call_artifacts
-required_gate: EXPERIMENTS_SA_UPGRADE/gates/qa_v2_validation.json
+required_gate: EXPERIMENTS_SA_UPGRADE/gates/qa_v2_pilot.json
 workers_per_experiment: 1
 parallel_experiments: 1
 seed: 42

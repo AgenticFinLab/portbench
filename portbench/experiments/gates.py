@@ -172,7 +172,7 @@ def evaluate_sa_pilot(cfg: ExperimentConfig) -> dict[str, Any]:
 
 
 def evaluate_qa_validation(cfg: ExperimentConfig) -> dict[str, Any]:
-    """Validate the preregistered constraint-v2 development-score gate."""
+    """Validate complete and discriminative constraint-v2 responses before expansion."""
     findings: list[str] = []
     checked: dict[str, dict[str, Any]] = {}
     for spec in cfg.models:

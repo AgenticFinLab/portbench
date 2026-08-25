@@ -158,8 +158,8 @@ def test_sa_upgrade_configs_pin_single_agent_without_tools_or_memory():
         "full": ExperimentConfig.from_yaml("configs/experiments/sa_upgrade_full.yaml"),
         "causal": ExperimentConfig.from_yaml("configs/experiments/sa_upgrade_causal.yaml"),
         "qa": ExperimentConfig.from_yaml("configs/experiments/sa_upgrade_qa_v2.yaml"),
-        "qa_validation": ExperimentConfig.from_yaml(
-            "configs/experiments/sa_upgrade_qa_v2_val.yaml"
+        "qa_pilot": ExperimentConfig.from_yaml(
+            "configs/experiments/sa_upgrade_qa_v2_pilot.yaml"
         ),
     }
     for config in configs.values():
@@ -192,5 +192,6 @@ def test_sa_upgrade_configs_pin_single_agent_without_tools_or_memory():
     assert configs["qa"].qa.template_version == "constraint-v2"
     assert configs["qa"].qa.templates == ["T3", "T4"]
     assert configs["qa"].qa.freeze_manifest.endswith("constraint_v2_test_manifest.json")
-    assert configs["qa_validation"].qa.split == "val"
-    assert configs["qa_validation"].qa.max_pairs_per_template == 20
+    assert configs["qa_pilot"].qa.split == "test"
+    assert configs["qa_pilot"].qa.max_pairs_per_template == 20
+    assert configs["qa_pilot"].qa.freeze_manifest.endswith("constraint_v2_test_manifest.json")

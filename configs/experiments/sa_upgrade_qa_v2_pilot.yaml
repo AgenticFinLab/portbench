@@ -1,5 +1,5 @@
-# Development-only validation gate for constraint-v2; do not use test results to edit items.
-batch_id: "sa_upgrade_qa_v2_val_{date}"
+# Locked-test reliability pilot for constraint-v2; do not edit items or scoring after it.
+batch_id: "sa_upgrade_qa_v2_pilot_{date}"
 data_provider: processed
 data_version: processed-v1
 data_dir: datasets/processed
@@ -29,7 +29,7 @@ profiles: [balanced]
 stress_scenarios: [2022_crypto_collapse]
 run_normal: false
 oracle_mode: lookback
-experiment_tag: sa_upgrade_qa_v2_val_v1
+experiment_tag: sa_upgrade_qa_v2_pilot_v1
 logging:
   save_pipeline_logs: true
   save_snapshots: true
@@ -49,7 +49,7 @@ interventions:
 run_qa: true
 qa:
   dataset_path: datasets/qa-v2-constraint
-  split: val
+  split: test
   templates: [T3, T4]
   max_pairs_per_template: 20
   parallel_questions: 1
@@ -58,3 +58,4 @@ qa:
   scorer_version: qa-v2-constraint-v1
   call_max_attempts: 3
   retry_failed_calls: false
+  freeze_manifest: datasets/qa-v2-constraint/constraint_v2_test_manifest.json

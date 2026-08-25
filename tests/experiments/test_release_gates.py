@@ -50,7 +50,7 @@ def test_qa_validation_gate_requires_complete_and_variable_scores(tmp_path):
     assert verdict["passed"] is True
 
 
-def test_qa_validation_gate_rejects_near_perfect_scores(tmp_path):
+def test_qa_validation_gate_rejects_near_perfect_locked_test_pilot(tmp_path):
     config = ExperimentConfig.from_dict(
         {
             "models": [{"provider": "tencent", "model": "hy3-preview", "architecture_id": "SA"}],
