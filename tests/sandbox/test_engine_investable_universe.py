@@ -88,6 +88,25 @@ def test_engine_limits_rebalances_for_a_protocol_pilot():
     assert len(strategy.seen_current_weights) == 2
 
 
+def test_engine_pilot_cap_skips_the_initial_portfolio_date():
+    """A one-step pilot must select the first agent decision, not initialization."""
+    strategy = _RecordingBaseline()
+    engine = BacktestEngine(
+        strategy=strategy,
+        provider=_UniverseProvider(),
+        start_date=date(2020, 1, 1),
+        end_date=date(2020, 3, 31),
+        rebalance_freq="monthly",
+        max_rebalances=1,
+        use_pipeline=False,
+        progress=False,
+    )
+
+    engine.run()
+
+    assert len(strategy.seen_current_weights) == 1
+
+
 def test_engine_pit_prefix_uses_only_trailing_returns():
     """The pilot prefix must ignore the snapshot's forward-return ground truth."""
     engine = BacktestEngine(

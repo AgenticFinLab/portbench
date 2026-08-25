@@ -281,6 +281,13 @@ class BacktestEngine:
             for ts in pd.bdate_range(self.start_date, self.end_date, freq=freq_key)
             }
         )
+
+        # The initial portfolio is established on start_date without an agent call.
+        rebalance_dates = [
+            rebalance_date
+            for rebalance_date in rebalance_dates
+            if rebalance_date > self.start_date
+        ]
         if self.max_rebalances:
             rebalance_dates = rebalance_dates[: self.max_rebalances]
         rebalance_dates = set(rebalance_dates)
