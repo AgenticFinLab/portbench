@@ -88,6 +88,17 @@ class SnapshotBuilder:
             price_data[asset] = prices
             return_data[asset] = returns
 
+        unavailable_positions = sorted(
+            asset
+            for asset, weight in current_weights.items()
+            if float(weight) > 1e-12 and asset not in return_data
+        )
+        if unavailable_positions:
+            raise ValueError(
+                "Current portfolio contains assets outside the decision-date "
+                f"investable universe: {', '.join(unavailable_positions)}"
+            )
+
         # Correlation matrix from return data
         corr = None
         if len(return_data) >= 2:

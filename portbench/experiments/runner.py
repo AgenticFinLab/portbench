@@ -719,7 +719,12 @@ def _run_one_model(
             if cfg.on_error == "fail_fast":
                 raise
 
-    return profile_results
+    failed_profiles = [
+        profile_name
+        for profile_name in pending
+        if profile_name not in profile_results
+    ]
+    return profile_results, failed_profiles
 
 
 # ---------------------------------------------------------------------------
@@ -913,7 +918,7 @@ class BatchRunner:
                 cfg.output_root, cfg.rebalance, prov_name, model_name, timestamp
             )
             try:
-                profile_results = _run_one_model(
+                profile_results, failed_profiles = _run_one_model(
                     cfg,
                     spec,
                     data_provider,
@@ -924,6 +929,13 @@ class BatchRunner:
                     errors_lock,
                     already_done=already_done,
                 )
+                if failed_profiles:
+                    n_failed += 1
+                    print(
+                        f"[failed] {prov_name}/{model_name}: incomplete profiles: "
+                        f"{', '.join(failed_profiles)}"
+                    )
+                    return
                 _write_run_summary(
                     r_dir,
                     prov_name,

@@ -12,6 +12,8 @@ class _StubProvider(DataProvider):
     """Prices exist on 2020-03-02; as_of 2020-03-01 must exclude that row."""
 
     def get_price_series(self, asset, start, end):
+        if asset == "CSHI":
+            return pd.Series(dtype=float)
         idx = pd.to_datetime(["2020-02-28", "2020-03-01", "2020-03-02"])
         s = pd.Series([100.0, 101.0, 90.0], index=idx)
         mask = (s.index.date >= start) & (s.index.date <= end)
@@ -58,3 +60,18 @@ def test_default_includes_decision_date():
     last_price_day = snap.price_data["SPY"].index[-1].date()
     assert last_price_day == date(2020, 3, 2)
     assert snap.macro_data["vix"] == 40.0
+
+
+def test_snapshot_rejects_current_weight_outside_investable_universe():
+    builder = SnapshotBuilder(_StubProvider(), ["SPY", "CSHI"], lookback_days=5)
+
+    try:
+        builder.build(
+            decision_date=date(2020, 3, 2),
+            current_weights={"SPY": 0.8, "CSHI": 0.2},
+            nav=1.0,
+        )
+    except ValueError as exc:
+        assert "CSHI" in str(exc)
+    else:
+        raise AssertionError("unavailable current positions must be rejected")

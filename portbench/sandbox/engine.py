@@ -217,14 +217,41 @@ class BacktestEngine:
             - If d is a rebalance date: get target weights, execute rebalance
             - Else: mark portfolio to market using daily returns
         """
-        # Initial portfolio weights (custom or equal-weight)
-        n = len(self.assets)
+        # Build the initial portfolio only from assets investable on the start date.
+        initial_snapshot = self._snapshot_builder.build(
+            self.start_date,
+            current_weights={},
+            nav=self.initial_nav,
+        )
+        initial_assets = list(initial_snapshot.return_data)
+        if not initial_assets:
+            raise RuntimeError("No investable assets are available on the start date")
+
         if self.initial_weights:
-            init_weights = dict(self.initial_weights)
-            for a in self.assets:
-                init_weights.setdefault(a, 0.0)
+            unavailable_initial_assets = sorted(
+                asset
+                for asset, weight in self.initial_weights.items()
+                if float(weight) > 1e-12 and asset not in initial_snapshot.return_data
+            )
+            if unavailable_initial_assets:
+                raise ValueError(
+                    "Initial weights contain assets outside the start-date "
+                    f"investable universe: {', '.join(unavailable_initial_assets)}"
+                )
+            init_weights = {
+                asset: float(self.initial_weights.get(asset, 0.0))
+                for asset in initial_assets
+            }
+            total_initial_weight = sum(init_weights.values())
+            if total_initial_weight <= 0:
+                raise ValueError("Initial weights must assign positive total weight")
+            init_weights = {
+                asset: weight / total_initial_weight
+                for asset, weight in init_weights.items()
+            }
         else:
-            init_weights = {a: round(1.0 / n, 6) for a in self.assets}
+            equal_weight = 1.0 / len(initial_assets)
+            init_weights = {asset: equal_weight for asset in initial_assets}
         portfolio = PortfolioState(
             nav=self.initial_nav,
             weights=init_weights,

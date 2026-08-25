@@ -10,9 +10,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .config import ExperimentConfig, ModelSpec
+from .source_version import runtime_behavior_hash
 
 
-FREEZE_MANIFEST_VERSION = "sa-upgrade-v1"
+FREEZE_MANIFEST_VERSION = "sa-upgrade-v2"
 
 
 def _canonical(value: Any) -> str:
@@ -73,6 +74,7 @@ def build_freeze_manifest(cfg: ExperimentConfig, spec: ModelSpec) -> dict[str, A
             "resource_budget": asdict(cfg.resource_budget),
             "call_max_attempts": cfg.call_max_attempts,
             "call_artifact_root": cfg.call_artifact_root,
+            "runtime_behavior_hash": runtime_behavior_hash(),
         },
         "data": {
             "provider": cfg.data_provider,

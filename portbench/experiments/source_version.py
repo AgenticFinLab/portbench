@@ -8,20 +8,29 @@ from pathlib import Path
 
 SOURCE_PATHS = (
     "portbench",
-    "tests",
     "requirements.txt",
     "setup.py",
 )
 SOURCE_SUFFIXES = {".py", ".yaml", ".yml", ".json"}
 
+RUNTIME_BEHAVIOR_PATHS = (
+    "portbench/agent_eval",
+    "portbench/sandbox",
+    "portbench/metrics/ceps.py",
+    "portbench/experiments/config.py",
+    "portbench/experiments/freeze.py",
+    "portbench/experiments/providers.py",
+    "portbench/experiments/runner.py",
+    "portbench/experiments/source_version.py",
+)
 
-def source_tree_hash(root: str | Path = ".") -> str:
-    """Hash behavior-bearing source files in stable relative-path order."""
+
+def _hash_paths(root: str | Path, relative_paths: tuple[str, ...]) -> str:
+    """Hash selected source files in stable relative-path order."""
     root_path = Path(root).resolve()
     files: list[Path] = []
 
-    # Exclude reports and generated artifacts from cache provenance.
-    for relative in SOURCE_PATHS:
+    for relative in relative_paths:
         base = root_path / relative
         if not base.exists():
             continue
@@ -35,7 +44,6 @@ def source_tree_hash(root: str | Path = ".") -> str:
         )
 
     digest = hashlib.sha256()
-    # Include paths so moving a module invalidates artifacts from the old layout.
     for path in sorted(files, key=lambda item: item.relative_to(root_path).as_posix()):
         relative = path.relative_to(root_path).as_posix().encode("utf-8")
         digest.update(relative)
@@ -45,4 +53,14 @@ def source_tree_hash(root: str | Path = ".") -> str:
     return digest.hexdigest()
 
 
-__all__ = ["source_tree_hash"]
+def source_tree_hash(root: str | Path = ".") -> str:
+    """Hash behavior-bearing source files in stable relative-path order."""
+    return _hash_paths(root, SOURCE_PATHS)
+
+
+def runtime_behavior_hash(root: str | Path = ".") -> str:
+    """Hash runtime paths that can alter an SA sandbox episode."""
+    return _hash_paths(root, RUNTIME_BEHAVIOR_PATHS)
+
+
+__all__ = ["runtime_behavior_hash", "source_tree_hash"]
