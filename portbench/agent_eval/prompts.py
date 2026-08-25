@@ -243,8 +243,10 @@ def build_s3_prompt(
         for a in assets
     )
     current_w_str = ", ".join(
-        f"{a}={w:.3f}" for a, w in snapshot.current_weights.items()
-    )
+        f"{asset}={weight:.4f}"
+        for asset, weight in snapshot.current_weights.items()
+        if abs(float(weight)) > 1e-8
+    ) or "none"
     corr_section = f"\n{corr_block}\n" if corr_block else ""
     schema = _schema_block(
         [
@@ -268,6 +270,8 @@ TASK: Allocate portfolio weights based on the signals above.
 Constraints:
   - All weights must be in [0.0, 1.0]
   - Weights must sum to exactly 1.0
+  - Use at least four decimal places for every selected weight
+  - Recalculate the sum of the numeric literals before replying; set the final selected weight to the residual needed for exactly 1.0
   - Return only assets with strictly positive weights; omitted visible assets receive 0.0
   - Select at most 12 assets
   - "sell" signals should receive reduced weight (ideally 0.0)

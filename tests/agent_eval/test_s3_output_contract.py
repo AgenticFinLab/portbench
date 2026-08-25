@@ -1,10 +1,13 @@
 """Tests for sparse S2 and S3 provider-output contracts."""
 
 import json
+from datetime import date
 from types import SimpleNamespace
 
 import pytest
 
+from portbench.agent_eval.base import MarketSnapshot, S2Output
+from portbench.agent_eval.prompts import build_s3_prompt
 from portbench.agent_eval.stages import _parse_stage_payload
 
 
@@ -67,3 +70,29 @@ def test_s2_accepts_sparse_signal_strength_pairs():
 
     assert parsed["signals"] == {"SPY": "buy"}
     assert parsed["strengths"] == {"SPY": 0.8}
+
+
+def test_s3_prompt_requires_exact_numeric_simplex_without_zero_weight_noise():
+    snapshot = MarketSnapshot(
+        decision_date=date(2024, 1, 2),
+        price_data={},
+        return_data={},
+        current_weights={"SPY": 0.6, "BIL": 0.4, "TLT": 0.0},
+        portfolio_value=1_000_000.0,
+    )
+    s2 = S2Output(
+        signals={"SPY": "buy", "BIL": "hold", "TLT": "sell"},
+        strengths={"SPY": 0.8, "BIL": 0.5, "TLT": 0.6},
+    )
+
+    prompt = build_s3_prompt(
+        snapshot=snapshot,
+        s2=s2,
+        assets=["SPY", "BIL", "TLT"],
+        corr_block="",
+    )
+
+    assert "at least four decimal places" in prompt
+    assert "residual needed for exactly 1.0" in prompt
+    assert "SPY=0.6000, BIL=0.4000" in prompt
+    assert "TLT=0.0000" not in prompt
