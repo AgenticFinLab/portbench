@@ -101,21 +101,21 @@ class CollaborationAdapter(AgentAdapter):
                     "macro_summary": "stable",
                 }
             )
+        if '"allocation_scores"' in prompt:
+            return json.dumps(
+                {
+                    "allocation_scores": {"SPY": 0.6, "BIL": 0.4},
+                    "expected_return": 0.06,
+                    "expected_vol": 0.11,
+                    "sharpe_estimate": 0.55,
+                }
+            )
         if '"signals"' in prompt:
             return json.dumps(
                 {
                     "signals": {"SPY": "buy", "BIL": "hold"},
                     "strengths": {"SPY": 0.7, "BIL": 0.2},
                     "reasoning": "positive equity signal",
-                }
-            )
-        if '"weights"' in prompt:
-            return json.dumps(
-                {
-                    "weights": {"SPY": 0.6, "BIL": 0.4},
-                    "expected_return": 0.06,
-                    "expected_vol": 0.11,
-                    "sharpe_estimate": 0.55,
                 }
             )
         raise AssertionError(f"unexpected prompt: {prompt[:200]}")
