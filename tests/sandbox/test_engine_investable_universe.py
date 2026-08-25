@@ -16,7 +16,7 @@ class _UniverseProvider(DataProvider):
     def get_price_series(self, asset, start, end):
         if asset == "INACTIVE":
             return pd.Series(dtype=float)
-        index = pd.bdate_range("2019-10-01", "2020-02-10")
+        index = pd.bdate_range("2019-10-01", "2020-06-10")
         return pd.Series(100.0, index=index)
 
     def get_return_series(self, asset, start, end):
@@ -67,3 +67,22 @@ def test_engine_initializes_only_start_date_investable_assets():
 
     assert strategy.seen_current_weights == [{"ACTIVE": 1.0}]
     assert "INACTIVE" not in result.weight_history.columns
+
+
+def test_engine_limits_rebalances_for_a_protocol_pilot():
+    """A pilot may exercise the pipeline without evaluating an entire window."""
+    strategy = _RecordingBaseline()
+    engine = BacktestEngine(
+        strategy=strategy,
+        provider=_UniverseProvider(),
+        start_date=date(2020, 1, 2),
+        end_date=date(2020, 4, 30),
+        rebalance_freq="monthly",
+        max_rebalances=2,
+        use_pipeline=False,
+        progress=False,
+    )
+
+    engine.run()
+
+    assert len(strategy.seen_current_weights) == 2

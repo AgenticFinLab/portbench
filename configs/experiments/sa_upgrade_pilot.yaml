@@ -29,6 +29,8 @@ stress_scenarios: [2022_crypto_collapse]
 run_normal: true
 normal_periods:
   - {start: 2024-01-01, end: 2024-12-31, label: balanced_bull_2024}
+# The pilot validates the end-to-end contract rather than reporting performance.
+max_rebalances_per_window: 1
 oracle_mode: lookback
 experiment_tag: sa_upgrade_pilot_v1
 logging:

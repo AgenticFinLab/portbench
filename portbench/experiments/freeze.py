@@ -86,6 +86,7 @@ def build_freeze_manifest(cfg: ExperimentConfig, spec: ModelSpec) -> dict[str, A
             "stress_scenarios": cfg.resolved_stress_scenarios(),
             "normal_periods": normal_periods,
             "rebalance": cfg.rebalance,
+            "max_rebalances_per_window": cfg.max_rebalances_per_window,
             "initial_nav": cfg.initial_nav,
             "seed": cfg.seed,
         },

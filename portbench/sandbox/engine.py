@@ -79,6 +79,7 @@ class BacktestEngine:
         start_date: date = date(2024, 1, 1),
         end_date: date = date(2024, 12, 31),
         rebalance_freq: str = "monthly",
+        max_rebalances: int = 0,
         initial_nav: float = 1_000_000.0,
         initial_weights: Optional[dict[str, float]] = None,
         lookback_days: int = 60,
@@ -110,6 +111,7 @@ class BacktestEngine:
         self.start_date = start_date
         self.end_date = end_date
         self.rebalance_freq = rebalance_freq
+        self.max_rebalances = max_rebalances
         self._forward_days = _REBALANCE_FORWARD_DAYS.get(rebalance_freq, 21)
         self.initial_nav = initial_nav
         self.initial_weights = initial_weights
@@ -260,10 +262,15 @@ class BacktestEngine:
 
         # Generate rebalance dates
         freq_key = _REBALANCE_FREQS.get(self.rebalance_freq, "BMS")
-        rebalance_dates = {
+        rebalance_dates = sorted(
+            {
             ts.date()
             for ts in pd.bdate_range(self.start_date, self.end_date, freq=freq_key)
-        }
+            }
+        )
+        if self.max_rebalances:
+            rebalance_dates = rebalance_dates[: self.max_rebalances]
+        rebalance_dates = set(rebalance_dates)
 
         # All business days for mark-to-market
         all_bdays = [ts.date() for ts in pd.bdate_range(self.start_date, self.end_date)]

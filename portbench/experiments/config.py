@@ -208,6 +208,7 @@ class ExperimentConfig:
     normal_periods: list[NormalPeriod] = field(
         default_factory=lambda: [NormalPeriod()]
     )
+    max_rebalances_per_window: int = 0
     oracle_mode: str = "ex_post"  # "ex_post" | "lookback" | "equal_weight"
     experiment_tag: str = ""  # appended to output_root for experiment isolation
                               # e.g. "rebuttal_lookback" → EXPERIMENTS_rebuttal_lookback/
@@ -246,6 +247,8 @@ class ExperimentConfig:
     interventions: InterventionConfig = field(default_factory=InterventionConfig)
 
     def __post_init__(self):
+        if self.max_rebalances_per_window < 0:
+            raise ValueError("max_rebalances_per_window must be non-negative")
         # Concurrent scenarios would mix provider usage deltas across threads.
         if any(model.architecture_id for model in self.models) and self.workers_per_experiment != 1:
             raise ValueError(
@@ -334,6 +337,7 @@ class ExperimentConfig:
             stress_scenarios=raw.get("stress_scenarios", "all"),
             run_normal=bool(raw.get("run_normal", True)),
             normal_periods=np_objs,
+            max_rebalances_per_window=int(raw.get("max_rebalances_per_window", 0)),
             oracle_mode=str(raw.get("oracle_mode", "ex_post")),
             experiment_tag=str(raw.get("experiment_tag", "")),
             data_provider=raw.get("data_provider", "processed"),

@@ -160,9 +160,18 @@ def test_sa_upgrade_configs_pin_single_agent_without_tools_or_memory():
         assert config.generation.temperature == 0.0
         assert config.generation.max_tokens == 8192
     assert len(configs["full"].models) == 10
+    assert [period.label for period in configs["full"].normal_periods] == [
+        "balanced_bull_2024"
+    ]
+    assert configs["full"].max_rebalances_per_window == 0
     assert configs["causal"].profiles == ["balanced"]
+    assert [period.label for period in configs["causal"].normal_periods] == [
+        "balanced_bull_2024"
+    ]
+    assert configs["causal"].max_rebalances_per_window == 0
     assert configs["causal"].interventions.mode == "online"
     assert configs["causal"].interventions.closed_loop is False
+    assert configs["pilot"].max_rebalances_per_window == 1
     assert configs["qa"].run_sandbox is False
     assert configs["qa"].qa.template_version == "constraint-v2"
     assert configs["qa"].qa.templates == ["T3", "T4"]
