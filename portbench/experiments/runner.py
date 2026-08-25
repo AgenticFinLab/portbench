@@ -5,7 +5,8 @@ Directory layout (new):
   EXPERIMENTS/{rebalance}/{provider}/{model}/{timestamp}/{profile}/{scenario}/
 
 One "run" = one model across all profiles (same timestamp directory).
-Parallelism: parallel_experiments controls concurrent model runs.
+Parallelism: parallel_experiments controls concurrent provider runs.
+             At most one model runs per provider at a time.
              workers_per_experiment controls concurrent stress scenarios per profile.
 
 Failure isolation: per (provider, model_name). Failure in one model does not
@@ -24,7 +25,7 @@ import subprocess
 import threading
 import time
 import traceback
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -993,19 +994,41 @@ class BatchRunner:
                 pbar.update(1)
                 pbar.set_postfix(done=n_done, failed=n_failed)
 
-        max_workers = max(1, cfg.parallel_experiments)
-        with ThreadPoolExecutor(max_workers=max_workers) as ex:
-            futs = {
-                ex.submit(_task, spec, prov, model, ts, done): (prov, model)
-                for spec, prov, model, ts, done in to_run
-            }
-            for fut in as_completed(futs):
-                try:
-                    fut.result()
-                except Exception:
-                    if cfg.on_error == "fail_fast":
-                        pbar.close()
-                        raise
+        # Run at most one model per provider so independent provider accounts
+        # make progress concurrently without concurrent requests to one account.
+        pending_by_provider: dict[str, list[tuple[ModelSpec, str, str, str, list[str]]]] = {}
+        for task in to_run:
+            pending_by_provider.setdefault(task[1], []).append(task)
+
+        if pending_by_provider:
+            max_workers = min(max(1, cfg.parallel_experiments), len(pending_by_provider))
+            with ThreadPoolExecutor(max_workers=max_workers) as ex:
+                active: dict[object, str] = {}
+
+                def submit_next(provider: str) -> None:
+                    queue = pending_by_provider[provider]
+                    if not queue:
+                        return
+                    spec, prov, model, timestamp, already_done = queue.pop(0)
+                    future = ex.submit(_task, spec, prov, model, timestamp, already_done)
+                    active[future] = provider
+
+                for provider in pending_by_provider:
+                    if len(active) >= max_workers:
+                        break
+                    submit_next(provider)
+
+                while active:
+                    completed, _ = wait(active, return_when=FIRST_COMPLETED)
+                    for fut in completed:
+                        provider = active.pop(fut)
+                        try:
+                            fut.result()
+                        except Exception:
+                            if cfg.on_error == "fail_fast":
+                                pbar.close()
+                                raise
+                        submit_next(provider)
 
         pbar.close()
 

@@ -5,7 +5,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import asdict
 from pathlib import Path
+
+import yaml
 
 from .config import ExperimentConfig
 from .runner import BatchRunner
@@ -22,9 +25,39 @@ def _resolve_output_root(args) -> str:
     return args.output_root
 
 
+def _filter_models_by_provider(cfg: ExperimentConfig, providers: str | None) -> tuple[str, ...]:
+    """Restrict one batch invocation to configured LLM providers."""
+    if not providers:
+        return ()
+    selected = tuple(part.strip().lower() for part in providers.split(",") if part.strip())
+    if not selected:
+        raise ValueError("--providers must name at least one provider")
+    available = {spec.provider for spec in cfg.models if spec.provider}
+    unknown = sorted(set(selected) - available)
+    if unknown:
+        raise ValueError(f"--providers contains unconfigured providers: {', '.join(unknown)}")
+    cfg.models = [spec for spec in cfg.models if spec.provider in selected]
+    return selected
+
+
+def _filtered_config_snapshot(raw_yaml: str, cfg: ExperimentConfig, providers: tuple[str, ...]) -> str:
+    """Record the effective provider-filtered model list for one batch run."""
+    if not providers:
+        return raw_yaml
+    snapshot = yaml.safe_load(raw_yaml)
+    snapshot["models"] = [asdict(spec) for spec in cfg.models]
+    snapshot["selected_providers"] = list(providers)
+    return yaml.safe_dump(snapshot, allow_unicode=True, sort_keys=False)
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="PortBench batch experiment runner")
     p.add_argument("--config", default=None, help="Path to YAML experiment config")
+    p.add_argument(
+        "--providers",
+        default=None,
+        help="Comma-separated configured providers to run in this invocation",
+    )
     p.add_argument(
         "--dry-run",
         action="store_true",
@@ -264,6 +297,11 @@ def main(argv=None) -> int:
     cfg_path = Path(args.config)
     raw_yaml = cfg_path.read_text(encoding="utf-8")
     cfg = ExperimentConfig.from_yaml(cfg_path)
+    try:
+        selected_providers = _filter_models_by_provider(cfg, args.providers)
+    except ValueError as exc:
+        p.error(str(exc))
+    raw_yaml = _filtered_config_snapshot(raw_yaml, cfg, selected_providers)
 
     runner = BatchRunner(cfg, raw_yaml=raw_yaml)
 
