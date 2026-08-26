@@ -417,10 +417,23 @@ def _parse_stage_payload(
             raise ValueError("S2 requires signals and strengths objects")
         if not set(signals).issubset(assets) or not set(strengths).issubset(assets):
             raise ValueError("S2 signals and strengths may only reference visible assets")
-        if set(signals) != set(strengths):
-            raise ValueError("S2 signals and strengths must select the same assets")
         if any(str(value) not in {"buy", "sell", "hold"} for value in signals.values()):
             raise ValueError("S2 signals must be buy, sell, or hold")
+        unpaired_hold_assets = {
+            asset
+            for asset, signal in signals.items()
+            if str(signal) == "hold" and asset not in strengths
+        }
+        if unpaired_hold_assets:
+            payload = dict(payload)
+            payload["signals"] = {
+                asset: signal
+                for asset, signal in signals.items()
+                if asset not in unpaired_hold_assets
+            }
+            signals = payload["signals"]
+        if set(signals) != set(strengths):
+            raise ValueError("S2 signals and strengths must select the same assets")
         for value in strengths.values():
             if not isinstance(value, (int, float)) or not 0.0 <= float(value) <= 1.0:
                 raise ValueError("S2 strengths must be in [0, 1]")
@@ -480,6 +493,8 @@ def _call_with_json_retry(
         if stage_name == "S1":
             response_schema["asset_view_representation"] = "sparse-neutral-v1"
             parser_version = "S1-sparse-json-v6"
+        if stage_name == "S2":
+            parser_version = "S2-nonhold-json-v5"
         if stage_name == "S3":
             response_schema["allocation_representation"] = "nonnegative-scores-v3"
             parser_version = "S3-scores-json-v7"
