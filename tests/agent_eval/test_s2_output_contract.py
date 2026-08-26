@@ -55,3 +55,37 @@ def test_s2_rejects_unpaired_non_hold_signals():
             stage_name="S2",
             snapshot=snapshot,
         )
+
+
+def test_s3_canonicalizes_the_unambiguous_ics_alias():
+    """S3 records the one unambiguous ICS to ICSH ticker correction."""
+    snapshot = SimpleNamespace(return_data={"SPY": object(), "ICSH": object()})
+
+    parsed = _parse_stage_payload(
+        (
+            '{"allocation_scores": {"SPY": 0.5, "ICS": 0.5}, '
+            '"expected_return": 0.05, "expected_vol": 0.10, '
+            '"sharpe_estimate": 0.5}'
+        ),
+        stage_name="S3",
+        snapshot=snapshot,
+    )
+
+    assert parsed["allocation_scores"] == {"SPY": 0.5, "ICSH": 0.5}
+    assert parsed["_artifact_normalizations"][0]["to"] == "ICSH"
+
+
+def test_s3_rejects_an_ambiguous_ics_alias():
+    """S3 preserves strict validation when both ticker forms are present."""
+    snapshot = SimpleNamespace(return_data={"SPY": object(), "ICSH": object()})
+
+    with pytest.raises(ValueError, match="visible assets"):
+        _parse_stage_payload(
+            (
+                '{"allocation_scores": {"SPY": 0.5, "ICS": 0.25, "ICSH": 0.25}, '
+                '"expected_return": 0.05, "expected_vol": 0.10, '
+                '"sharpe_estimate": 0.5}'
+            ),
+            stage_name="S3",
+            snapshot=snapshot,
+        )

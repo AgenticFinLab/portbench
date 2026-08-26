@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -171,6 +172,43 @@ def test_invalid_attempts_stay_in_ledger_and_require_explicit_retry(tmp_path):
     )
     assert not hit
     assert parsed == {"answer": 1}
+
+
+def test_linked_recovery_reuses_a_different_generation_budget(tmp_path):
+    store = CallArtifactStore(tmp_path)
+    original = _request()
+    recovery = replace(
+        original,
+        generation_config={"temperature": 0.0, "max_tokens": 16384},
+    )
+
+    store.complete_or_call(
+        recovery,
+        parser_version="schema-v1",
+        parse=lambda raw: json.loads(raw),
+        call_fn=lambda: '{"answer": 1}',
+        provenance={"recovery_of_call_key": original.call_key},
+    )
+    store._append_attempt(
+        original.namespace,
+        original.call_key,
+        {
+            "event": "recovery_available",
+            "recovery_call_key": recovery.call_key,
+        },
+    )
+
+    parsed, artifact, hit = store.complete_or_call(
+        original,
+        parser_version="schema-v1",
+        parse=lambda raw: json.loads(raw),
+        call_fn=lambda: (_ for _ in ()).throw(AssertionError("provider call not expected")),
+    )
+
+    assert hit
+    assert parsed == {"answer": 1}
+    assert artifact.call_key == recovery.call_key
+    assert any(item["event"] == "recovery_reused" for item in store.attempts(original))
 
 
 def test_call_key_ignores_provenance_but_tracks_behavior_fields():

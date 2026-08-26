@@ -644,14 +644,19 @@ class ArchitectureStageAdapter(AgentAdapter):
         if cache_hit:
             self.runtime.ledger.record(cache_hit_count=1)
             self.runtime.record_agent_usage(self.agent_id, cache_hit_count=1)
-        self.runtime.provenance[self.call_id] = {
+        provenance = {
             **dict(artifact.provenance),
             "source": "current_call_artifact" if cache_hit else "new_api_call",
-            "call_key": request.call_key,
+            "call_key": artifact.call_key,
             "stage_id": self.stage_id,
             "agent_id": self.agent_id,
             "round_id": self.round_id,
         }
+        if artifact.call_key != request.call_key:
+            provenance["logical_call_key"] = request.call_key
+        if isinstance(parsed, Mapping) and parsed.get("_artifact_normalizations"):
+            provenance["output_normalizations"] = parsed["_artifact_normalizations"]
+        self.runtime.provenance[self.call_id] = provenance
         return parsed, artifact.raw_response
 
     def complete(self, prompt: str) -> str:

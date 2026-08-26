@@ -199,6 +199,38 @@ class CallArtifactStore:
             raise ValueError("call artifact request mismatch")
         return CallArtifact(**raw)
 
+    def _load_linked_recovery(
+        self,
+        request: CallRequest,
+        ledger: list[dict[str, Any]],
+    ) -> Optional[CallArtifact]:
+        """Load one auditable recovery call that preserves the logical request."""
+        expected_core = dict(request.key_payload())
+        expected_core.pop("generation_config")
+        for event in reversed(ledger):
+            if event.get("event") != "recovery_available":
+                continue
+            recovery_key = event.get("recovery_call_key")
+            if not isinstance(recovery_key, str):
+                continue
+            path = self._path("calls", request.namespace, recovery_key)
+            if not path.exists():
+                continue
+            try:
+                artifact = CallArtifact(**json.loads(path.read_text(encoding="utf-8")))
+            except (OSError, TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if artifact.call_key != recovery_key:
+                continue
+            recovery_core = dict(artifact.request)
+            recovery_core.pop("generation_config", None)
+            if recovery_core != expected_core:
+                continue
+            if artifact.provenance.get("recovery_of_call_key") != request.call_key:
+                continue
+            return artifact
+        return None
+
     def load_parse(self, request: CallRequest, parser_version: str) -> Optional[ParseArtifact]:
         """Load a parser-version-specific result for one exact raw response."""
         path = self._path("parses", request.namespace, f"{request.call_key}.{parser_version}")
@@ -357,6 +389,46 @@ class CallArtifactStore:
                     },
                 )
                 return parsed_output, artifact, True
+            recovered = self._load_linked_recovery(request, ledger)
+            if recovered is not None:
+                try:
+                    parsed_output = parse(recovered.raw_response)
+                except Exception as exc:
+                    self._append_attempt(
+                        request.namespace,
+                        request.call_key,
+                        {
+                            "timestamp": _now(),
+                            "event": "recovery_reparse_failed",
+                            "recovery_call_key": recovered.call_key,
+                            "parser_version": parser_version,
+                            "error": str(exc),
+                        },
+                    )
+                else:
+                    self._record_parse(
+                        request,
+                        parser_version,
+                        recovered.raw_response,
+                        parsed_output,
+                    )
+                    if not any(
+                        item.get("event") == "recovery_reused"
+                        and item.get("recovery_call_key") == recovered.call_key
+                        and item.get("parser_version") == parser_version
+                        for item in ledger
+                    ):
+                        self._append_attempt(
+                            request.namespace,
+                            request.call_key,
+                            {
+                                "timestamp": _now(),
+                                "event": "recovery_reused",
+                                "recovery_call_key": recovered.call_key,
+                                "parser_version": parser_version,
+                            },
+                        )
+                    return parsed_output, recovered, True
             completed_attempts = {
                 int(item["attempt"])
                 for item in ledger

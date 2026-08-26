@@ -441,6 +441,24 @@ def _parse_stage_payload(
         scores = payload.get("allocation_scores")
         if not isinstance(scores, dict) or not scores:
             raise ValueError("S3 requires a non-empty visible-asset allocation score object")
+        if (
+            "ICS" in scores
+            and "ICS" not in assets
+            and "ICSH" in assets
+            and "ICSH" not in scores
+        ):
+            payload = dict(payload)
+            scores = dict(scores)
+            scores["ICSH"] = scores.pop("ICS")
+            payload["allocation_scores"] = scores
+            payload["_artifact_normalizations"] = [
+                {
+                    "field": "allocation_scores",
+                    "from": "ICS",
+                    "to": "ICSH",
+                    "kind": "unambiguous_ticker_alias",
+                }
+            ]
         if not set(scores).issubset(assets):
             raise ValueError("S3 allocation scores may only reference visible assets")
         values = list(scores.values())
@@ -497,7 +515,7 @@ def _call_with_json_retry(
             parser_version = "S2-nonhold-json-v5"
         if stage_name == "S3":
             response_schema["allocation_representation"] = "nonnegative-scores-v3"
-            parser_version = "S3-scores-json-v7"
+            parser_version = "S3-scores-json-v8"
         parsed, raw = adapter.complete_json(
             prompt,
             parse=parse,
