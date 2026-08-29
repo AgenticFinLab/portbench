@@ -35,6 +35,7 @@ STAGE_ORDER = (
     StageID.S5_RISK_MONITORING,
 )
 STAGE_BY_TEXT = {stage.value: stage for stage in STAGE_ORDER}
+REPAIR_DEFINITION = "oracle-stage-replacement-v1"
 _USAGE_KEYS = (
     "token_exact",
     "token_est",
@@ -450,7 +451,12 @@ def _annotate_suffix_plan_scores(
 
     s3 = filled.get(StageID.S3_WEIGHT_OPTIMIZATION)
     s4 = filled.get(StageID.S4_EXECUTION_SIMULATION)
-    if s3 is not None and s4 is not None and getattr(s3, "weights", None):
+    if (
+        s3 is not None
+        and s4 is not None
+        and getattr(s3, "weights", None)
+        and not getattr(s4, "plan_scores", None)
+    ):
         nav = float(snapshot.portfolio_value or 0.0)
         ref_plan, ref_result = run_s4_deterministic_from_weights(
             s3.weights,
@@ -475,7 +481,7 @@ def _annotate_suffix_plan_scores(
         weights = dict(s4_for_s5.executed_weights)
     elif s3 is not None:
         weights = dict(s3.weights)
-    if s5 is not None and weights:
+    if s5 is not None and weights and not getattr(s5, "plan_scores", None):
         pre_risk = summarize_pre_action_risk(weights, snapshot.return_data)
         ref_decision = _reference_risk_decision(weights, pre_risk, -0.02, -0.10, 0.05)
         from portbench.agent_eval.contracts import RiskControlDecision
@@ -510,9 +516,10 @@ def _replacement_payload(
     factual: EpisodeResult,
     stage: StageID,
     operator: str,
+    pipeline: Optional[EvalPipeline] = None,
 ) -> Any:
     if operator == "repair":
-        return _coerce(stage, _repair_payload(stage, snapshot, factual))
+        return _oracle_replacement(pipeline, snapshot, factual, stage)
     if operator == "perturb":
         payload = default_perturb(stage.value, _plain(factual.stage_outputs[stage]))
         return _coerce(stage, payload)
@@ -538,10 +545,14 @@ def run_offline_stage_intervention(
         for upstream in STAGE_ORDER[:stage_index]
         if upstream in factual.stage_outputs
     }
-    outputs[stage] = _replacement_payload(snapshot, factual, stage, operator)
+    outputs[stage] = _replacement_payload(
+        snapshot, factual, stage, operator, pipeline=pipeline
+    )
     outputs = _fill_deterministic_suffix(snapshot, outputs, stage_index)
     outputs = _annotate_suffix_plan_scores(snapshot, outputs, factual)
     scores = _score_outputs(pipeline, outputs, factual.gt_outputs)
+    if operator == "repair":
+        scores[stage] = 1.0
     intervened_ceps = _ceps_from_scores(scores, propagation_weight)
     factual_ceps = _ceps_from_scores(factual.stage_scores, propagation_weight)
     score_delta = {
@@ -552,6 +563,7 @@ def run_offline_stage_intervention(
     return {
         "stage_id": stage.value,
         "operator": operator,
+        "repair_definition": REPAIR_DEFINITION if operator == "repair" else None,
         "mode": "offline",
         "score_delta": score_delta,
         "ceps_factual": factual_ceps,
@@ -570,6 +582,7 @@ def run_episode_interventions(
     operator: str = "repair",
     mode: str = "offline",
     propagation_weight: float = 0.1,
+    max_tokens: Optional[int] = None,
 ) -> list[dict[str, Any]]:
     """Run repair/perturb interventions for one factual episode."""
     if mode not in {"offline", "online"}:
@@ -601,6 +614,7 @@ def run_episode_interventions(
                 stage_id,
                 operator=operator,
                 perturb_fn=perturb_fn,
+                max_tokens=max_tokens,
             )
             factual_ceps = _ceps_from_scores(factual.stage_scores, propagation_weight)
             intervened_ceps = _ceps_from_scores(result.intervened.stage_scores, propagation_weight)
@@ -608,6 +622,9 @@ def run_episode_interventions(
                 {
                     "stage_id": result.stage_id,
                     "operator": operator,
+                    "repair_definition": (
+                        REPAIR_DEFINITION if operator == "repair" else None
+                    ),
                     "mode": "online",
                     "score_delta": {
                         key: float(value) for key, value in result.score_delta.items()
@@ -624,6 +641,9 @@ def run_episode_interventions(
                 {
                     "stage_id": _stage(stage_id).value,
                     "operator": operator,
+                    "repair_definition": (
+                        REPAIR_DEFINITION if operator == "repair" else None
+                    ),
                     "mode": mode,
                     "error": str(exc),
                     "resource_usage": _usage_counters({}),
@@ -689,7 +709,11 @@ def run_offline_closed_loop(
                         if upstream in factual_result.stage_outputs
                     },
                     stage: _replacement_payload(
-                        branch_snapshot, factual_result, stage, operator
+                        branch_snapshot,
+                        factual_result,
+                        stage,
+                        operator,
+                        pipeline=pipeline,
                     ),
                 },
                 STAGE_ORDER.index(stage),
@@ -743,26 +767,97 @@ def run_offline_closed_loop(
     }
 
 
-def _repair_payload(
-    stage_id: StageID, snapshot: MarketSnapshot, factual: EpisodeResult
-) -> Dict[str, Any]:
-    """Build a schema-compatible repair from Point-in-Time snapshot fields."""
-    lookback = snapshot.return_data
-    if stage_id is StageID.S1_MARKET_INTERPRETATION:
-        return pit_repair.repair_s1(lookback_returns=lookback)
-    if stage_id is StageID.S2_SIGNAL_GENERATION:
-        s1_payload = _plain(factual.stage_outputs[StageID.S1_MARKET_INTERPRETATION])
-        return pit_repair.repair_s2(lookback_returns=lookback, s1_output=s1_payload)
-    if stage_id is StageID.S3_WEIGHT_OPTIMIZATION:
-        return pit_repair.repair_s3(lookback_returns=lookback)
+def _oracle_replacement(
+    pipeline: Optional[EvalPipeline],
+    snapshot: MarketSnapshot,
+    factual: EpisodeResult,
+    stage_id: StageID,
+) -> Any:
+    """Build the scored oracle replacement that defines the repair estimand."""
+    if stage_id in {
+        StageID.S1_MARKET_INTERPRETATION,
+        StageID.S2_SIGNAL_GENERATION,
+        StageID.S3_WEIGHT_OPTIMIZATION,
+    }:
+        if stage_id not in factual.gt_outputs:
+            raise KeyError(f"factual result is missing {stage_id.value} ground truth")
+        return factual.gt_outputs[stage_id]
+
     if stage_id is StageID.S4_EXECUTION_SIMULATION:
+        from portbench.agent_eval.s4_s5_bridge import run_s4_deterministic_from_weights
+        from portbench.metrics.plan_outcome_scores import score_s4_environment_outcome
+
         s3_output = factual.stage_outputs[StageID.S3_WEIGHT_OPTIMIZATION]
-        repaired = S4ExecutionSimulation()._execute(s3_output, snapshot)
-        return _plain(repaired)
-    s4_output = factual.stage_outputs[StageID.S4_EXECUTION_SIMULATION]
-    repaired = S5RiskMonitoring()._monitor(s4_output.executed_weights, snapshot)
-    repaired.final_weights = dict(s4_output.executed_weights)
-    return _plain(repaired)
+        plan, result = run_s4_deterministic_from_weights(
+            s3_output.weights,
+            snapshot,
+            snapshot.current_weights,
+            float(snapshot.portfolio_value or 0.0),
+        )
+        return S4Output(
+            executed_weights=dict(result.filled_weights),
+            total_cost=float(result.cost),
+            turnover=float(result.turnover),
+            schema_version=factual.schema_version,
+            plan=asdict(plan),
+            plan_scores={
+                "order_legality": 1.0,
+                "target_tracking": 1.0,
+                "direction_consistency": 1.0,
+                "cost_awareness": 1.0,
+                "plan_quality": 1.0,
+            },
+            outcome_scores=score_s4_environment_outcome(result, result),
+        )
+
+    if pipeline is None:
+        raise ValueError("S5 oracle replacement requires the active pipeline")
+    from portbench.agent_eval.s4_s5_stages import _reference_risk_decision
+    from portbench.metrics.plan_outcome_scores import score_s5_environment_outcome
+    from portbench.sandbox.risk_control import evaluate_risk, summarize_pre_action_risk
+
+    stage = pipeline.stages.get(StageID.S5_RISK_MONITORING)
+    if stage is None:
+        raise KeyError("pipeline is missing S5")
+    weights = dict(
+        factual.stage_outputs[StageID.S4_EXECUTION_SIMULATION].executed_weights
+    )
+    var_limit = float(getattr(stage, "_var_limit", -0.02))
+    drawdown_limit = float(getattr(stage, "_drawdown_limit", -0.10))
+    drift_limit = float(getattr(stage, "_drift_limit", 0.05))
+    pre_risk = summarize_pre_action_risk(weights, snapshot.return_data)
+    decision = _reference_risk_decision(
+        weights,
+        pre_risk,
+        var_limit,
+        drawdown_limit,
+        drift_limit,
+    )
+    result = evaluate_risk(
+        decision,
+        weights,
+        snapshot.return_data,
+        var_limit=var_limit,
+        drawdown_limit=drawdown_limit,
+        drift_limit=drift_limit,
+    )
+    final_weights = dict(result.metadata.get("final_weights") or weights)
+    return S5Output(
+        portfolio_var=float(result.var or 0.0),
+        portfolio_drawdown=float(result.drawdown or 0.0),
+        weight_drift=float(result.metadata.get("weight_drift", 0.0)),
+        rebalance_needed=decision.action != "hold",
+        final_weights=final_weights,
+        schema_version=factual.schema_version,
+        decision=asdict(decision),
+        plan_scores={
+            "alert_identification": 1.0,
+            "action_choice": 1.0,
+            "corrective_compliance": 1.0,
+            "adjustment_scale": 1.0,
+        },
+        outcome_scores=score_s5_environment_outcome(result, result),
+    )
 
 
 def intervene_from_factual(
@@ -773,17 +868,18 @@ def intervene_from_factual(
     *,
     operator: str = "repair",
     perturb_fn: Optional[Callable[[Mapping[str, Any]], Mapping[str, Any]]] = None,
+    max_tokens: Optional[int] = None,
 ) -> StageInterventionResult:
     """Replace one factual stage output and rerun only its downstream stages."""
     stage = _stage(stage_id)
     if operator == "repair":
-        payload = _repair_payload(stage, snapshot, factual)
+        replacement = _oracle_replacement(pipeline, snapshot, factual, stage)
     elif operator == "perturb":
         fn = perturb_fn or (lambda output: default_perturb(stage.value, output))
         payload = apply_perturb(stage.value, _plain(factual.stage_outputs[stage]), perturb_fn=fn)
+        replacement = _coerce(stage, payload)
     else:
         raise ValueError("operator must be repair or perturb")
-    replacement = _coerce(stage, payload)
     stage_index = STAGE_ORDER.index(stage)
     # Preserve factual upstream outputs and rerun only the affected suffix.
     reused = {
@@ -801,13 +897,15 @@ def intervene_from_factual(
             run_interventions=False,
         )
     else:
-        with runtime.intervention_branch(branch_id):
+        with runtime.intervention_branch(branch_id, max_tokens=max_tokens):
             intervened = pipeline.run_episode(
                 snapshot,
                 stage_overrides={stage: replacement},
                 reuse_outputs=reused,
                 run_interventions=False,
             )
+    if operator == "repair":
+        intervened.stage_scores[stage] = 1.0
     deltas = {
         downstream.value: float(intervened.stage_scores.get(downstream, 0.0))
         - float(factual.stage_scores.get(downstream, 0.0))

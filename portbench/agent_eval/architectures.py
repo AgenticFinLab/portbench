@@ -871,7 +871,7 @@ class ArchitectureRuntime:
             self.agent_nodes[role].memory = other.agent_nodes[role].memory.clone()
 
     @contextmanager
-    def intervention_branch(self, branch_id: str):
+    def intervention_branch(self, branch_id: str, *, max_tokens: int | None = None):
         """Route one online intervention suffix into its isolated namespace."""
         if self.schema_version != PIPELINE_V4_SA_CAUSAL:
             yield
@@ -879,13 +879,18 @@ class ArchitectureRuntime:
         namespace = f"intervention__{branch_id}"
         previous_namespace = self.cache_namespace
         previous_id = self.intervention_id
+        previous_max_tokens = getattr(self.base_adapter, "_max_tokens", None)
         self.cache_namespace = namespace
         self.intervention_id = branch_id
+        if max_tokens is not None:
+            self.base_adapter._max_tokens = int(max_tokens)
         try:
             yield
         finally:
             self.cache_namespace = previous_namespace
             self.intervention_id = previous_id
+            if max_tokens is not None:
+                self.base_adapter._max_tokens = previous_max_tokens
 
     def collaboration_trace(self) -> List[Dict[str, Any]]:
         """Return the episode's ordered message trace."""

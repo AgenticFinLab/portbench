@@ -101,6 +101,18 @@ def test_memory_branch_is_copy_on_write(tmp_path):
         frozen.append("S3", "2024-01-01", "weights")
 
 
+def test_intervention_branch_temporarily_overrides_max_tokens():
+    adapter = NoCallAdapter()
+    adapter._max_tokens = 4096
+    runtime = ArchitectureRuntime(adapter, "SA", schema_version="pipeline-v4-sa-causal")
+
+    with runtime.intervention_branch("s1_repair", max_tokens=16384):
+        assert runtime.cache_namespace == "intervention__s1_repair"
+        assert adapter._max_tokens == 16384
+
+    assert runtime.cache_namespace == "factual"
+    assert adapter._max_tokens == 4096
+
 def test_ma_nodes_have_private_copy_on_write_memories(tmp_path):
     factual = ArchitectureRuntime(
         NoCallAdapter(),

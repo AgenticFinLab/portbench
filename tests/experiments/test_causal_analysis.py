@@ -45,6 +45,7 @@ def test_causal_summary_reports_stage_effects_and_fdr():
     assert summary["delta_ceps"]["S3"]["effect"] == pytest.approx(0.15)
     assert summary["influence_matrix"]["S1"]["S1"]["fdr_q_value"] is not None
     assert summary["decomposition"]["S1"]["downstream_propagation_effect"] == pytest.approx(0.35)
+    assert summary["mechanism_gate"]["passed"] is True
 
 
 def test_causal_loader_accepts_only_online_v4_sa_repairs(tmp_path):
@@ -68,6 +69,7 @@ def test_causal_loader_accepts_only_online_v4_sa_repairs(tmp_path):
             {
                 "stage_id": "S2",
                 "operator": "repair",
+                "repair_definition": "oracle-stage-replacement-v1",
                 "mode": "online",
                 "score_delta": {"S2": 0.1, "S3": 0.2},
                 "ceps_delta": 0.1,

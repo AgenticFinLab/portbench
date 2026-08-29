@@ -10,6 +10,8 @@ import pytest
 from portbench.agent_eval.base import EpisodeResult, MarketSnapshot, StageID
 from portbench.agent_eval.contracts import ProvenanceSource, ResultProvenance
 from portbench.agent_eval.intervention import (
+    REPAIR_DEFINITION,
+    _oracle_replacement,
     apply_perturb,
     apply_repair,
     compute_descriptive_delta,
@@ -156,6 +158,7 @@ def test_sum_intervention_usage_adds_nested_counters():
 def test_online_intervention_records_resource_usage():
     snapshot = _snapshot()
     factual = _factual_from_gt(snapshot)
+    factual.stage_scores[StageID.S4_EXECUTION_SIMULATION] = 0.25
 
     class UsagePipeline:
         def run_episode(
@@ -186,10 +189,42 @@ def test_online_intervention_records_resource_usage():
         UsagePipeline(),
         snapshot,
         factual,
-        stages=["S5"],
+        stages=["S4"],
         operator="repair",
         mode="online",
     )
     assert records[0]["mode"] == "online"
     assert records[0]["resource_usage"]["request_count"] == 3
     assert records[0]["resource_usage"]["tool_call_count"] == 1
+    assert records[0]["repair_definition"] == REPAIR_DEFINITION
+    assert records[0]["score_delta"]["S4"] == pytest.approx(0.75)
+
+
+def test_oracle_replacement_preserves_agentic_direct_score_contract():
+    snapshot = _snapshot()
+    factual = _factual_from_gt(snapshot)
+    factual.schema_version = "pipeline-v4-sa-causal"
+
+    class S5Stage:
+        _var_limit = -0.02
+        _drawdown_limit = -0.20
+        _drift_limit = 0.05
+
+    class Pipeline:
+        stages = {StageID.S5_RISK_MONITORING: S5Stage()}
+
+    s1 = _oracle_replacement(
+        Pipeline(), snapshot, factual, StageID.S1_MARKET_INTERPRETATION
+    )
+    s4 = _oracle_replacement(
+        Pipeline(), snapshot, factual, StageID.S4_EXECUTION_SIMULATION
+    )
+    s5 = _oracle_replacement(
+        Pipeline(), snapshot, factual, StageID.S5_RISK_MONITORING
+    )
+
+    assert s1 is factual.gt_outputs[StageID.S1_MARKET_INTERPRETATION]
+    assert set(s4.plan_scores.values()) == {1.0}
+    assert set(s5.plan_scores.values()) == {1.0}
+    assert s4.schema_version == "pipeline-v4-sa-causal"
+    assert s5.schema_version == "pipeline-v4-sa-causal"

@@ -92,8 +92,11 @@ def _resource_budget(cfg: ExperimentConfig) -> IsoTokenBudget:
     )
 
 
-def _intervention_spec(cfg: ExperimentConfig) -> dict:
-    return cfg.interventions.to_spec(cfg.propagation_weight)
+def _intervention_spec(cfg: ExperimentConfig, spec: ModelSpec) -> dict:
+    intervention = cfg.interventions.to_spec(cfg.propagation_weight)
+    if spec.intervention_max_tokens is not None:
+        intervention["max_tokens"] = int(spec.intervention_max_tokens)
+    return intervention
 
 
 def _persist_closed_loop(engine, out_dir: Path) -> None:
@@ -344,7 +347,7 @@ def _run_one_scenario(
         data_version=cfg.data_version,
         code_commit=_current_code_commit(),
         resource_budget=_resource_budget(cfg) if spec.architecture_id else None,
-        intervention_spec=_intervention_spec(cfg),
+        intervention_spec=_intervention_spec(cfg, spec),
         call_max_attempts=cfg.call_max_attempts,
         retry_failed_calls=cfg.retry_failed_calls,
         schema_version=cfg.pipeline_schema_version,
@@ -438,7 +441,7 @@ def _run_normal(
         data_version=cfg.data_version,
         code_commit=_current_code_commit(),
         resource_budget=_resource_budget(cfg) if spec.architecture_id else None,
-        intervention_spec=_intervention_spec(cfg),
+        intervention_spec=_intervention_spec(cfg, spec),
         call_max_attempts=cfg.call_max_attempts,
         retry_failed_calls=cfg.retry_failed_calls,
         schema_version=cfg.pipeline_schema_version,

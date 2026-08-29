@@ -752,6 +752,7 @@ class EvalPipeline:
                 operator=str(spec.get("operator") or "repair"),
                 mode=str(spec.get("mode") or "offline"),
                 propagation_weight=float(spec.get("propagation_weight") or 0.1),
+                max_tokens=spec.get("max_tokens"),
             )
             if result.interventions:
                 usage = dict(result.resource_usage or {})

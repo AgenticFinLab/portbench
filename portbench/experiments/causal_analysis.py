@@ -10,6 +10,8 @@ from typing import Any, Iterable, Mapping
 
 import numpy as np
 
+from portbench.agent_eval.intervention import REPAIR_DEFINITION
+
 
 STAGES = ("S1", "S2", "S3", "S4", "S5")
 
@@ -45,6 +47,7 @@ def load_online_repair_records(
         for branch in episode.get("interventions") or []:
             if (
                 branch.get("operator") != "repair"
+                or branch.get("repair_definition") != REPAIR_DEFINITION
                 or branch.get("mode") != "online"
                 or branch.get("error")
             ):
@@ -182,6 +185,51 @@ def _bh_fdr(items: list[dict[str, Any]]) -> None:
         item["fdr_q_value"] = running
 
 
+def evaluate_causal_mechanism(records: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """Check that oracle repair is score-compatible and changes a downstream suffix."""
+    source_records = list(records)
+    findings: list[str] = []
+    direct_effects: dict[str, list[float]] = {stage: [] for stage in STAGES}
+    downstream_effects: list[float] = []
+    for record in source_records:
+        stage = str(record.get("stage_id", ""))
+        scores = dict(record.get("score_delta") or {})
+        if stage in direct_effects and stage in scores:
+            direct_effects[stage].append(float(scores[stage]))
+        if stage in STAGES:
+            stage_index = STAGES.index(stage)
+            downstream_effects.extend(
+                float(scores[destination])
+                for destination in STAGES[stage_index + 1 :]
+                if destination in scores
+            )
+    for stage, values in direct_effects.items():
+        if not values:
+            findings.append(f"missing oracle repair records for {stage}")
+        elif min(values) < -1e-9:
+            findings.append(f"oracle repair reduced the directly repaired {stage} score")
+    positive_direct = sum(
+        value > 1e-6 for values in direct_effects.values() for value in values
+    )
+    if positive_direct == 0:
+        findings.append("oracle repair produced no non-trivial direct improvement")
+    nonzero_downstream = sum(abs(value) > 1e-6 for value in downstream_effects)
+    if nonzero_downstream == 0:
+        findings.append("oracle repair produced no measurable downstream response")
+    return {
+        "passed": not findings,
+        "repair_definition": REPAIR_DEFINITION,
+        "n_records": len(source_records),
+        "positive_direct_effects": positive_direct,
+        "nonzero_downstream_effects": nonzero_downstream,
+        "direct_minima": {
+            stage: min(values) if values else None
+            for stage, values in direct_effects.items()
+        },
+        "findings": findings,
+    }
+
+
 def summarize_causal_attribution(
     records: Iterable[Mapping[str, Any]],
     *,
@@ -231,6 +279,7 @@ def summarize_causal_attribution(
     return {
         "analysis_protocol": "paired simulator intervention / within-simulator stage attribution",
         "operator": "repair",
+        "repair_definition": REPAIR_DEFINITION,
         "mode": "online",
         "closed_loop": False,
         "bootstrap": {
@@ -243,6 +292,7 @@ def summarize_causal_attribution(
             "matrix_fdr": "BH-FDR 0.05",
         },
         "n_intervention_records": len(source_records),
+        "mechanism_gate": evaluate_causal_mechanism(source_records),
         "influence_matrix": matrix,
         "delta_ceps": ceps_effects,
         "decomposition": decomposition,
@@ -291,6 +341,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--bootstrap", type=int, default=10_000, help="Number of bootstrap draws")
     parser.add_argument("--seed", type=int, default=42, help="Bootstrap seed")
     parser.add_argument("--block-size", type=int, default=3, help="Moving-block length in rebalance dates")
+    parser.add_argument("--gate-output", help="Optional mechanism-gate JSON path")
     args = parser.parse_args(argv)
     records = load_online_repair_records(args.input)
     summary = summarize_causal_attribution(
@@ -300,8 +351,17 @@ def main(argv: list[str] | None = None) -> int:
         block_size=args.block_size,
     )
     output = write_causal_artifacts(summary, args.output)
+    if args.gate_output:
+        gate_path = Path(args.gate_output)
+        gate_path.parent.mkdir(parents=True, exist_ok=True)
+        gate = {
+            **summary["mechanism_gate"],
+            "source_root": str(args.input),
+            "analysis_summary": str(output),
+        }
+        gate_path.write_text(json.dumps(gate, indent=2), encoding="utf-8")
     print(output)
-    return 0
+    return 0 if summary["mechanism_gate"]["passed"] else 2
 
 
 if __name__ == "__main__":

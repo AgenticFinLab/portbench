@@ -76,6 +76,7 @@ class ModelSpec:
     mock: bool = False  # MockAgentAdapter
     temperature: Optional[float] = None  # overrides global generation.temperature
     max_tokens: Optional[int] = None  # overrides global generation.max_tokens
+    intervention_max_tokens: Optional[int] = None  # online repair calls only
     parallel_questions: Optional[int] = None  # overrides global qa.parallel_questions for this model
     architecture_id: Optional[str] = None
 
