@@ -112,7 +112,7 @@ def _write_source(root, snapshot: MarketSnapshot) -> None:
             },
         ],
     }
-    episode_path = root / "monthly" / "demo" / "model" / "run" / "balanced"
+    episode_path = root / "monthly" / "demo" / "model__SA" / "run" / "balanced"
     episode_path = episode_path / "normal_2024" / "pipeline_logs" / "log" / "episodes"
     episode_path.mkdir(parents=True)
     (episode_path / "2024-02-01_0001.json").write_text(

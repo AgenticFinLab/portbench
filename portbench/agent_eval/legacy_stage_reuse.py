@@ -33,7 +33,10 @@ def _source_coordinates(path: Path, root: Path) -> tuple[str, str, str, str] | N
     decision_date = path.stem.split("_", 1)[0]
     if len(decision_date) != 10:
         return None
-    return parts[1], parts[2], parts[4], decision_date
+    model = parts[2]
+    if model.endswith("__SA"):
+        model = model[: -len("__SA")]
+    return parts[1], model, parts[4], decision_date
 
 
 def _stage_records(episode: dict[str, Any]) -> dict[str, dict[str, Any]]:
