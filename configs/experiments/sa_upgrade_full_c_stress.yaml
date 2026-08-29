@@ -1,4 +1,4 @@
-# Protocol-C factual stress matrix with new SA S1-S5 calls.
+# Protocol-C factual stress matrix with prompt-exact S1-S3 reuse where eligible.
 batch_id: "sa_upgrade_full_c_stress_{date}"
 data_provider: processed
 data_version: processed-v1
@@ -8,8 +8,9 @@ rebalance: monthly
 initial_nav: 1000000
 pipeline_schema_version: pipeline-v4-sa-causal
 sa_only: true
-call_artifact_root: EXPERIMENTS_SA_UPGRADE/shared_call_artifacts
-required_gate: EXPERIMENTS_SA_UPGRADE/gates/sa_upgrade_pilot.json
+call_artifact_root: EXPERIMENTS_SA_UPGRADE/shared_call_artifacts_v7
+required_gate: EXPERIMENTS_SA_UPGRADE/gates/sa_upgrade_s4_v1.json
+legacy_stage_reuse_root: EXPERIMENTS_sa_upgrade_full_c_stress_v6
 workers_per_experiment: 1
 parallel_experiments: 3
 seed: 42
@@ -39,7 +40,7 @@ stress_scenarios: [2015_china_shock, 2020_covid_flash_crash, 2022_crypto_collaps
 run_normal: false
 max_rebalances_per_window: 0
 oracle_mode: lookback
-experiment_tag: sa_upgrade_full_c_stress_v6
+experiment_tag: sa_upgrade_full_c_stress_v7
 logging: {save_pipeline_logs: true, save_snapshots: true, save_figures: true}
 on_error: isolate
 output_root: EXPERIMENTS

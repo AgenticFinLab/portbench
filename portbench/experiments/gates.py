@@ -42,6 +42,31 @@ def _artifact_failures(root: Path) -> list[str]:
         namespace = call_path.parent.name
         if not list((root / "parses" / namespace).glob(f"{key}.*.json")):
             failures.append(f"missing parse artifact: {call_path}")
+    attempts_root = root / "attempts"
+    for attempt_path in attempts_root.glob("*/*.jsonl"):
+        try:
+            events = [
+                json.loads(line)
+                for line in attempt_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+        except (OSError, json.JSONDecodeError):
+            failures.append(f"unreadable attempt ledger: {attempt_path}")
+            continue
+        request_count = sum(event.get("event") == "request_recorded" for event in events)
+        validated = [
+            index for index, event in enumerate(events) if event.get("event") == "validated"
+        ]
+        if request_count != 1:
+            failures.append(f"invalid request-record count: {attempt_path}")
+        if len(validated) != 1:
+            failures.append(f"invalid validated-event count: {attempt_path}")
+            continue
+        if any(
+            event.get("event") == "provider_started"
+            for event in events[validated[0] + 1 :]
+        ):
+            failures.append(f"provider call occurred after validation: {attempt_path}")
     return failures
 
 
@@ -111,6 +136,20 @@ def _check_episode_logs(
                 findings.append(f"invalid S5 decision fallback: {episode_path}")
             if stage.get("stage_id") == "S4" and "expected_directions" in prompt:
                 findings.append(f"S4 answer leakage: {episode_path}")
+            if stage.get("stage_id") == "S4" and "compact json object" in prompt:
+                representation = (
+                    (parsed_output.get("plan") or {}).get("metadata") or {}
+                ).get("response_representation")
+                tracking = float(
+                    (parsed_output.get("plan_scores") or {}).get("target_tracking", 0.0)
+                )
+                if representation not in {
+                    "compact-target-book-v1",
+                    "bound-target-policy-v1",
+                }:
+                    findings.append(f"invalid compact S4 representation: {episode_path}")
+                if tracking < 0.999:
+                    findings.append(f"S4 changed the binding target book: {episode_path}")
             if stage.get("stage_id") == "S5" and "if var is below" in prompt:
                 findings.append(f"S5 answer-policy leakage: {episode_path}")
     return findings
@@ -120,7 +159,9 @@ def evaluate_sa_pilot(cfg: ExperimentConfig) -> dict[str, Any]:
     """Validate the online factual/repair pilot before the full SA matrix."""
     findings: list[str] = []
     episode_count = 0
-    expected_stages = set(cfg.interventions.stages)
+    expected_stages = (
+        set(cfg.interventions.stages) if cfg.interventions.enabled else set()
+    )
     expected_prefix_stages = set(cfg.factual_pit_prefix_stages)
     for spec in cfg.models:
         provider = spec_provider_name(spec)
