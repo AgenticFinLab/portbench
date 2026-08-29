@@ -666,57 +666,64 @@ def rescore_ceps(
                 profile_name = p_dir.name
                 if profile_name not in ("conservative", "balanced", "aggressive"):
                     continue
-                # Look for pipeline_logs under normal/ sub-directory
-                normal_p_dir = p_dir / "normal"
-                if not normal_p_dir.exists():
-                    n_skipped += 1
-                    continue
+                profile_rescored = False
 
-                try:
-                    result = _rescore_profile(
-                        normal_p_dir,
-                        snapshot_builder,
-                        forward_days,
-                        propagation_weight,
-                        profile_name=profile_name,
-                        intervention_cfg=intervention_cfg,
-                    )
-                    if result is None:
-                        _log(f"  {profile_name}: no pipeline_logs — skipped")
-                        n_skipped += 1
-                        continue
-                    new_ceps, mean_stage_scores = result
-                    _update_run_summary(r_dir, profile_name, new_ceps, mean_stage_scores)
-                    mean_new = float(np.mean(new_ceps))
-                    _log(
-                        f"  {profile_name}: {len(new_ceps)} episodes rescored, mean_ceps={mean_new:.4f}"
-                    )
-                    n_rescored += 1
-                    # Rescore stress scenarios for this profile
-                    for stress_dir in sorted(p_dir.iterdir()):
-                        if not stress_dir.is_dir() or not stress_dir.name.startswith("stress_"):
-                            continue
-                        scenario = stress_dir.name[len("stress_"):]
-                        try:
-                            stress_result = _rescore_profile(
-                                stress_dir,
-                                snapshot_builder,
-                                forward_days,
-                                propagation_weight,
-                                profile_name=profile_name,
-                                intervention_cfg=intervention_cfg,
+                # Rescore normal output when this profile includes one.
+                normal_p_dir = p_dir / "normal"
+                if normal_p_dir.exists():
+                    try:
+                        result = _rescore_profile(
+                            normal_p_dir,
+                            snapshot_builder,
+                            forward_days,
+                            propagation_weight,
+                            profile_name=profile_name,
+                            intervention_cfg=intervention_cfg,
+                        )
+                        if result is not None:
+                            new_ceps, mean_stage_scores = result
+                            _update_run_summary(
+                                r_dir, profile_name, new_ceps, mean_stage_scores
                             )
-                            if stress_result is not None:
-                                s_ceps, s_stage = stress_result
-                                _update_run_summary_stress(
-                                    r_dir, profile_name, scenario, s_ceps, s_stage
-                                )
-                                _log(f"    stress/{scenario}: {len(s_ceps)} episodes rescored")
-                        except Exception as exc:
-                            _log(f"    stress/{scenario}: ERROR — {exc}")
-                except Exception as exc:
-                    _log(f"  {profile_name}: ERROR — {exc}")
-                    n_errors += 1
+                            mean_new = float(np.mean(new_ceps))
+                            _log(
+                                f"  {profile_name}: {len(new_ceps)} episodes rescored, "
+                                f"mean_ceps={mean_new:.4f}"
+                            )
+                            n_rescored += 1
+                            profile_rescored = True
+                    except Exception as exc:
+                        _log(f"  {profile_name}: ERROR — {exc}")
+                        n_errors += 1
+
+                # Stress-only runs must be rescored without requiring a normal directory.
+                for stress_dir in sorted(p_dir.iterdir()):
+                    if not stress_dir.is_dir() or not stress_dir.name.startswith("stress_"):
+                        continue
+                    scenario = stress_dir.name[len("stress_"):]
+                    try:
+                        stress_result = _rescore_profile(
+                            stress_dir,
+                            snapshot_builder,
+                            forward_days,
+                            propagation_weight,
+                            profile_name=profile_name,
+                            intervention_cfg=intervention_cfg,
+                        )
+                        if stress_result is not None:
+                            s_ceps, s_stage = stress_result
+                            _update_run_summary_stress(
+                                r_dir, profile_name, scenario, s_ceps, s_stage
+                            )
+                            _log(f"    stress/{scenario}: {len(s_ceps)} episodes rescored")
+                            n_rescored += 1
+                            profile_rescored = True
+                    except Exception as exc:
+                        _log(f"    stress/{scenario}: ERROR — {exc}")
+                        n_errors += 1
+                if not profile_rescored:
+                    _log(f"  {profile_name}: no pipeline_logs — skipped")
+                    n_skipped += 1
 
     _log(
         f"rescore complete: rescored={n_rescored} skipped={n_skipped} errors={n_errors}"
