@@ -79,9 +79,89 @@ def _extract_json(text: str) -> Mapping[str, Any]:
 
 
 def _plan_from_payload(
-    payload: Mapping[str, Any], *, allowed_assets: Optional[set[str]] = None
+    payload: Mapping[str, Any],
+    *,
+    allowed_assets: Optional[set[str]] = None,
+    current_weights: Optional[Mapping[str, float]] = None,
+    bound_target_weights: Optional[Mapping[str, float]] = None,
 ) -> ExecutionPlan:
     """Parse and validate a multi-asset execution plan."""
+    target_weights = (
+        bound_target_weights
+        if bound_target_weights is not None
+        else payload.get("target_weights")
+    )
+    if target_weights is not None:
+        if not isinstance(target_weights, Mapping) or not target_weights:
+            raise AgenticStageError("S4 target_weights must be a non-empty object")
+        if current_weights is None:
+            raise AgenticStageError("S4 target_weights require current_weights")
+        try:
+            target_book = {
+                str(asset): float(weight) for asset, weight in target_weights.items()
+            }
+        except (TypeError, ValueError) as exc:
+            raise AgenticStageError(f"invalid S4 target_weights: {exc}") from exc
+        if allowed_assets is not None:
+            unknown_assets = sorted(set(target_book) - allowed_assets)
+            if unknown_assets:
+                raise AgenticStageError(
+                    "S4 target_weights may only reference visible assets: "
+                    f"{', '.join(unknown_assets)}"
+                )
+        if any(
+            not math.isfinite(weight) or not 0.0 <= weight <= 1.0
+            for weight in target_book.values()
+        ):
+            raise AgenticStageError("S4 target_weights must be finite and in [0, 1]")
+        if not any(weight > 0.0 for weight in target_book.values()):
+            raise AgenticStageError("S4 target_weights require positive total mass")
+
+        order_type = str(payload.get("order_type", "market")).strip().lower()
+        urgency = str(payload.get("urgency", "normal")).strip().lower()
+        if urgency == "medium":
+            urgency = "normal"
+
+        # Expand the binding target into the complete book expected by the simulator.
+        assets = set(current_weights) | set(target_book)
+        if allowed_assets is not None:
+            assets &= allowed_assets
+        orders = []
+        for asset in sorted(assets):
+            current = float(current_weights.get(asset, 0.0))
+            target = float(target_book.get(asset, 0.0))
+            if target > current + 1e-12:
+                direction = "buy"
+            elif target < current - 1e-12:
+                direction = "sell"
+            else:
+                direction = "hold"
+            orders.append(
+                OrderIntent(
+                    asset=asset,
+                    direction=direction,
+                    target_weight=target,
+                    order_type=order_type,
+                    urgency=urgency,
+                    slip_limit=payload.get("slip_limit"),
+                )
+            )
+        return ExecutionPlan(
+            order_direction="rebalance_to_target",
+            order_type=order_type,
+            urgency=urgency,
+            slip_limit=payload.get("slip_limit"),
+            orders=orders,
+            metadata={
+                "rationale": str(payload.get("rationale", "")),
+                "response_representation": (
+                    "bound-target-policy-v1"
+                    if bound_target_weights is not None
+                    else "compact-target-book-v1"
+                ),
+            },
+        )
+
     orders_raw = payload.get("orders")
     if not isinstance(orders_raw, list) or not orders_raw:
         raise AgenticStageError("S4 response requires a non-empty orders list")
@@ -117,11 +197,14 @@ def _plan_from_payload(
         orders.append(order)
     return ExecutionPlan(
         order_direction="rebalance_to_target",
-        order_type=str(payload.get("order_type", "market")),
-        urgency=str(payload.get("urgency", "normal")),
+        order_type=str(payload.get("order_type", "market")).strip().lower(),
+        urgency=str(payload.get("urgency", "normal")).strip().lower(),
         slip_limit=payload.get("slip_limit"),
         orders=orders,
-        metadata={"rationale": str(payload.get("rationale", ""))},
+        metadata={
+            "rationale": str(payload.get("rationale", "")),
+            "response_representation": "orders-v1",
+        },
     )
 
 
@@ -130,6 +213,18 @@ def _decision_from_payload(
 ) -> RiskControlDecision:
     """Parse and validate an S5 control decision."""
     corrective = payload.get("corrective_weights")
+    corrective_rule = payload.get("corrective_rule")
+    if corrective_rule is not None and corrective is not None:
+        raise AgenticStageError(
+            "S5 response must choose corrective_rule or corrective_weights, not both"
+        )
+    if corrective_rule is not None:
+        if str(corrective_rule).strip().lower() != "equal_weight":
+            raise AgenticStageError("S5 corrective_rule must be equal_weight")
+        if not allowed_assets:
+            raise AgenticStageError("S5 equal_weight requires visible assets")
+        weight = 1.0 / len(allowed_assets)
+        corrective = {asset: weight for asset in sorted(allowed_assets)}
     if corrective is not None and not isinstance(corrective, Mapping):
         raise AgenticStageError("corrective_weights must be an object or null")
     if isinstance(corrective, Mapping) and allowed_assets is not None:
@@ -140,7 +235,7 @@ def _decision_from_payload(
                 f"{', '.join(unknown_assets)}"
             )
     try:
-        return RiskControlDecision(
+        decision = RiskControlDecision(
             action=str(payload.get("action", "")),
             alerts=list(payload.get("alerts") or []),
             corrective_weights=(
@@ -149,10 +244,18 @@ def _decision_from_payload(
                 else None
             ),
             scale_factor=payload.get("scale_factor"),
-            metadata={"rationale": str(payload.get("rationale", ""))},
+            metadata={
+                "rationale": str(payload.get("rationale", "")),
+                "response_representation": (
+                    "corrective-rule-v1"
+                    if corrective_rule is not None
+                    else "sparse-corrective-book-v1"
+                ),
+            },
         )
     except (TypeError, ValueError) as exc:
         raise AgenticStageError(f"invalid S5 decision: {exc}") from exc
+    return decision
 
 
 def _snapshot_context(snapshot_like: Any) -> Dict[str, Any]:
@@ -232,6 +335,8 @@ def _complete_json(
     use_tools: bool,
     snapshot: Any,
     parse,
+    parser_version: str,
+    response_schema: Mapping[str, Any],
 ) -> tuple[Any, str, Optional[Exception]]:
     """Retry JSON parse like S1–S3. Return (parsed, raw, error); parsed is None on failure."""
     if hasattr(adapter, "complete_json"):
@@ -241,8 +346,8 @@ def _complete_json(
         parsed, raw = adapter.complete_json(
             prompt,
             parse=validate,
-            parser_version="s4s5-json-v5",
-            response_schema={"type": "object", "stage": "S4S5"},
+            parser_version=parser_version,
+            response_schema=response_schema,
             use_tools=use_tools,
             snapshot=snapshot,
         )
@@ -305,11 +410,12 @@ class AgenticS4Stage:
         }
         self.last_prompt = (
             "You are the execution-planning stage. Use only the supplied Point-in-Time context. "
-            "Determine trade direction and size from current and target books yourself. "
-            "Return a JSON object with orders and rationale. Each order must include asset, direction, "
-            "target_weight or delta_weight, order_type, urgency, and slip_limit. "
-            "Orders must reference only assets listed in market.prices. "
-            "Consider volatility, liquidity, and the supplied transaction-cost model when selecting order policy. "
+            "The supplied S3 target book is bound by the runtime and cannot be changed by this stage. "
+            "Return one compact JSON object with order_type, urgency, slip_limit, and rationale. "
+            "Do not return target_weights, an orders array, or per-asset execution-policy fields. "
+            "order_type must be market or limit; urgency must be low, normal, or high. "
+            "Choose the global execution policy from volatility, liquidity, "
+            "and the supplied transaction-cost model. Keep rationale to one short sentence. "
             f"Context: {json.dumps(context, ensure_ascii=False, default=str)}\n"
             f"{format_contract(self.use_tools)}"
         )
@@ -323,7 +429,15 @@ class AgenticS4Stage:
                 parse=lambda payload: _plan_from_payload(
                     payload,
                     allowed_assets=set(market_context["prices"]),
+                    current_weights=current_weights,
+                    bound_target_weights=target_weights,
                 ),
+                parser_version="s4-bound-target-policy-v1",
+                response_schema={
+                    "type": "object",
+                    "stage": "S4",
+                    "representation": "bound-target-policy-v1",
+                },
             )
         except Exception as exc:
             plan, raw, parse_err = None, "", exc
@@ -432,10 +546,14 @@ class AgenticS5Stage:
         }
         self.last_prompt = (
             "You are the portfolio risk-control stage. Use only the supplied Point-in-Time risk summary. "
-            "Return a JSON object with action, alerts, corrective_weights, scale_factor, rationale. "
+            "Return a compact JSON object with action, alerts, corrective_rule, corrective_weights, "
+            "scale_factor, and rationale. "
             "action must be hold, scale_down, or rebalance. "
             "alerts must use only var_breach, drawdown, and weight_drift. "
-            "For a rebalance, corrective_weights must use only the assets in weights, be non-negative, and sum to one. "
+            "For an equal-weight rebalance, set corrective_rule to equal_weight and corrective_weights to null. "
+            "For a custom rebalance, set corrective_rule to null and list only positive corrective_weights; "
+            "omitted assets receive zero weight, and listed weights must sum to one. "
+            "For hold or scale_down, set both corrective fields to null. "
             "For scale_down, provide a scale_factor in [0,1]. Explain the risk evidence and proposed action briefly. "
             f"Context: {json.dumps(context, ensure_ascii=False, default=str)}\n"
             f"{format_contract(self.use_tools)}"
@@ -464,6 +582,12 @@ class AgenticS5Stage:
                     payload,
                     allowed_assets=set(return_data),
                 ),
+                parser_version="s5-compact-decision-v1",
+                response_schema={
+                    "type": "object",
+                    "stage": "S5",
+                    "representation": "compact-risk-decision-v1",
+                },
             )
         except Exception as exc:
             decision, raw, parse_err = None, "", exc

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pandas as pd
@@ -240,6 +241,115 @@ def test_agentic_s4_normalizes_order_enum_casing():
     assert order.urgency == "high"
 
 
+def test_agentic_s4_compact_target_book_expands_liquidations():
+    from portbench.agent_eval.s4_s5_stages import _plan_from_payload
+
+    plan = _plan_from_payload(
+        {
+            "target_weights": {"BIL": 0.7, "SPY": 0.3},
+            "order_type": "LIMIT",
+            "urgency": "HIGH",
+            "slip_limit": 0.002,
+            "rationale": "Use one bounded policy for the rebalance.",
+        },
+        allowed_assets={"BIL", "SPY", "TLT"},
+        current_weights={"BIL": 0.2, "SPY": 0.5, "TLT": 0.3},
+    )
+
+    orders = {order.asset: order for order in plan.normalized_orders()}
+    assert orders["BIL"].direction == "buy"
+    assert orders["SPY"].direction == "sell"
+    assert orders["TLT"].direction == "sell"
+    assert orders["TLT"].target_weight == 0.0
+    assert all(order.order_type == "limit" for order in orders.values())
+    assert plan.metadata["response_representation"] == "compact-target-book-v1"
+
+
+def test_agentic_s4_rejects_truncated_saved_response_shape():
+    from portbench.agent_eval.s4_s5_stages import AgenticStageError, _extract_json
+
+    # This prefix mirrors a saved formal response truncated inside its orders array.
+    raw = (
+        '{"orders": ['
+        '{"asset": "VLUE", "direction": "SELL", "delta_weight": -0.0099, '
+        '"order_type": "MARKET", "urgency": "MEDIUM", "slip_limit": 0.0015},'
+        '{"asset": "JNK", "direction": "SELL"'
+    )
+
+    with pytest.raises(AgenticStageError, match="JSON"):
+        _extract_json(raw)
+
+
+def test_agentic_s4_prompt_requests_bound_target_policy():
+    from portbench.agent_eval.s4_s5_stages import AgenticS4Stage
+
+    class Adapter:
+        def complete(self, prompt: str) -> str:
+            return json.dumps(
+                {
+                    "order_type": "market",
+                    "urgency": "normal",
+                    "slip_limit": 0.001,
+                    "rationale": "Use immediate execution for a liquid book.",
+                }
+            )
+
+    current = {"SPY": 0.5, "BIL": 0.4, "TLT": 0.1}
+    snapshot = SimpleNamespace(
+        current_weights=current,
+        portfolio_value=100_000.0,
+        price_data={
+            "SPY": pd.Series([100.0, 101.0]),
+            "BIL": pd.Series([100.0, 100.0]),
+            "TLT": pd.Series([100.0, 99.0]),
+        },
+        return_data={
+            "SPY": pd.Series([0.01, -0.01]),
+            "BIL": pd.Series([0.0, 0.0]),
+            "TLT": pd.Series([0.01, -0.01]),
+        },
+        macro_data={},
+    )
+    stage = AgenticS4Stage(Adapter())
+
+    bundle = stage.run(
+        snapshot_like=snapshot,
+        current_weights=current,
+        target_weights={"SPY": 0.6, "BIL": 0.4},
+        nav=100_000.0,
+    )
+
+    assert "bound by the runtime" in stage.last_prompt
+    assert "Do not return target_weights" in stage.last_prompt
+    assert bundle.plan.metadata["response_representation"] == "bound-target-policy-v1"
+    assert bundle.plan_scores["order_legality"] == 1.0
+    assert bundle.plan_scores["target_tracking"] == 1.0
+
+
+def test_agentic_s4_bound_target_ignores_incomplete_echo_and_normalizes_medium():
+    from portbench.agent_eval.s4_s5_stages import _plan_from_payload
+
+    plan = _plan_from_payload(
+        {
+            "target_weights": {"SPY": 0.6},
+            "order_type": "limit",
+            "urgency": "medium",
+            "slip_limit": 0.002,
+            "rationale": "Use a bounded global execution policy.",
+        },
+        allowed_assets={"BIL", "SPY", "TLT"},
+        current_weights={"BIL": 0.2, "SPY": 0.5, "TLT": 0.3},
+        bound_target_weights={"BIL": 0.4, "SPY": 0.6},
+    )
+
+    orders = {order.asset: order for order in plan.normalized_orders()}
+    assert orders["BIL"].target_weight == 0.4
+    assert orders["SPY"].target_weight == 0.6
+    assert orders["TLT"].target_weight == 0.0
+    assert all(order.urgency == "normal" for order in orders.values())
+    assert plan.metadata["response_representation"] == "bound-target-policy-v1"
+
+
 def test_agentic_s4_rejects_non_tradable_order_asset():
     from portbench.agent_eval.s4_s5_stages import AgenticStageError, _plan_from_payload
 
@@ -277,6 +387,41 @@ def test_agentic_s5_rejects_overweight_incoming_book():
         AgenticS5Stage(Adapter()).run(
             weights={"SPY": 0.7, "BIL": 0.5},
             return_data=returns,
+        )
+
+
+def test_agentic_s5_equal_weight_rule_expands_in_parser():
+    from portbench.agent_eval.s4_s5_stages import _decision_from_payload
+
+    decision = _decision_from_payload(
+        {
+            "action": "rebalance",
+            "alerts": ["weight_drift"],
+            "corrective_rule": "equal_weight",
+            "corrective_weights": None,
+            "scale_factor": None,
+            "rationale": "Restore the declared active-book reference.",
+        },
+        allowed_assets={"SPY", "BIL", "TLT"},
+    )
+
+    assert decision.corrective_weights == pytest.approx(
+        {"SPY": 1.0 / 3.0, "BIL": 1.0 / 3.0, "TLT": 1.0 / 3.0}
+    )
+    assert decision.metadata["response_representation"] == "corrective-rule-v1"
+
+
+def test_agentic_s5_rejects_two_corrective_representations():
+    from portbench.agent_eval.s4_s5_stages import AgenticStageError, _decision_from_payload
+
+    with pytest.raises(AgenticStageError, match="not both"):
+        _decision_from_payload(
+            {
+                "action": "rebalance",
+                "corrective_rule": "equal_weight",
+                "corrective_weights": {"BIL": 1.0},
+            },
+            allowed_assets={"BIL"},
         )
 
 
