@@ -141,7 +141,7 @@ LLM prompt receives signals and must output a weight allocation with sum=1, all 
 
 **Scoring**: Composite score — **σ × weight accuracy + (1−σ) × correlation awareness** (default σ = 0.5):
 
-- *Weight accuracy*: `1 - weight_MAE / 2` against max-Sharpe GT
+- *Weight accuracy*: `1 - 0.5 * sum(abs(weight - oracle_weight))` against the max-Sharpe oracle (`s3-tv-v1`)
 - *Correlation awareness* (1−σ): when `snapshot.asset_class_map` is set, split equally into:
   - *50% intra-class concentration penalty* — for each class, `class_weight × max(avg_intra_corr, 0)` is summed and subtracted from 1; piling weight inside a class with high mutual correlation is penalized.
   - *50% inter-class hedging credit* — weighted average of off-diagonal inter-class correlations, mapped via `(1 − avg)/2`; spreading weight across weakly / negatively correlated classes is rewarded.

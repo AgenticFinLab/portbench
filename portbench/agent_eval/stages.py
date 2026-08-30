@@ -982,6 +982,8 @@ class S3WeightOptimization(PipelineStage):
     σ = 0.5 → balanced return-risk evaluation (default)
     """
 
+    scoring_protocol = "s3-tv-v1"
+
     def __init__(
         self,
         adapter: AgentAdapter = None,

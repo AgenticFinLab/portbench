@@ -49,6 +49,7 @@ config = MetricsConfig(
 | Function | Description |
 |----------|-------------|
 | `weight_mae(actual, gt)` | Mean absolute error between two weight dicts |
+| `weight_total_variation(actual, gt)` | Total-variation distance between normalized weight dicts |
 | `portfolio_return_gap(actual_w, gt_w, returns)` | Return gap attributable to weight difference |
 
 ### `ceps.py` — Cross-Stage Error Propagation Score
@@ -99,3 +100,4 @@ print(metrics.sharpe_ratio, metrics.max_drawdown, metrics.var_95)
 - All functions return `float` (or `Optional[float]` for edge cases like too-short series).
 - Edge cases (empty series, zero volatility) return `None` rather than raising exceptions.
 - `weight_mae` handles missing keys in either dict by treating them as zero weight.
+- `weight_total_variation` normalizes both allocations and stays unchanged when zero-weight assets are added.
