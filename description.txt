@@ -1,1 +1,1 @@
-PortBench, a benchmark for multi-asset portfolio management featuring heterogeneous asset classes. 
+PortBench is a correlation-aware benchmark for multi-asset portfolio management with financial QA, five-stage evaluation, and stress testing.
