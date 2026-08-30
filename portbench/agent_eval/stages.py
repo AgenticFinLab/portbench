@@ -972,7 +972,7 @@ class S3WeightOptimization(PipelineStage):
         S3 score = σ × accuracy_score + (1-σ) × correlation_awareness_score
 
     where:
-        accuracy_score         = 1 - weight_MAE / 2  (closeness to max-Sharpe GT)
+        accuracy_score         = 1 - total_variation  (closeness to max-Sharpe GT)
         correlation_awareness  = 0.5×intra_class + 0.5×inter_class  (when asset_class_map present)
                                = variance_ratio_score  (fallback)
         σ (sigma)              = controllable return-vs-risk balance parameter (default 0.5)
@@ -1160,35 +1160,56 @@ class S3WeightOptimization(PipelineStage):
                 f"S3 parsed JSON missing required fields: {exc}. Parsed: {parsed!r}"
             ) from exc
 
-    def score(self, actual: S3Output, ground_truth: S3Output) -> float:
-        """
-        S3 score = σ × accuracy_score + (1-σ) × correlation_awareness
+    def score_components(
+        self,
+        actual: S3Output,
+        ground_truth: S3Output,
+    ) -> dict[str, float]:
+        """Return the total-variation and correlation components of S3."""
 
-        accuracy_score = 1 - weight_MAE / 2  (closeness to max-Sharpe GT)
-        correlation_awareness:
-          - With asset_class_map: 0.5 × intra_class + 0.5 × inter_class
-          - Without:              variance_ratio fallback
-        σ (self.sigma) controls the return-vs-risk balance (default 0.5).
-        """
-        from ..metrics.allocation_metrics import weight_mae
+        from ..metrics.allocation_metrics import weight_total_variation
 
-        mae = weight_mae(actual.weights, ground_truth.weights)
-        accuracy_score = float(np.clip(1.0 - mae / 2.0, 0.0, 1.0))
+        weight_tv = weight_total_variation(actual.weights, ground_truth.weights)
+        accuracy_score = float(np.clip(1.0 - weight_tv, 0.0, 1.0))
 
         snap = getattr(self, "_last_snapshot", None)
         if snap is None or self.sigma >= 1.0:
-            return accuracy_score
+            return {
+                "weight_tv": weight_tv,
+                "accuracy": accuracy_score,
+                "intra_class": float("nan"),
+                "inter_class": float("nan"),
+                "correlation": float("nan"),
+                "score": accuracy_score,
+            }
 
         if snap.asset_class_map:
             intra = self._intra_class_diversification_score(actual.weights, snap)
             inter = self._inter_class_hedging_score(actual.weights, snap)
             corr_score = 0.5 * intra + 0.5 * inter
         else:
+            intra = float("nan")
+            inter = float("nan")
             corr_score = self._correlation_awareness_score(
                 actual.weights, ground_truth.weights, snap
             )
 
-        return float(self.sigma * accuracy_score + (1.0 - self.sigma) * corr_score)
+        score = self.sigma * accuracy_score + (1.0 - self.sigma) * corr_score
+        if not np.isfinite(score):
+            raise ValueError("S3 score is non-finite")
+        return {
+            "weight_tv": weight_tv,
+            "accuracy": accuracy_score,
+            "intra_class": intra,
+            "inter_class": inter,
+            "correlation": corr_score,
+            "score": float(score),
+        }
+
+    def score(self, actual: S3Output, ground_truth: S3Output) -> float:
+        """Return the S3-TV-v1 score for one allocation."""
+
+        return self.score_components(actual, ground_truth)["score"]
 
     def _intra_class_diversification_score(
         self,
@@ -1218,7 +1239,10 @@ class S3WeightOptimization(PipelineStage):
             vals = sub.values[~np.eye(len(sub), dtype=bool)]
             if not len(vals):
                 continue
-            avg_corr = float(np.mean(vals))
+            finite = vals[np.isfinite(vals)]
+            if not len(finite):
+                continue
+            avg_corr = float(np.mean(finite))
             penalty += class_w * max(avg_corr, 0.0)
         return float(np.clip(1.0 - penalty, 0.0, 1.0))
 
@@ -1257,11 +1281,14 @@ class S3WeightOptimization(PipelineStage):
             for cj in active:
                 if ci == cj:
                     continue
+                correlation = float(inter.loc[ci, cj])
+                if not np.isfinite(correlation):
+                    continue
                 w_pair = class_weights[ci] * class_weights[cj]
-                num += w_pair * float(inter.loc[ci, cj])
+                num += w_pair * correlation
                 den += w_pair
         if den <= 0:
-            return 1.0
+            raise ValueError("No finite inter-class correlation pair for S3 scoring")
         avg_corr = num / den
         return float(np.clip((1.0 - avg_corr) / 2.0, 0.0, 1.0))
 

@@ -3,6 +3,41 @@
 import numpy as np
 
 
+def _normalize_allocation(weights: dict[str, float]) -> dict[str, float]:
+    """Validate and normalize one non-negative portfolio allocation."""
+
+    if not weights:
+        raise ValueError("Allocation is empty")
+
+    parsed = {str(asset): float(weight) for asset, weight in weights.items()}
+    values = np.asarray(list(parsed.values()), dtype=float)
+    if not np.isfinite(values).all():
+        raise ValueError("Allocation contains a non-finite weight")
+    if (values < 0.0).any():
+        raise ValueError("Allocation contains a negative weight")
+
+    total = float(values.sum())
+    if total <= 0.0:
+        raise ValueError("Allocation has zero total mass")
+    return {asset: weight / total for asset, weight in parsed.items()}
+
+
+def weight_total_variation(
+    predicted: dict[str, float],
+    actual: dict[str, float],
+) -> float:
+    """Return total-variation distance between two portfolio allocations."""
+
+    predicted_norm = _normalize_allocation(predicted)
+    actual_norm = _normalize_allocation(actual)
+    assets = set(predicted_norm) | set(actual_norm)
+    distance = 0.5 * sum(
+        abs(predicted_norm.get(asset, 0.0) - actual_norm.get(asset, 0.0))
+        for asset in assets
+    )
+    return float(np.clip(distance, 0.0, 1.0))
+
+
 def weight_mae(predicted: dict[str, float], actual: dict[str, float]) -> float:
     """
     Compute the Mean Absolute Error between predicted and actual portfolio weights.
@@ -16,7 +51,8 @@ def weight_mae(predicted: dict[str, float], actual: dict[str, float]) -> float:
         actual:    Dict mapping asset name -> ground-truth weight.
 
     Returns:
-        Weight MAE in [0, 2] (0 = perfect, 2 = completely wrong).
+        Mean absolute weight error. For normalized long-only allocations over
+        n assets, the maximum is 2/n.
     """
     all_assets = set(predicted) | set(actual)
     if not all_assets:

@@ -4,7 +4,7 @@ from .base import MetricsConfig, PortfolioMetrics
 from .return_metrics import total_return, cagr
 from .risk_metrics import volatility, max_drawdown, var, cvar
 from .risk_adjusted import sharpe_ratio, sortino_ratio, calmar_ratio, information_ratio
-from .allocation_metrics import weight_mae, portfolio_return_gap
+from .allocation_metrics import weight_mae, weight_total_variation, portfolio_return_gap
 from .ceps import CEPS, CEPSResult, StageScore
 
 
@@ -59,6 +59,7 @@ __all__ = [
     "calmar_ratio",
     "information_ratio",
     "weight_mae",
+    "weight_total_variation",
     "portfolio_return_gap",
     "CEPS",
     "CEPSResult",
