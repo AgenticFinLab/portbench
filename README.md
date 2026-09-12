@@ -20,7 +20,13 @@ The main pipeline ranking uses model decisions at S1--S3 and deterministic reali
 Across ten frontier LLMs, only 39 of 120 model--profile--period evaluations (32.5%) outperform equal weighting on Sharpe ratio. QA and balanced-profile CEPS rankings are negatively correlated (Spearman $\rho=-0.49$), showing that strong static QA performance does not reliably predict multi-stage portfolio decisions.
 
 <p align="center">
-  <img src="figures/intro_overview.png" width="100%" alt="PortBench market base dataset, complementary static QA and dynamic evaluation routes, evaluation dimensions, output metrics, and empirical findings"/>
+  <img src="figures/intro_overview.png" width="100%" alt="PortBench overview showing a shared multi-asset market base, complementary static QA and dynamic evaluation layers, and the benchmark's core evaluation dimensions"/>
+  <br><em>Figure 1. PortBench overview: a shared multi-asset market base supports static QA, dynamic five-stage evaluation, and three core evaluation dimensions.</em>
+</p>
+
+<p align="center">
+  <img src="figures/method_framework.png" width="100%" alt="PortBench evaluation framework showing seven static QA templates, the five-stage dynamic pipeline, CEPS and paired interventions, and portfolio state propagation"/>
+  <br><em>Figure 2. Evaluation framework: static QA is paired with a stateful dynamic pipeline, CEPS and paired interventions, and portfolio state propagation.</em>
 </p>
 
 ## Installation
