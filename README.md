@@ -4,29 +4,29 @@
 [![Dataset](https://img.shields.io/badge/%F0%9F%A4%97_HuggingFace-Dataset-yellow)](https://huggingface.co/collections/AgenticFinLab/portbench)
 [![Homepage](https://img.shields.io/badge/Homepage-portbench.github.io-blue)](https://portbench.github.io/)
 
-PortBench evaluates large language models on multi-asset portfolio management. It combines a ten-year market dataset, a static financial QA benchmark, and a stateful five-stage allocation pipeline covering 183 instruments across equities, bonds, commodities, real estate, cryptocurrency, and cash.
+PortBench is a correlation-aware benchmark for LLM-driven portfolio management. Diversification depends on correlations within and across asset classes, but existing benchmarks are often limited to one asset class, or they score assets in isolation. They also rarely show where an error arises or how it changes the next decision. PortBench evaluates both with a 2015--2025 corpus of 183 market series across equities, bonds, commodities, real estate, cryptocurrency, and cash, a static QA dataset, and a five-stage portfolio evaluation.
 
 ## Benchmark at a Glance
 
 | Component | Scope | Measures |
 |---|---|---|
-| Market base dataset | 183 instruments, 6 asset classes, 2015--2025 | Prices, macro series, time-aligned news, and cross-asset correlations |
+| Market base dataset | 183 series, 6 asset classes, 2015--2025 | Prices, macro series, time-aligned news, and cross-asset correlations |
 | Static QA | 6,269 questions, 7 templates, 4 difficulty levels | Prediction, risk estimation, sizing, allocation, rebalancing, and regime judgment |
-| Dynamic pipeline | S1 market interpretation, S2 signal generation, S3 weight optimization, S4 execution realization, S5 risk realization | Stage quality, cross-stage error propagation, portfolio outcomes, and profile alignment |
-| Robustness evaluation | 3 investor profiles and 3 historical stress regimes | Risk-adjusted performance and profile-specific drawdown gates |
+| Dynamic pipeline | S1 market interpretation, S2 signal generation, S3 weight optimization; S4 and S5 score the allocation | Reference-based stage scores, class-level correlation, turnover and lookback risk-state agreement |
+| Robustness evaluation | 3 investor profiles, 3 stress windows, and the 2024 normal window | Sharpe versus equal weight, drawdown gates, and profile exposure |
 
-The main pipeline ranking uses model decisions at S1--S3 and deterministic realization scores at S4--S5. CEPS combines mean stage quality with a penalty for drops between adjacent stages. S3 also scores whether allocations avoid intra-class concentration and use inter-class hedging. Paired stage interventions replace one stage output with its ground truth and rerun the downstream stages to measure within-simulator error propagation.
+The model produces S1--S3. S4 and S5 score that allocation under one execution and risk policy. CEPS is the mean of the five reference-based stage scores minus a penalty, with weight 0.1, for downstream score drops. S3 gives equal weight to similarity with a profile-constrained lookback reference and a class-level correlation score: exposure to internally correlated classes is penalized, and cross-class hedging is credited. Asset-level covariance diagnostics then hold the selected securities and class totals fixed, so within-class weights can be tested separately. Paired interventions replace one stage with its reference and rerun the later stages. Portfolio replay uses the 98 series with matched prices; weight on VIX or on an ineligible asset stays in cash.
 
-Across ten frontier LLMs, 65 of 120 model--profile--period evaluations (54.2%) outperform equal weighting on Sharpe ratio, without a consistent advantage across the four windows. QA and balanced-profile CEPS rankings are negatively correlated (Spearman $\rho=-.32$), showing that strong static QA performance does not reliably predict multi-stage portfolio decisions.
+Across ten LLMs, high QA scores do not ensure consistent portfolio outperformance. Their portfolios beat equal weighting on Sharpe in 65 of 120 evaluations (54.2%) and fail to do so in the other 55. Beat rates are 90% in 2015--16, 77% in 2020, 50% in 2024, and 0% in 2022. QA and balanced-profile CEPS rankings are negatively correlated (Spearman $\rho=-.32$). The 330 saved 2024 allocations hold 73 assets on average, yet equalizing weights within each held class lowers estimated volatility by 8.5% (271 of 330 decisions). Within-class covariance accounts for 76.4% of that mean variance difference: broad holdings still concentrate exposure in correlated assets.
 
 <p align="center">
-  <img src="figures/intro_overview.png" width="100%" alt="PortBench overview showing a shared multi-asset market base, complementary static QA and dynamic evaluation layers, and the benchmark's core evaluation dimensions"/>
-  <br><em>Figure 1. PortBench overview: a shared multi-asset market base supports static QA, dynamic five-stage evaluation, and three core evaluation dimensions.</em>
+  <img src="figures/intro_overview.png" width="100%" alt="PortBench overview: a shared multi-asset market base, static QA and dynamic evaluation, and correlation-aware allocation, CEPS, and stress and profile robustness"/>
+  <br><em>Figure 1. A shared multi-asset market base supports static QA and dynamic five-stage evaluation. The benchmark assesses correlation-aware allocation, stagewise diagnostics through CEPS and paired interventions, and robustness across periods and investor profiles.</em>
 </p>
 
 <p align="center">
-  <img src="figures/method_framework.png" width="100%" alt="PortBench evaluation framework showing seven static QA templates, the five-stage dynamic pipeline, CEPS and paired interventions, and portfolio state propagation"/>
-  <br><em>Figure 2. Evaluation framework: static QA is paired with a stateful dynamic pipeline, CEPS and paired interventions, and portfolio state propagation.</em>
+  <img src="figures/method_framework.png" width="100%" alt="Evaluation framework with seven QA templates and a five-stage pipeline in which the LLM produces S1 through S3 and the sandbox scores S4 and S5"/>
+  <br><em>Figure 2. Static QA covers templates T1--T7. At each rebalance the LLM produces S1--S3, and the sandbox scores execution and risk at S4--S5. CEPS summarizes the reference-based stage scores, and the portfolio state carries into the next decision.</em>
 </p>
 
 ## Installation
