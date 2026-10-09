@@ -15,9 +15,13 @@ PortBench is a correlation-aware benchmark for LLM-driven portfolio management. 
 | Dynamic pipeline | S1 market interpretation, S2 signal generation, S3 weight optimization; S4 and S5 score the allocation | Reference-based stage scores, class-level correlation, turnover and lookback risk-state agreement |
 | Robustness evaluation | 3 investor profiles, 3 stress windows, and the 2024 normal window | Sharpe versus equal weight, drawdown gates, and profile exposure |
 
-The model produces S1--S3. S4 and S5 score that allocation under one execution and risk policy. CEPS is the mean of the five reference-based stage scores minus a penalty, with weight 0.1, for downstream score drops. S3 gives equal weight to similarity with a profile-constrained lookback reference and a class-level correlation score: exposure to internally correlated classes is penalized, and cross-class hedging is credited. Asset-level covariance diagnostics then hold the selected securities and class totals fixed, so within-class weights can be tested separately. Paired interventions replace one stage with its reference and rerun the later stages. Portfolio replay uses the 98 series with matched prices; weight on VIX or on an ineligible asset stays in cash.
+**Key findings**:
 
-Across ten LLMs, high QA scores do not ensure consistent portfolio outperformance. Their portfolios beat equal weighting on Sharpe in 65 of 120 evaluations (54.2%) and fail to do so in the other 55. Beat rates are 90% in 2015--16, 77% in 2020, 50% in 2024, and 0% in 2022. QA and balanced-profile CEPS rankings are negatively correlated (Spearman $\rho=-.32$). The 330 saved 2024 allocations hold 73 assets on average, yet equalizing weights within each held class lowers estimated volatility by 8.5% (271 of 330 decisions). Within-class covariance accounts for 76.4% of that mean variance difference: broad holdings still concentrate exposure in correlated assets.
+- **No consistent Sharpe advantage over equal weighting.** Portfolios beat equal weighting on Sharpe in 65 of 120 evaluations (54.2%): 90% in 2015--16, 77% in 2020, 50% in 2024, and 0% in 2022.
+- **High financial QA scores do not ensure consistent portfolio outperformance.** QA and balanced-profile CEPS rankings differ sharply (Spearman $\rho=-.32$).
+- **Broad holdings still concentrate weight in correlated assets.** The allocations in 2024 hold 73 assets on average. Equalizing weights within each held class lowers estimated volatility by 8.5% (271 of 330 decisions); 76.4% of the mean variance difference comes from within-class covariance.
+
+Details are in the [paper](https://arxiv.org/abs/2605.27887).
 
 <p align="center">
   <img src="figures/intro_overview.png" width="100%" alt="PortBench overview: a shared multi-asset market base, static QA and dynamic evaluation, and correlation-aware allocation, CEPS, and stress and profile robustness"/>
