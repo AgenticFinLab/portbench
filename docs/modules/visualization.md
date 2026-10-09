@@ -80,7 +80,7 @@ Used by `portbench/experiments/figures.py` to render per-experiment PNGs.
 
 ### Heatmap and Panel Views (`correlation_plots.py`)
 
-These functions mirror the two-layer correlation model used in the S3 score (15% intra-class concentration penalty + 15% inter-class hedging credit).
+These functions mirror the class-level correlation score used in S3: equal weight on the intra-class concentration penalty and the inter-class hedging credit.
 
 | Function | Description |
 |----------|-------------|

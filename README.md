@@ -17,7 +17,7 @@ PortBench evaluates large language models on multi-asset portfolio management. I
 
 The main pipeline ranking uses model decisions at S1--S3 and deterministic realization scores at S4--S5. CEPS combines mean stage quality with a penalty for drops between adjacent stages. S3 also scores whether allocations avoid intra-class concentration and use inter-class hedging. Paired stage interventions replace one stage output with its ground truth and rerun the downstream stages to measure within-simulator error propagation.
 
-Across ten frontier LLMs, only 39 of 120 model--profile--period evaluations (32.5%) outperform equal weighting on Sharpe ratio. QA and balanced-profile CEPS rankings are negatively correlated (Spearman $\rho=-0.49$), showing that strong static QA performance does not reliably predict multi-stage portfolio decisions.
+Across ten frontier LLMs, 65 of 120 model--profile--period evaluations (54.2%) outperform equal weighting on Sharpe ratio, without a consistent advantage across the four windows. QA and balanced-profile CEPS rankings are negatively correlated (Spearman $\rho=-.32$), showing that strong static QA performance does not reliably predict multi-stage portfolio decisions.
 
 <p align="center">
   <img src="figures/intro_overview.png" width="100%" alt="PortBench overview showing a shared multi-asset market base, complementary static QA and dynamic evaluation layers, and the benchmark's core evaluation dimensions"/>
@@ -58,6 +58,10 @@ python examples/sandbox/run_backtest.py --data-provider mock
 python -m portbench.experiments \
   --config configs/experiments/default.yaml \
   --dry-run
+
+# Replay the published tables from frozen decisions (no model calls)
+python -m portbench.published_eval replay --source-root .
+python -m portbench.published_eval classical --source-root .
 ```
 
 For provider configuration and full experiment workflows, see the [experiment documentation](docs/modules/experiments.md). Generated datasets and experiment outputs are stored in gitignored local directories.
